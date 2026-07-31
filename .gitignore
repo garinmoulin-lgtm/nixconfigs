@@ -1,0 +1,9 @@
+# ignore everything by default
+*
+
+# but allow these
+!flake.nix
+!home.nix
+!configuration.nix
+!kernel.nix
+!.gitignore
