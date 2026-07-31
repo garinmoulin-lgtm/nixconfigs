@@ -2,8 +2,14 @@
 *
 
 # but allow these
+!.gitignore
+!configuration.nix
 !flake.nix
 !home.nix
-!configuration.nix
 !kernel.nix
-!.gitignore
+!nvidia/
+!nvidia/**
+!amd/
+!amd/**
+!intel/
+!intel/**
