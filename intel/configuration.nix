@@ -147,13 +147,15 @@ zramSwap = {
 
   # Enable CUPS to print documents.
   services.printing.enable = true;
-services.xserver.videoDrivers = [ "nvidia" ];
-#nvidia
-hardware.nvidia = {
-  package = config.boot.kernelPackages.nvidiaPackages.latest;
-  open = true;
-  modesetting.enable = true;
-  powerManagement.enable = true;
+services.xserver.videoDrivers = [ "modesetting" ];  # or omit entirely, modesetting is default
+
+hardware.graphics = {
+  enable = true;
+  enable32Bit = true;
+  extraPackages = with pkgs; [
+    intel-media-driver   # for newer Intel (Broadwell+), VAAPI
+    vpl-gpu-rt           # for even newer Intel (Xe), if applicable
+  ];
 };
 #LE STEAM
 programs.steam = {
