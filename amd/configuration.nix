@@ -74,7 +74,7 @@ security.doas.extraRules = [
     persist = true;
   }
 ];
-
+programs.bash.blesh.enable = true;
 # Enable the Hyprland Compositor via its dedicated module
 # This configures polkit, xdg portals, and session files seamlessly
 
@@ -250,7 +250,6 @@ programs.git.enable = true;
      pkgs.kdePackages.qtmultimedia
      pkgs.qt6.qtmultimedia
      chromium
-     blesh
      swaynotificationcenter
      pkg-config
   	 nwg-look

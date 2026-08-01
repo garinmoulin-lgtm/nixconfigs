@@ -10,7 +10,6 @@
       ./hardware-configuration.nix
       #./kernel.nix
     ];
-
   boot.blacklistedKernelModules = [ "acpi_pad" "nouveau" ];
   # Bootloader.
   boot.loader.systemd-boot.enable = true;
@@ -79,7 +78,7 @@ security.doas.extraRules = [
 # This configures polkit, xdg portals, and session files seamlessly
 
 programs.hyprland.enable = true;
-
+programs.bash.blesh.enable = true;
 #kmscon tty
 services.kmscon = {
   enable = true;
@@ -254,7 +253,6 @@ programs.git.enable = true;
      pkgs.kdePackages.qtmultimedia
      pkgs.qt6.qtmultimedia
      chromium
-     blesh
      swaynotificationcenter
      pkg-config
   	 nwg-look

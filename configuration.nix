@@ -37,6 +37,7 @@
   # Select internationalisation properties.
   i18n.defaultLocale = "en_US.UTF-8";
   #nix helper
+  programs.bash.blesh.enable = true;
 programs.nh = {
   enable = true;
   clean = {
@@ -252,7 +253,6 @@ programs.git.enable = true;
      pkgs.kdePackages.qtmultimedia
      pkgs.qt6.qtmultimedia
      chromium
-     blesh
      swaynotificationcenter
      pkg-config
   	 nwg-look
