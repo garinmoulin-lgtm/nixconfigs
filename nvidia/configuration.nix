@@ -90,7 +90,7 @@ security.doas.extraRules = [
 
 # Enable the Hyprland Compositor via its dedicated module
 # This configures polkit, xdg portals, and session files seamlessly
-
+services.udisks2.enable = true;
 programs.hyprland.enable = true;
 
 #kmscon tty
@@ -250,6 +250,7 @@ programs.git.enable = true;
      cmake
      llvm
      clang
+     udisks2
      gpu-screen-recorder-gtk
      tty-clock
      stdenv.cc

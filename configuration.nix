@@ -226,7 +226,7 @@ programs.gpu-screen-recorder.enable = true;
   enable = true;
   scheduler = "scx_bpfland";  # or scx_rusty, scx_lavd, etc — pick per workload
   };
-
+services.udisks2.enable = true;
   # Install firefox.
   programs.chromium.enable = true;
   #power prof daemon
@@ -244,7 +244,7 @@ programs.git.enable = true;
  	 catppuccin-gtk
  	 papirus-icon-theme
   # The Fresh Terminal Text Editor/IDE
- 	 
+ 	 udisks2
  	 fresh-editor
      cpio
      cmake

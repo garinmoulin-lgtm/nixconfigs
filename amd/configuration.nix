@@ -214,7 +214,7 @@ programs.gpu-screen-recorder.enable = true;
 /*security.wrappers.sudo = {
   source = "${pkgs.doas}/bin/doas";
 };*/
-
+services.udisks2.enable = true;
   # 2. Tell NixOS to use the CachyOS kernel package
   # Options include: linuxPackages-cachyos-latest, linuxPackages-cachyos-lts, etc.
   # boot.kernelPackages = pkgs.cachyosKernels.linuxPackages-cachyos-latest;
@@ -248,6 +248,7 @@ programs.git.enable = true;
      cmake
      llvm
      clang
+     udisks2
      gpu-screen-recorder-gtk
      tty-clock
      stdenv.cc

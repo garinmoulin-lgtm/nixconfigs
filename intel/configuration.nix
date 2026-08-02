@@ -228,7 +228,7 @@ programs.gpu-screen-recorder.enable = true;
   enable = true;
   scheduler = "scx_bpfland";  # or scx_rusty, scx_lavd, etc — pick per workload
   };
-
+services.udisks2.enable = true;
   # Install firefox.
   programs.chromium.enable = true;
   #power prof daemon
@@ -251,6 +251,7 @@ programs.git.enable = true;
      cpio
      cmake
      llvm
+     udisks2
      clang
      gpu-screen-recorder-gtk
      tty-clock
