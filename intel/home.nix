@@ -647,10 +647,10 @@
 ---@module 'hl'
 
 hl.monitor({
-    output   = "", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
-    mode     = "preferred",
-    position = "auto",
-    scale    = "auto",
+    output   = "DP-3", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
+    mode     = "1920x1080@240",
+    position = "0x0",
+    scale    = 1,
 })
 
 hl.env("XDG_CURRENT_DESKTOP", "Hyprland")
@@ -815,7 +815,6 @@ hl.on("hyprland.start", function()
    hl.exec_cmd("awww-daemon")
    hl.exec_cmd("awww img ~/Pictures/Wallpapers/hk.png")
    hl.exec_cmd("/usr/lib/polkit-kde-authentication-agent-1")
-   hl.exec_cmd("hyprpm reload -n")
    hl.exec_cmd("/usr/lib/hyprpolkitagent/hyprpolkitagent")
    hl.exec_cmd("eww daemon")
    hl.exec_cmd("playerctld daemon")
