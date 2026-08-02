@@ -13,8 +13,20 @@
 
   boot.blacklistedKernelModules = [ "acpi_pad" "nouveau" ];
   # Bootloader.
-  boot.loader.systemd-boot.enable = true;
- # boot.loader.grub.enable = false;
+  #boot.loader.systemd-boot.enable = true;
+boot.loader.grub = {
+  enable = true;
+  efiSupport = true;
+  device = "nodev";
+  useOSProber = true;
+
+  theme = pkgs.fetchFromGitHub {
+    owner = "catppuccin";
+    repo = "grub";
+    rev = "main";              # or pin to a specific commit/tag for reproducibility
+    sha256 = "jgM22pvCQvb0bjQQXoiqGMgScR9AgCK3OfDF5Ud+/mk=";                # leave blank first build — Nix will error with the correct hash, paste it back in
+  } + "/src/catppuccin-frappe-grub-theme";
+};
 
   boot.loader.efi.canTouchEfiVariables = true;
   # Use latest kernel. Baseline, cachy @ line 157
@@ -263,7 +275,7 @@ programs.git.enable = true;
     owner = "Alexays";
     repo = "Waybar";
     rev = "master";
-    hash = "sha256-pSbVf9mMWazkaTgNM0X4pfkIS/6AzoAfs7YTS27udOE=";
+    hash = "sha256-qquPn4ibBnc7gA4peGgseP+lKGRq58UPxsMTSrdUT8Q=";
   };
   buildInputs = (old.buildInputs or []) ++ [ pkgs.modemmanager ];
   mesonFlags = (old.mesonFlags or []) ++ [ "-Dcava=disabled" ];
