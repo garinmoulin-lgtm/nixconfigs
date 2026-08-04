@@ -250,6 +250,9 @@ programs.git.enable = true;
      cmake
      llvm
      clang
+     protontricks
+     winetricks
+     wineWow64Packages.stable
      gpu-screen-recorder-gtk
      tty-clock
      stdenv.cc
