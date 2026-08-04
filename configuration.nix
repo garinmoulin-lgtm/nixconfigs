@@ -91,8 +91,26 @@ security.doas.extraRules = [
 # Enable the Hyprland Compositor via its dedicated module
 # This configures polkit, xdg portals, and session files seamlessly
 
+nixpkgs.overlays = [
+  (final: prev: {
+    hyprland = prev.hyprland.overrideAttrs (old: {
+      cmakeFlags = (old.cmakeFlags or []) ++ [
+        "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"
+        "-DFETCHCONTENT_SOURCE_DIR_GLAZE=${prev.fetchFromGitHub {
+          owner = "stephenberry";
+          repo = "glaze";
+          rev = "v7.2.0";
+          hash = "sha256-f3NVRi3SXKo42hn0WCw7JsOK3EkdOVJIcuzhPorKjFY=";
+        }}"
+      ];
+    });
+  })
+];
 programs.hyprland.enable = true;
-
+xdg.portal = {
+  enable = true;
+  extraPortals = [ pkgs.xdg-desktop-portal-hyprland ];
+};
 #kmscon tty
 services.kmscon = {
   enable = true;
@@ -207,7 +225,7 @@ programs.gpu-screen-recorder.enable = true;
   users.users."garinh" = {
     isNormalUser = true;
     description = "garinh";
-    extraGroups = [ "networkmanager" "wheel" ];
+    extraGroups = [ "networkmanager" "wheel" "input" ];
     packages = with pkgs; [
     #  thunderbird
     ];
@@ -216,7 +234,13 @@ programs.gpu-screen-recorder.enable = true;
 /*security.wrappers.sudo = {
   source = "${pkgs.doas}/bin/doas";
 };*/
+services.udev.extraRules = ''
+  SUBSYSTEM=="input", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
+  KERNEL=="js*", SUBSYSTEM=="input", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
+  SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
+'';
 
+# make sure you're in the input group
   # 2. Tell NixOS to use the CachyOS kernel package
   # Options include: linuxPackages-cachyos-latest, linuxPackages-cachyos-lts, etc.
   # boot.kernelPackages = pkgs.cachyosKernels.linuxPackages-cachyos-latest;
@@ -271,6 +295,7 @@ programs.git.enable = true;
      swaynotificationcenter
      pkg-config
   	 nwg-look
+     oversteer
      lavat
 (waybar.overrideAttrs (old: {
   version = "git";
