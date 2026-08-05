@@ -234,12 +234,13 @@ programs.gpu-screen-recorder.enable = true;
 /*security.wrappers.sudo = {
   source = "${pkgs.doas}/bin/doas";
 };*/
+hardware.new-lg4ff.enable = true;
 services.udev.extraRules = ''
   SUBSYSTEM=="input", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
   KERNEL=="js*", SUBSYSTEM=="input", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
   SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
 '';
-
+services.udev.packages = with pkgs; [ oversteer ];
 # make sure you're in the input group
   # 2. Tell NixOS to use the CachyOS kernel package
   # Options include: linuxPackages-cachyos-latest, linuxPackages-cachyos-lts, etc.
@@ -270,6 +271,7 @@ programs.git.enable = true;
   # The Fresh Terminal Text Editor/IDE
  	 udisks2
  	 fresh-editor
+     oversteer
      cpio
      cmake
      llvm
@@ -295,7 +297,6 @@ programs.git.enable = true;
      swaynotificationcenter
      pkg-config
   	 nwg-look
-     oversteer
      lavat
 (waybar.overrideAttrs (old: {
   version = "git";
