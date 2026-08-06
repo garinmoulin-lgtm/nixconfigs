@@ -272,6 +272,7 @@ programs.git.enable = true;
  	 udisks2
  	 fresh-editor
      oversteer
+     wget
      cpio
      cmake
      llvm

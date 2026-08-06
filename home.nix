@@ -2012,6 +2012,7 @@ programs.bash = {
   bashrcExtra = ''
     source -- ~/.local/share/blesh/ble.sh
     eval "$(starship init bash)"
+    export PATH=~/bin:$PATH
     pfetch
   '';
 };
