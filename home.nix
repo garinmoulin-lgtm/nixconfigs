@@ -952,7 +952,7 @@ window {
     margin:                      0px;
     padding:                     0px;
     border:                      4px solid;
-    /*border-radius:               12px;*/
+    border-radius:               6px;
     border-color:                @background-alt;
     cursor:                      "default";
     background-color:            @background;
@@ -974,7 +974,7 @@ inputbar {
     spacing:                     10px;
     margin:                      0px;
     padding:                     10px;
-    /*border-radius:               12px;*/
+    border-radius:               6px;
     background-color:            @background-alt;
     text-color:                  @foreground;
     children:                    [ "textbox-prompt-colon", "entry" ];
@@ -1024,7 +1024,7 @@ listview {
 scrollbar {
     handle-width:                5px ;
     handle-color:                @selected;
-    /*border-radius:               10px;*/
+    border-radius:               6px;
     background-color:            @background-alt;
 }
 
@@ -1034,7 +1034,7 @@ element {
     spacing:                     10px;
     margin:                      0px;
     padding:                     6px;
-    /*border-radius:               12px;*/
+    border-radius:               6px;
     background-color:            transparent;
     text-color:                  @foreground;
     cursor:                      pointer;
@@ -1086,7 +1086,7 @@ mode-switcher{
 }
 button {
     padding:                     10px;
-    /*border-radius:               12px;*/
+    border-radius:               6px;
     background-color:            @background-alt;
     text-color:                  inherit;
     cursor:                      pointer;
@@ -1101,7 +1101,7 @@ message {
     enabled:                     true;
     margin:                      0px;
     padding:                     10px;
-    /*border-radius:               12px;*/
+    border-radius:               6px;
     background-color:            @background-alt;
     text-color:                  @foreground;
 }
