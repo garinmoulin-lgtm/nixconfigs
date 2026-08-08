@@ -691,7 +691,7 @@ hl.config({
 -- that overwrote each other; only the last one was ever actually in effect)
 hl.config({
     decoration = {
-        rounding = 8,
+        rounding = 0,
         blur = {
             enabled = true,
             size = 8,
@@ -723,7 +723,7 @@ hl.config({
         gaps_in = 4,
         gaps_out = 8,
         border_size = 2,
-        ["col.active_border"]   = "rgba(a6d189ee)",   -- Frappe Green
+        ["col.active_border"]   = "rgba(838ba7ee)",   -- Frappe Green
         ["col.inactive_border"] = "rgba(51576d99)",   -- Frappe Surface1
         resize_on_border = true,
         extend_border_grab_area = 20,  -- pixels of grab area beyond the visible border
