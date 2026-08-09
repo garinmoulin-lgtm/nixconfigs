@@ -319,7 +319,7 @@ programs.git.enable = true;
      kitty
      rofi
      btop
-     amberol
+     kew
      pavucontrol
      flatpak
      mdadm

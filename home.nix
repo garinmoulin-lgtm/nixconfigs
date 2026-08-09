@@ -2003,7 +2003,7 @@ programs.bash = {
   shellAliases = {
     ll = "ls -la";
     gs = "git status";
-    update = "cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch && cd";
+    update = "cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake /etc/nixos#nixos --impure && cd";
     viconfig = "sudo fresh /etc/nixos/configuration.nix";
     rmold = "nh clean all";
     rmcache = "sudo nix-collect-garbage";
@@ -2014,6 +2014,7 @@ programs.bash = {
     source -- ~/.local/share/blesh/ble.sh
     eval "$(starship init bash)"
     export PATH=~/bin:$PATH
+    export NIXPKGS_ALLOW_UNFREE=1
     pfetch
   '';
 };
