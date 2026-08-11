@@ -30,7 +30,7 @@ boot.loader.grub = {
 
   boot.loader.efi.canTouchEfiVariables = true;
   # Use latest kernel. Baseline, cachy @ line 157
-  boot.kernelPackages = pkgs.linuxPackages_cachyos-lto-znver4;
+  boot.kernelPackages = pkgs.linuxPackages_latest;
   
   nix.settings.trusted-users = [ "root" "garinh" ];
   networking.hostName = "nixos"; # Define your hostname.
@@ -181,7 +181,7 @@ zramSwap = {
 services.xserver.videoDrivers = [ "nvidia" ];
 #nvidia
 hardware.nvidia = {
-  package = config.boot.kernelPackages.nvidiaPackages.latest;
+  package = config.boot.kernelPackages.nvidiaPackages.stable;
   open = true;
   modesetting.enable = true;
   powerManagement.enable = true;
@@ -230,7 +230,13 @@ programs.gpu-screen-recorder.enable = true;
     #  thunderbird
     ];
   };
-  
+# avahi
+services.avahi = {
+  enable = true;
+  nssmdns4 = true;
+  openFirewall = true;
+};
+ 
 /*security.wrappers.sudo = {
   source = "${pkgs.doas}/bin/doas";
 };*/
@@ -286,6 +292,7 @@ programs.git.enable = true;
      bison
      flex
      pkg-config
+     theclicker
      elfutils          # Needed for kernel header unpacking
      openssl           # Needed for kernel signing checks
      bc                # Math tool used in the kernel Makefile
@@ -305,7 +312,7 @@ programs.git.enable = true;
     owner = "Alexays";
     repo = "Waybar";
     rev = "master";
-    hash = "sha256-qquPn4ibBnc7gA4peGgseP+lKGRq58UPxsMTSrdUT8Q=";
+    hash = "sha256-POvwObPOp6O14n6KYWNLp2Y3paunA5f8U1NCaodNFcc=";
   };
   buildInputs = (old.buildInputs or []) ++ [ pkgs.modemmanager ];
   mesonFlags = (old.mesonFlags or []) ++ [ "-Dcava=disabled" ];
@@ -314,12 +321,13 @@ programs.git.enable = true;
      ffmpeg
      micro
      hyprlock
-     pfetch-rs
+     fastfetch
      psmisc
      kitty
      rofi
      btop
      kew
+     go
      pavucontrol
      flatpak
      mdadm

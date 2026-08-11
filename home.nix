@@ -2015,7 +2015,7 @@ programs.bash = {
     eval "$(starship init bash)"
     export PATH=~/bin:$PATH
     export NIXPKGS_ALLOW_UNFREE=1
-    pfetch
+    fastfetch
   '';
 };
 }
