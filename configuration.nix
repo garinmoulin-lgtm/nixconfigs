@@ -181,7 +181,7 @@ zramSwap = {
 services.xserver.videoDrivers = [ "nvidia" ];
 #nvidia
 hardware.nvidia = {
-  package = config.boot.kernelPackages.nvidiaPackages.stable;
+  package = config.boot.kernelPackages.nvidiaPackages.latest;
   open = true;
   modesetting.enable = true;
   powerManagement.enable = true;
@@ -292,7 +292,6 @@ programs.git.enable = true;
      bison
      flex
      pkg-config
-     theclicker
      elfutils          # Needed for kernel header unpacking
      openssl           # Needed for kernel signing checks
      bc                # Math tool used in the kernel Makefile
