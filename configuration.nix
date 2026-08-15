@@ -305,16 +305,13 @@ programs.git.enable = true;
      pkg-config
   	 nwg-look
      lavat
-(waybar.overrideAttrs (old: {
-  version = "git";
-  src = pkgs.fetchFromGitHub {
-    owner = "Alexays";
-    repo = "Waybar";
-    rev = "master";
-    hash = "sha256-POvwObPOp6O14n6KYWNLp2Y3paunA5f8U1NCaodNFcc=";
-  };
+(pkgs.waybar.overrideAttrs (old: {
   buildInputs = (old.buildInputs or []) ++ [ pkgs.modemmanager ];
-  mesonFlags = (old.mesonFlags or []) ++ [ "-Dcava=disabled" ];
+  mesonFlags = (old.mesonFlags or []) ++ [ 
+      "-Dcava=disabled"
+      "-Dsystemd=disabled"
+  ];
+  env.NIX_CFLAGS_COMPILE = "-march=native -O3";
   doInstallCheck = false;
 }))
      ffmpeg

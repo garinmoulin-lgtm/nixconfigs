@@ -4,6 +4,10 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     catppuccin.url = "github:catppuccin/nix";
     chaotic.url = "github:chaotic-cx/nyx/nyxpkgs-unstable";
+    waybar = {
+        url = "github:Alexays/Waybar";
+        inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     home-manager = {
       url = "github:nix-community/home-manager";
@@ -12,10 +16,11 @@
 
   };
 
-  outputs = { self, nixpkgs, catppuccin, home-manager, chaotic, ... }@inputs: {
+  outputs = { self, nixpkgs, catppuccin, home-manager, waybar, chaotic, ... }@inputs: {
     nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
+        { nixpkgs.overlays = [ waybar.overlays.default ]; }
         ./configuration.nix
         chaotic.nixosModules.default
 
