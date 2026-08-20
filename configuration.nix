@@ -342,10 +342,10 @@ programs.git.enable = true;
      libreoffice
      kdePackages.qt6ct
      adwaita-icon-theme
-     #steam
      nautilus
      wl-clipboard
      playerctl
+     telegram-desktop
   ];
 
   # Some programs need SUID wrappers, can be configured further or are
