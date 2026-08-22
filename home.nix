@@ -742,7 +742,7 @@ hl.config({
         sensitivity = 0.0,   -- keep at 0 for 1:1, adjust if needed alongside flat profile
     },
 })
-
+-- anims here
 hl.bind("Caps_Lock", hl.dsp.exec_cmd("sleep 0.1 && ~/.config/hypr/scripts/capslock.sh"))
 
 hl.bind("SUPER + SHIFT + Right", function()
