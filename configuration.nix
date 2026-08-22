@@ -346,6 +346,7 @@ programs.git.enable = true;
      wl-clipboard
      playerctl
      telegram-desktop
+     bibletime
   ];
 
   # Some programs need SUID wrappers, can be configured further or are
