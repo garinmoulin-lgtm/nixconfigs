@@ -220,7 +220,8 @@ boot.kernelParams = [ "nvidia-drm.modeset=1" ];
 programs.gpu-screen-recorder.enable = true;
   # Enable touchpad support (enabled default in most desktopManager).
   # services.xserver.libinput.enable = true;
-
+  #helps bins work
+programs.nix-ld.enable = true;
   # Define a user account. Don't forget to set a password with ‘passwd’.
   users.users."garinh" = {
     isNormalUser = true;
