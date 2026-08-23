@@ -347,6 +347,7 @@ programs.git.enable = true;
      playerctl
      telegram-desktop
      bibletime
+     nodejs
   ];
 
   # Some programs need SUID wrappers, can be configured further or are
