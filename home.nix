@@ -745,7 +745,7 @@ hl.config({
 -- anims here
 -- Define curves first
 hl.curve("sharp", { type = "bezier", points = { {0.16, 1}, {0.3, 1} } })
-hl.curve("snappy", { type = "bezier", points = { {0.05, 0.9}, {0.1, 1.05} } })
+hl.curve("snappy", { type = "bezier", points = { {0.05, 0.9}, {0.1, 1} } })
 hl.curve("linear", { type = "bezier", points = { {0, 0}, {1, 1} } })
 
 -- Then reference them by leaf
