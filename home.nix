@@ -743,6 +743,18 @@ hl.config({
     },
 })
 -- anims here
+-- Define curves first
+hl.curve("sharp", { type = "bezier", points = { {0.16, 1}, {0.3, 1} } })
+hl.curve("snappy", { type = "bezier", points = { {0.05, 0.9}, {0.1, 1.05} } })
+hl.curve("linear", { type = "bezier", points = { {0, 0}, {1, 1} } })
+
+-- Then reference them by leaf
+hl.animation({ leaf = "windows", enabled = true, speed = 2, bezier = "snappy", style = "popin 90%" })
+hl.animation({ leaf = "windowsOut", enabled = true, speed = 1.6, bezier = "sharp", style = "popin 90%" })
+hl.animation({ leaf = "border", enabled = true, speed = 3, bezier = "linear" })
+hl.animation({ leaf = "fade", enabled = true, speed = 2, bezier = "sharp" })
+hl.animation({ leaf = "workspaces", enabled = true, speed = 2.2, bezier = "snappy", style = "slide" })
+hl.animation({ leaf = "layers", enabled = true, speed = 1.6, bezier = "sharp" })
 hl.bind("Caps_Lock", hl.dsp.exec_cmd("sleep 0.1 && ~/.config/hypr/scripts/capslock.sh"))
 
 hl.bind("SUPER + SHIFT + Right", function()
