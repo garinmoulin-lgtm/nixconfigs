@@ -347,7 +347,6 @@ programs.git.enable = true;
      wl-clipboard
      playerctl
      telegram-desktop
-     bibletime
      nodejs
   ];
 
