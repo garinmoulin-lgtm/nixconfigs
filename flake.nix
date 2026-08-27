@@ -29,7 +29,7 @@
           home-manager.useGlobalPkgs = true;
           home-manager.useUserPackages = true;
           home-manager.users.garinh = {
-            imports = [ catppuccin.homeModules.catppuccin ./home.nix ];
+            imports = [ inputs.catppuccin.homeModules.catppuccin ./home.nix ];
             #home.stateVersion = "24.11";
           };
         }

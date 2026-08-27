@@ -91,7 +91,7 @@ security.doas.extraRules = [
 # Enable the Hyprland Compositor via its dedicated module
 # This configures polkit, xdg portals, and session files seamlessly
 
-nixpkgs.overlays = [
+/*nixpkgs.overlays = [
   (final: prev: {
     hyprland = prev.hyprland.overrideAttrs (old: {
       cmakeFlags = (old.cmakeFlags or []) ++ [
@@ -105,7 +105,7 @@ nixpkgs.overlays = [
       ];
     });
   })
-];
+];*/
 programs.hyprland.enable = true;
 xdg.portal = {
   enable = true;
@@ -200,7 +200,7 @@ boot.extraModprobeConfig = ''
   options nvidia NVreg_TemporaryFilePath=/var/tmp
 '';
 
-boot.kernelParams = [ "nvidia-drm.modeset=1" ];
+boot.kernelParams = [ "nvidia-drm.modeset=1" "video=DP-3:1920x1080@240" ];
   # Enable sound with pipewire.
   services.pulseaudio.enable = false;
   security.rtkit.enable = true;
@@ -349,7 +349,6 @@ programs.git.enable = true;
      telegram-desktop
      nodejs
   ];
-
   # Some programs need SUID wrappers, can be configured further or are
   # started in user sessions.
   # programs.mtr.enable = true;
