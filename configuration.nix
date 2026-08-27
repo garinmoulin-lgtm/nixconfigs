@@ -297,6 +297,7 @@ programs.git.enable = true;
      openssl           # Needed for kernel signing checks
      bc                # Math tool used in the kernel Makefile
      gnumake
+     lunar-client
      unzip
      yt-dlp
      pkgs.kdePackages.qtmultimedia
