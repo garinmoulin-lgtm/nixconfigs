@@ -200,7 +200,7 @@ boot.extraModprobeConfig = ''
   options nvidia NVreg_TemporaryFilePath=/var/tmp
 '';
 
-boot.kernelParams = [ "nvidia-drm.modeset=1" "video=DP-3:1920x1080@240" ];
+boot.kernelParams = [ "nvidia-drm.modeset=1" ];
   # Enable sound with pipewire.
   services.pulseaudio.enable = false;
   security.rtkit.enable = true;
