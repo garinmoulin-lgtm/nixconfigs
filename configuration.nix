@@ -260,7 +260,7 @@ services.udev.packages = with pkgs; [ oversteer ];
   };
 services.udisks2.enable = true;
   # Install firefox.
-  programs.chromium.enable = true;
+  programs.firefox.enable = true;
   #power prof daemon
   services.power-profiles-daemon.enable = true;
   #hehe wm
@@ -278,7 +278,6 @@ programs.git.enable = true;
   # The Fresh Terminal Text Editor/IDE
  	 udisks2
  	 fresh-editor
-     oversteer
      wget
      cpio
      cmake
@@ -302,7 +301,6 @@ programs.git.enable = true;
      yt-dlp
      pkgs.kdePackages.qtmultimedia
      pkgs.qt6.qtmultimedia
-     chromium
      swaynotificationcenter
      pkg-config
   	 nwg-look
