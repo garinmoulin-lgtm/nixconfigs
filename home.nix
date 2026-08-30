@@ -1991,7 +1991,7 @@ gtk = {
 
 
   font = {
-    name = "Hanken Grotesk";
+    name = "Noto Sans";
     size = 11;
   };
 

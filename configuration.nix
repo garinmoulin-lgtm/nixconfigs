@@ -154,14 +154,15 @@ fonts = {
     # Options include: .normal, .normal-NF (Nerd Font patched), .condensed, etc.
     ioskeley-mono.normal-NF       # Pre-patched with Nerd Font glyphs
 
-    # Clean, modern Grotesque typeface
-    hanken-grotesk
+    # Clean, modern sans-serif typeface
+    noto-fonts
   ];
+
 
   # Inform your desktop environment how to prioritize these fonts
   fontconfig.defaultFonts = {
     monospace = [ "Ioskeley Mono" "JetBrainsMono Nerd Font" ];
-    sansSerif = [ "Hanken Grotesk" ];
+    sansSerif = [ "Noto Sans" ];
   };
 };
 #zram and such (oh yes)
