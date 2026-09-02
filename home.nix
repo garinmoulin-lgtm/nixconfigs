@@ -14,9 +14,11 @@
 {
     "layer": "top",
     "position": "top",
+    "margin-top": 8,
+    "margin-left": 10,
+    "margin-right": 10,
     "spacing": 1,
 	"height": 30, // bump this up from whatever it currently is
-	"margin": 0,
     "modules-left": [
         "group/hardware",
         "custom/bar2",
@@ -290,7 +292,7 @@
   	
   force = true;
   text = ''
- /* Catppuccin Frappé TTY Colors */
+/* Catppuccin Frappé TTY Colors */
  @define-color background #303446; /* Base */
  @define-color background-light #414559; /* Surface0 */
  @define-color foreground #c6d0f5; /* Text */
@@ -351,7 +353,7 @@
      font-weight: 500; 
  }
  
- /* Common module styling with border-bottom */
+ /* Common module styling with full borders */
  #mode,
  #custom-hardware-wrap,
  #custom-session-wrap,
@@ -368,9 +370,10 @@
  #power-profiles-daemon,
  #idle_inhibitor,
  #tray {
-     padding: 0 10px;
-     margin: 0 2px;
-     border-bottom: 2px solid transparent;
+     padding: 2px 10px;
+     margin: 2px 4px;
+     border: 2px solid transparent;
+     border-radius: 20px;
      background-color: transparent;
  }
  
@@ -418,168 +421,213 @@
     color: #232634;
 }
 
- 
- 
- /* Module-specific styling */
+ /* Module-specific border and text styling */
  #mode {
      color: @mode-color;
-     border-bottom-color: @mode-color;
+     border-color: @mode-color;
  }
  
  #custom-hardware-wrap {
      color: #232634;
      border-radius: 20px;
- 	background-color: #85c1dc;
+     background-color: #85c1dc;
+     border-color: #85c1dc;
  }
+
  #window {
- 	color: #c6d0f5;
- 	border-radius: 20px;
- 	/*background-color: #303446;*/
+     color: #c6d0f5;
+     border: 2px solid #c6d0f5;
+     border-radius: 20px;
+     padding: 2px 10px;
  }
  
- 
+ #clock {
+     color: @clock-color;
+     border-color: @clock-color;
+ }
+
+ #cpu {
+     color: @cpu-color;
+     border-color: @cpu-color;
+ }
+
+ #memory {
+     color: @memory-color;
+     border-color: @memory-color;
+ }
+
+ #temperature {
+     color: @temperature-color;
+     border-color: @temperature-color;
+ }
+
+ #temperature.critical {
+     color: #232634;
+     border-radius: 20px;
+     background-color: #e78284;
+     border-color: #e78284;
+ }
+
+ #network {
+     color: @network-color;
+     border-color: @network-color;
+ }
+
+ #network.disconnected {
+     color: @network-disconnected-color;
+     border-color: @network-disconnected-color;
+ }
+
+ #disk {
+     color: @disk-color;
+     border-color: @disk-color;
+ }
+
+ #power-profiles-daemon {
+     color: @power-profiles-daemon-color;
+     border-color: @power-profiles-daemon-color;
+ }
+
+ #power-profiles-daemon.performance {
+     color: @power-profiles-daemon-performance-color;
+     border-color: @power-profiles-daemon-performance-color;
+ }
+
+ #power-profiles-daemon.balanced {
+     color: @power-profiles-daemon-balanced-color;
+     border-color: @power-profiles-daemon-balanced-color;
+ }
+
+ #power-profiles-daemon.power-saver {
+     color: @power-profiles-daemon-power-saver-color;
+     border-color: @power-profiles-daemon-power-saver-color;
+ }
  
  #cpu-group {
      color: #232634;
      border-radius: 20px;
      background-color: #f4b8e4;
+     border: 2px solid #f4b8e4;
  }
  
- 
  #custom-gpu {
- 	color: #232634;
- 	border-radius: 20px;
- 	background-color: #8caaee; 
+     color: #232634;
+     border-radius: 20px;
+     background-color: #8caaee; 
+     border: 2px solid #8caaee;
  }
  
  #custom-gpu-temperature {
- 	color: #232634;
- 	border-radius: 20px;
- 	background-color: #ca9ee6;
- }
- 
- 
- #temperature.critical {
      color: #232634;
      border-radius: 20px;
-     background-color: #e78284;
+     background-color: #ca9ee6;
+     border: 2px solid #ca9ee6;
  }
- 
- 
- 
- 
- /*#power-profiles-daemon.power-saver {
-     color: #232634;
-     border-radius: 20px;
-     background-color: #81c8be;
- }*/
  
  #battery {
      color: @battery-color;
-     border-bottom-color: @battery-color;
+     border-color: @battery-color;
  }
  
  #battery.charging,
  #battery.plugged {
      color: @battery-charging-color;
-     border-bottom-color: @battery-charging-color;
+     border-color: @battery-charging-color;
  }
  
  #battery.warning:not(.charging) {
      color: @battery-warning-color;
-     border-bottom-color: @battery-warning-color;
+     border-color: @battery-warning-color;
  }
  
  #battery.critical:not(.charging) {
      color: @battery-critical-color;
-     border-bottom-color: @battery-critical-color;
+     border-color: @battery-critical-color;
  }
- 
  
  #pulseaudio {
      color: @pulseaudio-color;
-     border-bottom-color: @pulseaudio-color;
+     border-color: @pulseaudio-color;
      border-radius: 20px;
  }
  
  #pulseaudio.muted {
      color: @pulseaudio-muted-color;
-     border-bottom-color: @pulseaudio-muted-color;
+     border-color: @pulseaudio-muted-color;
      border-radius: 20px;
  }
- 
- /*#wireplumber {
-     color: #232634;
+
+ #wireplumber {
+     color: @wireplumber-color;
+     border-color: @wireplumber-color;
      border-radius: 20px;
-     background-color: #ef9f76;
  }
- 
+
  #wireplumber.muted {
-     background-color: #ea999c;
+     color: @wireplumber-muted-color;
+     border-color: @wireplumber-muted-color;
      border-radius: 20px;
-     color: #232634;
- }*/
+ }
  
  #backlight {
      color: @backlight-color;
-     border-bottom-color: @backlight-color;
+     border-color: @backlight-color;
      border-radius: 20px;
  }
+
  decoration {
      background: transparent;
      box-shadow: none;
-     border-radius: 20px; /* Change this to match your tooltip's border-radius */
+     border-radius: 20px;
  }
- 
- /* Clean up gaps when the music components are inactive */
- /* Target the buttons inside the group when the media module is invisible/empty */
  
  #idle_inhibitor {
      color: @idle-inhibitor-color;
-     border-bottom-color: transparent;
+     border-color: @idle-inhibitor-color;
  }
  
  #idle_inhibitor.activated {
      color: @idle-inhibitor-active-color;
-     border-bottom-color: @idle-inhibitor-active-color;
+     border-color: @idle-inhibitor-active-color;
  }
  
  tooltip {
-     background: #303446;          /* Change popup background color */
-     border: 2px solid #c6d0f5;    /* Give it a clean border */
-     border-radius: 8px;           /* Round the corners */
+     background: #303446;
+     border: 2px solid #c6d0f5;
+     border-radius: 8px;
  }
+
  #custom-media-next.active {
      color: #81c8be;
  }
+
  #custom-media-prev.active {
      color: #81c8be;
  }
- /* Styling the main container of the right-click context menu */
+
+ /* Tray Menu Styling */
  #tray menu {
-     background: #232634;          /* Dark theme background */
+     background: #232634;
      border: 1px solid #414559;
      border-radius: 6px;
      padding: 6px;
  }
  
- /* Individual lines / list items within the context menu */
  #tray menu menuitem {
-     color: #c6d0f5;               /* Text color */
+     color: #c6d0f5;
      padding: 4px 12px;
-     transition: all 0.2s ease;   /* Smooth color transition */
+     transition: all 0.2s ease;
  }
  
- /* Style when you hover your cursor over an option */
  #tray menu menuitem:hover {
-     background: #8caaee;          /* Highlight color on hover */
-     color: #232634;               /* Change text color on hover for legibility */
+     background: #8caaee;
+     color: #232634;
      border-radius: 20px;
  }
  
- 
  #tray {
      background-color: transparent;
+     border-color: @foreground;
      padding: 0 10px;
      margin: 0 2px;
  }
@@ -591,28 +639,22 @@
  #tray>.needs-attention {
      -gtk-icon-effect: highlight;
      color: @red;
-     border-bottom-color: @red;
+     border-color: @red;
  }
  
- /* Outer GTK window: border lives here since this is the layer-shell
-    surface boundary. */
- window#waybar {
-     background-color: #303446;
-     color: @foreground;
-     /*border: 2px solid #838ba7;
-     border-radius: 20px;*/
- }
+/* Make the base window transparent so rounded corners clip properly */
+window#waybar {
+    background-color: transparent;
+}
+
+/* Apply the background, border, and rounding to the inner box container */
+window#waybar > box {
+    background-color: #303446;
+    border: 2px solid #8caaee; /* Catppuccin Blue border (or #c6d0f5 for Text) */
+    border-radius: 16px;
+    padding: 2px 6px;
+}
  
- /* GTK Inspector confirmed the actual content node is an unnamed
-    box.horizontal directly under window#waybar (not #waybar itself,
-    and not a generic #waybar > box selector). Padding goes here so
-    it's applied to the real node holding modules-left/center/right. */
- window#waybar > box {
-     padding: 4px 4px;
- }
- 
- /* Extra safety margin on the very first/last module in each group
-    so nothing touches the rounded corners. */
  #modules-left > widget:first-child,
  #modules-right > widget:last-child {
      margin: 0 4px;
