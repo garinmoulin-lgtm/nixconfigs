@@ -104,6 +104,8 @@ xdg.portal = {
   extraPortals = [ pkgs.xdg-desktop-portal-hyprland ];
 };
 #kmscon tty
+#enable if you really need a cursor and the aesthetic
+/*
 services.kmscon = {
   enable = true;
   hwRender = true;
@@ -113,7 +115,7 @@ services.kmscon = {
     xkb-layout = "us";
   };
 };
-
+*/
 # Enable and configure LY
 services.displayManager = {
   ly.enable = true;
