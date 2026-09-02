@@ -21,8 +21,9 @@
 	"height": 30, // bump this up from whatever it currently is
     "modules-left": [
         "group/hardware",
-        "custom/bar2",
-        "hyprland/workspaces"
+        // "custom/bar2",
+        "hyprland/workspaces",
+        "hyprland/window"
     ],
     "modules-center": [
     	"group/media-player",
@@ -32,16 +33,16 @@
     "modules-right": [
     	"clock",
         "wireplumber#sink",
-        "custom/bar5",
+        // "custom/bar5",
         "network",
-        "custom/bar6",
+        // "custom/bar6",
         "group/session"
     ],
     "hyprland/workspaces": {
         "format": "{id}",
         "on-click": "activate"
     },
-    "custom/bar3": {
+  /*  "custom/bar3": {
     	"format": "<span color='#E78284'> │ </span>",
     	"tooltip": false
     },
@@ -60,15 +61,15 @@
     "custom/bar2": {
     	"format": "<span color='#E78284'> │ </span>",
     	"tooltip": false
-    },
-    /*"hyprland/window": {
+    },*/
+    "hyprland/window": {
         "format": "<span color='#c6d0f5'>  {title}  </span>",
         "max-length": 35,
         "rewrite": {
             "(.*) - Mozilla Firefox": "🌎 $1",
             "(.*) - zsh": "> [$1]"
         }
-    },*/
+    },
 	"group/hardware": {
 	    "orientation": "horizontal",
 	    "modules": [
@@ -292,373 +293,347 @@
   	
   force = true;
   text = ''
-/* Catppuccin Frappé TTY Colors */
- @define-color background #303446; /* Base */
- @define-color background-light #414559; /* Surface0 */
- @define-color foreground #c6d0f5; /* Text */
- @define-color black #626880; /* Surface2 */
- @define-color red #e78284; /* Red */
- @define-color green #a6d189; /* Green */
- @define-color yellow #e5c890; /* Yellow */
- @define-color blue #8caaee; /* Blue */
- @define-color magenta #f4b8e4; /* Pink */
- @define-color cyan #99d1db; /* Sky */
- @define-color white #c6d0f5; /* Text */
- @define-color orange #ef9f76; /* Peach */
- 
- /* Module-specific colors */
- @define-color workspaces-color @foreground;
- @define-color workspaces-focused-bg @green;
- @define-color workspaces-focused-fg @cyan;
- @define-color workspaces-urgent-bg @red;
- @define-color workspaces-urgent-fg @black;
- 
- /* Text and border colors for modules */
- @define-color mode-color @orange;
- @define-color group-hardware-color #232634;
- @define-color group-session-color @red;
- @define-color clock-color @blue;
- @define-color cpu-color @green;
- @define-color memory-color @magenta;
- @define-color temperature-color @yellow;
- @define-color temperature-critical-color @red;
- @define-color battery-color @cyan;
- @define-color battery-charging-color @green;
- @define-color battery-warning-color @yellow;
- @define-color battery-critical-color @red;
- @define-color network-color @blue;
- @define-color network-disconnected-color @red;
- @define-color pulseaudio-color @orange;
- @define-color pulseaudio-muted-color @red;
- @define-color wireplumber-color @orange;
- @define-color wireplumber-muted-color @red;
- @define-color backlight-color @yellow;
- @define-color disk-color @cyan;
- @define-color updates-color @orange;
- @define-color quote-color @green;
- @define-color idle-inhibitor-color @foreground;
- @define-color idle-inhibitor-active-color @red;
- @define-color power-profiles-daemon-color @cyan;
- @define-color power-profiles-daemon-performance-color @red;
- @define-color power-profiles-daemon-balanced-color @yellow;
- @define-color power-profiles-daemon-power-saver-color @green;
- 
- * {
-     /* Base styling for all modules */
-     border: none;
-     border-radius: 0;
-     font-family: "Noto Sans", "Symbols Nerd Font";
-     font-size: 14px;
-     min-height: 0;
-     font-weight: 500; 
- }
- 
- /* Common module styling with full borders */
- #mode,
- #custom-hardware-wrap,
- #custom-session-wrap,
- #clock,
- #cpu,
- #memory,
- #temperature,
- #battery,
- #network,
- #pulseaudio,
- #wireplumber,
- #backlight,
- #disk,
- #power-profiles-daemon,
- #idle_inhibitor,
- #tray {
-     padding: 2px 10px;
-     margin: 2px 4px;
-     border: 2px solid transparent;
-     border-radius: 20px;
-     background-color: transparent;
- }
- 
-#workspaces {
-    background-color: transparent;
-    padding: 0 6px;
-}
-
-#workspaces button {
-    min-width: 22px;
-    min-height: 0;
-    padding: 2px 7px;
-    margin: 0 3px;
-    border: 2px solid #c6d0f5;
-    border-radius: 12px;
-    background-color: transparent;
-    color: #c6d0f5;
-    font-weight: 600;
-}
-
-#workspaces button label {
-    opacity: 1;
-    color: #c6d0f5;
-}
-
-#workspaces button:hover {
-    background-color: alpha(#8caaee, 0.25);
-}
-
-#workspaces button.active,
-#workspaces button.focused {
-    background-color: #f2d5cf;
-    border-color: #f2d5cf;
-    color: #232634;
-}
-
-#workspaces button.active label,
-#workspaces button.focused label {
-    color: #232634;
-}
-
-#workspaces button.urgent {
-    background-color: #e78284;
-    border-color: #e78284;
-    color: #232634;
-}
-
- /* Module-specific border and text styling */
- #mode {
-     color: @mode-color;
-     border-color: @mode-color;
- }
- 
- #custom-hardware-wrap {
-     color: #232634;
-     border-radius: 20px;
-     background-color: #85c1dc;
-     border-color: #85c1dc;
- }
-
- #window {
-     color: #c6d0f5;
-     border: 2px solid #c6d0f5;
-     border-radius: 20px;
-     padding: 2px 10px;
- }
- 
- #clock {
-     color: @clock-color;
-     border-color: @clock-color;
- }
-
- #cpu {
-     color: @cpu-color;
-     border-color: @cpu-color;
- }
-
- #memory {
-     color: @memory-color;
-     border-color: @memory-color;
- }
-
- #temperature {
-     color: @temperature-color;
-     border-color: @temperature-color;
- }
-
- #temperature.critical {
-     color: #232634;
-     border-radius: 20px;
-     background-color: #e78284;
-     border-color: #e78284;
- }
-
- #network {
-     color: @network-color;
-     border-color: @network-color;
- }
-
- #network.disconnected {
-     color: @network-disconnected-color;
-     border-color: @network-disconnected-color;
- }
-
- #disk {
-     color: @disk-color;
-     border-color: @disk-color;
- }
-
- #power-profiles-daemon {
-     color: @power-profiles-daemon-color;
-     border-color: @power-profiles-daemon-color;
- }
-
- #power-profiles-daemon.performance {
-     color: @power-profiles-daemon-performance-color;
-     border-color: @power-profiles-daemon-performance-color;
- }
-
- #power-profiles-daemon.balanced {
-     color: @power-profiles-daemon-balanced-color;
-     border-color: @power-profiles-daemon-balanced-color;
- }
-
- #power-profiles-daemon.power-saver {
-     color: @power-profiles-daemon-power-saver-color;
-     border-color: @power-profiles-daemon-power-saver-color;
- }
- 
- #cpu-group {
-     color: #232634;
-     border-radius: 20px;
-     background-color: #f4b8e4;
-     border: 2px solid #f4b8e4;
- }
- 
- #custom-gpu {
-     color: #232634;
-     border-radius: 20px;
-     background-color: #8caaee; 
-     border: 2px solid #8caaee;
- }
- 
- #custom-gpu-temperature {
-     color: #232634;
-     border-radius: 20px;
-     background-color: #ca9ee6;
-     border: 2px solid #ca9ee6;
- }
- 
- #battery {
-     color: @battery-color;
-     border-color: @battery-color;
- }
- 
- #battery.charging,
- #battery.plugged {
-     color: @battery-charging-color;
-     border-color: @battery-charging-color;
- }
- 
- #battery.warning:not(.charging) {
-     color: @battery-warning-color;
-     border-color: @battery-warning-color;
- }
- 
- #battery.critical:not(.charging) {
-     color: @battery-critical-color;
-     border-color: @battery-critical-color;
- }
- 
- #pulseaudio {
-     color: @pulseaudio-color;
-     border-color: @pulseaudio-color;
-     border-radius: 20px;
- }
- 
- #pulseaudio.muted {
-     color: @pulseaudio-muted-color;
-     border-color: @pulseaudio-muted-color;
-     border-radius: 20px;
- }
-
- #wireplumber {
-     color: @wireplumber-color;
-     border-color: @wireplumber-color;
-     border-radius: 20px;
- }
-
- #wireplumber.muted {
-     color: @wireplumber-muted-color;
-     border-color: @wireplumber-muted-color;
-     border-radius: 20px;
- }
- 
- #backlight {
-     color: @backlight-color;
-     border-color: @backlight-color;
-     border-radius: 20px;
- }
-
- decoration {
-     background: transparent;
-     box-shadow: none;
-     border-radius: 20px;
- }
- 
- #idle_inhibitor {
-     color: @idle-inhibitor-color;
-     border-color: @idle-inhibitor-color;
- }
- 
- #idle_inhibitor.activated {
-     color: @idle-inhibitor-active-color;
-     border-color: @idle-inhibitor-active-color;
- }
- 
- tooltip {
-     background: #303446;
-     border: 2px solid #c6d0f5;
-     border-radius: 8px;
- }
-
- #custom-media-next.active {
-     color: #81c8be;
- }
-
- #custom-media-prev.active {
-     color: #81c8be;
- }
-
- /* Tray Menu Styling */
- #tray menu {
-     background: #232634;
-     border: 1px solid #414559;
-     border-radius: 6px;
-     padding: 6px;
- }
- 
- #tray menu menuitem {
-     color: #c6d0f5;
-     padding: 4px 12px;
-     transition: all 0.2s ease;
- }
- 
- #tray menu menuitem:hover {
-     background: #8caaee;
-     color: #232634;
-     border-radius: 20px;
- }
- 
- #tray {
-     background-color: transparent;
-     border-color: @foreground;
-     padding: 0 10px;
-     margin: 0 2px;
- }
- 
- #tray>.passive {
-     -gtk-icon-effect: dim;
- }
- 
- #tray>.needs-attention {
-     -gtk-icon-effect: highlight;
-     color: @red;
-     border-color: @red;
- }
- 
-/* Make the base window transparent so rounded corners clip properly */
-window#waybar {
-    background-color: transparent;
-}
-
-/* Apply the background, border, and rounding to the inner box container */
-window#waybar > box {
-    background-color: #303446;
-    border: 2px solid #8caaee; /* Catppuccin Blue border (or #c6d0f5 for Text) */
-    border-radius: 16px;
-    padding: 2px 6px;
-}
- 
- #modules-left > widget:first-child,
- #modules-right > widget:last-child {
-     margin: 0 4px;
- }
+  /* Catppuccin Frappé TTY Colors */
+   @define-color background #303446; /* Base */
+   @define-color background-light #414559; /* Surface0 */
+   @define-color foreground #c6d0f5; /* Text */
+   @define-color black #626880; /* Surface2 */
+   @define-color red #e78284; /* Red */
+   @define-color green #a6d189; /* Green */
+   @define-color yellow #e5c890; /* Yellow */
+   @define-color blue #8caaee; /* Blue */
+   @define-color magenta #f4b8e4; /* Pink */
+   @define-color cyan #99d1db; /* Sky */
+   @define-color white #c6d0f5; /* Text */
+   @define-color orange #ef9f76; /* Peach */
+   
+   /* Module-specific colors */
+   @define-color workspaces-color @foreground;
+   @define-color workspaces-focused-bg @green;
+   @define-color workspaces-focused-fg @cyan;
+   @define-color workspaces-urgent-bg @red;
+   @define-color workspaces-urgent-fg @black;
+   
+   /* Text and border colors for modules */
+   @define-color mode-color @orange;
+   @define-color group-hardware-color #232634;
+   @define-color group-session-color @red;
+   @define-color clock-color @blue;
+   @define-color cpu-color @green;
+   @define-color memory-color @magenta;
+   @define-color temperature-color @yellow;
+   @define-color temperature-critical-color @red;
+   @define-color battery-color @cyan;
+   @define-color battery-charging-color @green;
+   @define-color battery-warning-color @yellow;
+   @define-color battery-critical-color @red;
+   @define-color network-color @blue;
+   @define-color network-disconnected-color @red;
+   @define-color pulseaudio-color @orange;
+   @define-color pulseaudio-muted-color @red;
+   @define-color wireplumber-color @orange;
+   @define-color wireplumber-muted-color @red;
+   @define-color backlight-color @yellow;
+   @define-color disk-color @cyan;
+   @define-color updates-color @orange;
+   @define-color quote-color @green;
+   @define-color idle-inhibitor-color @foreground;
+   @define-color idle-inhibitor-active-color @red;
+   @define-color power-profiles-daemon-color @cyan;
+   @define-color power-profiles-daemon-performance-color @red;
+   @define-color power-profiles-daemon-balanced-color @yellow;
+   @define-color power-profiles-daemon-power-saver-color @green;
+   
+   * {
+       /* Base styling for all modules */
+       border: none;
+       border-radius: 0;
+       font-family: "Noto Sans", "Symbols Nerd Font";
+       font-size: 14px;
+       min-height: 0;
+       font-weight: 500; 
+   }
+   
+   /* Common module styling with uniform borders */
+   #mode,
+   #custom-hardware-wrap,
+   #custom-session-wrap,
+   #session,
+   #custom-session,
+   #clock,
+   #cpu,
+   #memory,
+   #temperature,
+   #battery,
+   #network,
+   #pulseaudio,
+   #wireplumber,
+   #backlight,
+   #disk,
+   #power-profiles-daemon,
+   #idle_inhibitor,
+   #tray {
+       padding: 2px 10px;
+       margin: 2px 4px;
+       border: 2px solid #c6d0f5;
+       border-radius: 12px;
+       background-color: transparent;
+   }
+   
+  #workspaces {
+      background-color: transparent;
+      padding: 0 6px;
+  }
+  
+  #workspaces button {
+      min-width: 22px;
+      min-height: 0;
+      padding: 2px 7px;
+      margin: 0 3px;
+      border: 2px solid #c6d0f5;
+      border-radius: 12px;
+      background-color: transparent;
+      color: #c6d0f5;
+      font-weight: 600;
+  }
+  
+  #workspaces button label {
+      opacity: 1;
+      color: #c6d0f5;
+  }
+  
+  #workspaces button:hover {
+      background-color: alpha(#8caaee, 0.25);
+  }
+  
+  #workspaces button.active,
+  #workspaces button.focused {
+      background-color: #f2d5cf;
+      border-color: #f2d5cf;
+      color: #232634;
+  }
+  
+  #workspaces button.active label,
+  #workspaces button.focused label {
+      color: #232634;
+  }
+  
+  #workspaces button.urgent {
+      background-color: #e78284;
+      border-color: #e78284;
+      color: #232634;
+  }
+  
+   /* Module-specific text styling (borders globally set to #c6d0f5) */
+   #mode {
+       color: @mode-color;
+   }
+   
+   #custom-hardware-wrap {
+       color: #232634;
+       border-radius: 12px;
+       background-color: #85c1dc;
+   }
+  
+   #window {
+       color: #c6d0f5;
+       padding: 2px 10px;
+   }
+   
+   #clock {
+       color: @clock-color;
+   }
+  
+   #cpu {
+       color: @cpu-color;
+   }
+  
+   #memory {
+       color: @memory-color;
+   }
+  
+   #temperature {
+       color: @temperature-color;
+   }
+  
+   #temperature.critical {
+       color: #232634;
+       border-radius: 12px;
+       background-color: #e78284;
+   }
+  
+   #network {
+       color: @network-color;
+   }
+  
+   #network.disconnected {
+       color: @network-disconnected-color;
+   }
+  
+   #disk {
+       color: @disk-color;
+   }
+  
+   #power-profiles-daemon {
+       color: @power-profiles-daemon-color;
+   }
+  
+   #power-profiles-daemon.performance {
+       color: @power-profiles-daemon-performance-color;
+   }
+  
+   #power-profiles-daemon.balanced {
+       color: @power-profiles-daemon-balanced-color;
+   }
+  
+   #power-profiles-daemon.power-saver {
+       color: @power-profiles-daemon-power-saver-color;
+   }
+   
+   #cpu-group {
+       color: #232634;
+       border-radius: 12px;
+       background-color: #f4b8e4;
+       border: 2px solid #c6d0f5;
+   }
+   
+   #custom-gpu {
+       color: #232634;
+       border-radius: 12px;
+       background-color: #8caaee; 
+       border: 2px solid #c6d0f5;
+   }
+   
+   #custom-gpu-temperature {
+       color: #232634;
+       border-radius: 12px;
+       background-color: #ca9ee6;
+       border: 2px solid #c6d0f5;
+   }
+   
+   #battery {
+       color: @battery-color;
+   }
+   
+   #battery.charging,
+   #battery.plugged {
+       color: @battery-charging-color;
+   }
+   
+   #battery.warning:not(.charging) {
+       color: @battery-warning-color;
+   }
+   
+   #battery.critical:not(.charging) {
+       color: @battery-critical-color;
+   }
+   
+   #pulseaudio {
+       color: @pulseaudio-color;
+       border-radius: 12px;
+   }
+   
+   #pulseaudio.muted {
+       color: @pulseaudio-muted-color;
+       border-radius: 12px;
+   }
+  
+   #wireplumber {
+       color: @wireplumber-color;
+       border-radius: 12px;
+   }
+  
+   #wireplumber.muted {
+       color: @wireplumber-muted-color;
+       border-radius: 12px;
+   }
+   
+   #backlight {
+       color: @backlight-color;
+       border-radius: 12px;
+   }
+  
+   decoration {
+       background: transparent;
+       box-shadow: none;
+       border-radius: 12px;
+   }
+   
+   #idle_inhibitor {
+       color: @idle-inhibitor-color;
+   }
+   
+   #idle_inhibitor.activated {
+       color: @idle-inhibitor-active-color;
+   }
+   
+   tooltip {
+       background: #303446;
+       border: 2px solid #c6d0f5;
+       border-radius: 12px;
+   }
+  
+   #custom-media-next.active {
+       color: #81c8be;
+   }
+  
+   #custom-media-prev.active {
+       color: #81c8be;
+   }
+  
+   /* Tray Menu Styling */
+   #tray menu {
+       background: #232634;
+       border: 1px solid #c6d0f5;
+       border-radius: 12px;
+       padding: 6px;
+   }
+   
+   #tray menu menuitem {
+       color: #c6d0f5;
+       padding: 4px 12px;
+       transition: all 0.2s ease;
+   }
+   
+   #tray menu menuitem:hover {
+       background: #8caaee;
+       color: #232634;
+       border-radius: 12px;
+   }
+   
+   #tray {
+       background-color: transparent;
+       border-color: #c6d0f5;
+       padding: 0 10px;
+       margin: 0 2px;
+   }
+   
+   #tray>.passive {
+       -gtk-icon-effect: dim;
+   }
+   
+   #tray>.needs-attention {
+       -gtk-icon-effect: highlight;
+       color: @red;
+   }
+   
+  /* Base window */
+  window#waybar {
+      background-color: transparent;
+  }
+  
+  /* Outer Waybar Container */
+  window#waybar > box {
+      background-color: #303446;
+      border: 2px solid #c6d0f5;
+      border-radius: 12px;
+      padding: 2px 6px;
+  }
+   
+   #modules-left > widget:first-child,
+   #modules-right > widget:last-child {
+       margin: 0 4px;
+   }
 '';
 };
   xdg.configFile."hypr/hyprland.lua" = {
