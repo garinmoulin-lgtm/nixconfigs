@@ -79,14 +79,6 @@ programs.nh = {
 # =========================================================================
 # 1. DISPLAY MANAGER & HYPRLAND COMPOSITOR CONFIGURATION
 # =========================================================================
-security.doas.enable = true;
-security.doas.extraRules = [
-  {
-    users = [ "garinh" ];
-    keepEnv = true;
-    persist = true;
-  }
-];
 
 # Enable the Hyprland Compositor via its dedicated module
 # This configures polkit, xdg portals, and session files seamlessly
@@ -239,9 +231,7 @@ services.avahi = {
   openFirewall = true;
 };
  
-/*security.wrappers.sudo = {
-  source = "${pkgs.doas}/bin/doas";
-};*/
+
 hardware.new-lg4ff.enable = true;
 services.udev.extraRules = ''
   SUBSYSTEM=="input", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"

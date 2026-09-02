@@ -15,25 +15,20 @@
     "layer": "top",
     "position": "top",
     "spacing": 1,
-	"height": 35, // bump this up from whatever it currently is
+	"height": 30, // bump this up from whatever it currently is
 	"margin": 0,
     "modules-left": [
-    	"hyprland/workspaces",
-    	"custom/bar1",
         "group/hardware",
         "custom/bar2",
-        "clock",
-        "tray"
+        "hyprland/workspaces"
     ],
     "modules-center": [
     	"group/media-player",
-        "custom/media-time"
+        "custom/media-time",
+        "tray"
     ],
     "modules-right": [
-		/*"custom/bar3",*/
-    	"custom/settings",
-    	"custom/terminal",
-		"custom/bar4",
+    	"clock",
         "wireplumber#sink",
         "custom/bar5",
         "network",
@@ -41,14 +36,10 @@
         "group/session"
     ],
     "hyprland/workspaces": {
-        "format": "",
-        "on-click": "notify-send test" /*hyprctl dispatch \"hl.dsp.focus({workspace = {name}})\"*/
+        "format": "{id}",
+        "on-click": "activate"
     },
     "custom/bar3": {
-    	"format": "<span color='#E78284'> │ </span>",
-    	"tooltip": false
-    },
-    "custom/bar4": {
     	"format": "<span color='#E78284'> │ </span>",
     	"tooltip": false
     },
@@ -61,10 +52,6 @@
     	"tooltip": false
     },
     "custom/bar7": {
-    	"format": "<span color='#E78284'> │ </span>",
-    	"tooltip": false
-    },
-    "custom/bar1": {
     	"format": "<span color='#E78284'> │ </span>",
     	"tooltip": false
     },
@@ -225,12 +212,6 @@
         "tooltip-format": "{ifname}: {ipaddr}",
         "on-click-right": "kitty -e nmtui"
     },
-    "custom/settings": {
-        "format": "<span color='#EEBEBE'>   󰒓   </span>",
-        "on-click": "kitty -e doas fresh /etc/nixos/configuration.nix",
-        "tooltip": true,
-        "tooltip-format": "Settings"
-    },
     "group/media-player": {
         "orientation": "horizontal",
         "modules": [
@@ -270,12 +251,6 @@
 	    "on-click": "playerctl next",
 	    "tooltip": false
 	},
-    "custom/terminal": {
-    	"format": "<span color='#EEBEBE'>   󱌣   </span>",
-    	"on-click": "kitty -e doas fresh /etc/nixos/home.nix",
-    	"tooltip": true,
-		"tooltip-format": "Customize Home Manager"
-    },
     "wireplumber#sink": {
         "format": "{icon} <span color=\"#C6D0F5\">{volume}%</span>",
         "format-muted": "<span color=\"#E78284\">󰝟</span>",
@@ -370,7 +345,7 @@
      /* Base styling for all modules */
      border: none;
      border-radius: 0;
-     font-family: "JetBrainsMono", "Symbols Nerd Font";
+     font-family: "Noto Sans", "Symbols Nerd Font";
      font-size: 14px;
      min-height: 0;
      font-weight: 500; 
@@ -401,39 +376,48 @@
  
 #workspaces {
     background-color: transparent;
-    padding: 0 8px;
+    padding: 0 6px;
 }
 
 #workspaces button {
-    padding: 0;
-    margin: 6 6px;
-    min-width: 15px;
-    min-height: 15px;
-    border-radius: 100%;
+    min-width: 22px;
+    min-height: 0;
+    padding: 2px 7px;
+    margin: 0 3px;
+    border: 2px solid #c6d0f5;
+    border-radius: 12px;
     background-color: transparent;
-    border: 2px solid @workspaces-color; /* or swap for a specific rgba */
-    color: transparent; /* hides the workspace number/name text */
-    transition: all 0.2s ease-in-out;
+    color: #c6d0f5;
+    font-weight: 600;
 }
 
 #workspaces button label {
-    opacity: 0; /* fully hide text so only the circle shows */
+    opacity: 1;
+    color: #c6d0f5;
 }
 
 #workspaces button:hover {
-    background-color: alpha(@workspaces-color, 0.3);
+    background-color: alpha(#8caaee, 0.25);
 }
 
 #workspaces button.active,
 #workspaces button.focused {
-    background-color: #eebebe; /* your existing Flamingo accent */
-    border-color: #eebebe;
+    background-color: #f2d5cf;
+    border-color: #f2d5cf;
+    color: #232634;
 }
- 
- #workspaces button.urgent {
-     background-color: @workspaces-urgent-bg;
-     color: @workspaces-urgent-fg;
- }
+
+#workspaces button.active label,
+#workspaces button.focused label {
+    color: #232634;
+}
+
+#workspaces button.urgent {
+    background-color: #e78284;
+    border-color: #e78284;
+    color: #232634;
+}
+
  
  
  /* Module-specific styling */
@@ -564,7 +548,6 @@
      background: #303446;          /* Change popup background color */
      border: 2px solid #c6d0f5;    /* Give it a clean border */
      border-radius: 8px;           /* Round the corners */
-     font-family: "Iosevka Mono"; /* Must be monospaced for layout alignment */
  }
  #custom-media-next.active {
      color: #81c8be;
@@ -2019,7 +2002,6 @@ programs.bash = {
     viconfig = "sudo fresh /etc/nixos/configuration.nix";
     rmold = "nh clean all";
     rmcache = "sudo nix-collect-garbage";
-    sudo = "doas";
     home-update = "home-manager switch";
   };
   bashrcExtra = ''
