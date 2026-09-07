@@ -1972,6 +1972,48 @@ xdg.configFile."fastfetch/config.jsonc" = {
 }
 '';
 };
+  xdg.configFile."kitty/kitty.conf" = {
+  force = true;
+  text = ''
+# shell_integration enabled no-rc
+# mouse_map left click ungrabbed mouse_handle_click selection prompt
+# sync_to_monitor no
+# input_delay 0
+# repaint_delay 2
+# linux_display_server wayland
+#basic init stuff
+#shell /usr/bin/fish
+scrollback_lines 10000
+background_opacity 0.7
+cursor_shape beam
+shell_integration no-cursor
+
+#performance optimizations
+cursor_trail 1
+repaint_delay 5
+input_delay 1
+sync_to_monitor no
+
+#QoL features
+confirm_os_window_close 0
+cursor_trail_start_threshold 0
+# background #11111b
+
+# BEGIN_KITTY_FONTS
+font_family      family="JetBrainsMono Nerd Font Mono"
+bold_font        auto
+italic_font      auto
+bold_italic_font auto
+# END_KITTY_FONTS
+
+
+
+# BEGIN_KITTY_THEME
+# Catppuccin-Frappe
+include current-theme.conf
+# END_KITTY_THEME
+'';
+};
 gtk = {
   enable = true;
 
