@@ -33,7 +33,7 @@
             imports = [ inputs.catppuccin.homeModules.catppuccin ./home.nix ];
             catppuccin.enable = true;
             catppuccin.autoEnable = true;
-            #home.stateVersion = "24.11";
+            home.stateVersion = "26.05";
           };
         }
       ];

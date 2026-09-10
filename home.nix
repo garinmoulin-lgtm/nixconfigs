@@ -4,7 +4,6 @@
   home.username = "garinh";
   home.homeDirectory = "/home/garinh";
 
-  home.stateVersion = "24.05";
 
   programs.home-manager.enable = true;
 
