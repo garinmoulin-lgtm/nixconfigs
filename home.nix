@@ -347,7 +347,6 @@
    * {
        /* Base styling for all modules */
        border: none;
-       border-radius: 0;
        font-family: "Noto Sans", "Symbols Nerd Font";
        font-size: 14px;
        min-height: 0;
@@ -376,7 +375,6 @@
        padding: 2px 10px;
        margin: 2px 4px;
        border: 2px solid #c6d0f5;
-       border-radius: 12px;
        background-color: transparent;
    }
    
@@ -387,11 +385,11 @@
   
   #workspaces button {
       min-width: 22px;
+      border-radius: 0;
       min-height: 0;
       padding: 2px 7px;
       margin: 0 3px;
       border: 2px solid #c6d0f5;
-      border-radius: 12px;
       background-color: transparent;
       color: #c6d0f5;
       font-weight: 600;
@@ -431,7 +429,6 @@
    
    #custom-hardware-wrap {
        color: #232634;
-       border-radius: 12px;
        background-color: #85c1dc;
    }
   
@@ -458,7 +455,6 @@
   
    #temperature.critical {
        color: #232634;
-       border-radius: 12px;
        background-color: #e78284;
    }
   
@@ -492,21 +488,18 @@
    
    #cpu-group {
        color: #232634;
-       border-radius: 12px;
        background-color: #f4b8e4;
        border: 2px solid #c6d0f5;
    }
    
    #custom-gpu {
        color: #232634;
-       border-radius: 12px;
        background-color: #8caaee; 
        border: 2px solid #c6d0f5;
    }
    
    #custom-gpu-temperature {
        color: #232634;
-       border-radius: 12px;
        background-color: #ca9ee6;
        border: 2px solid #c6d0f5;
    }
@@ -530,33 +523,27 @@
    
    #pulseaudio {
        color: @pulseaudio-color;
-       border-radius: 12px;
    }
    
    #pulseaudio.muted {
        color: @pulseaudio-muted-color;
-       border-radius: 12px;
    }
   
    #wireplumber {
        color: @wireplumber-color;
-       border-radius: 12px;
    }
   
    #wireplumber.muted {
        color: @wireplumber-muted-color;
-       border-radius: 12px;
    }
    
    #backlight {
        color: @backlight-color;
-       border-radius: 12px;
    }
   
    decoration {
        background: transparent;
        box-shadow: none;
-       border-radius: 12px;
    }
    
    #idle_inhibitor {
@@ -570,7 +557,6 @@
    tooltip {
        background: #303446;
        border: 2px solid #c6d0f5;
-       border-radius: 12px;
    }
   
    #custom-media-next.active {
@@ -585,7 +571,6 @@
    #tray menu {
        background: #232634;
        border: 1px solid #c6d0f5;
-       border-radius: 12px;
        padding: 6px;
    }
    
@@ -598,7 +583,6 @@
    #tray menu menuitem:hover {
        background: #8caaee;
        color: #232634;
-       border-radius: 12px;
    }
    
    #tray {
@@ -626,7 +610,6 @@
   window#waybar > box {
       background-color: #303446;
       border: 2px solid #c6d0f5;
-      border-radius: 12px;
       padding: 2px 6px;
   }
    
@@ -647,7 +630,7 @@
 ---@module 'hl'
 
 hl.monitor({
-    output   = "DP-1", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
+    output   = "DP-3", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
     mode     = "1920x1080@240",
     position = "0x0",
     scale    = 1,
@@ -691,7 +674,6 @@ hl.config({
 -- that overwrote each other; only the last one was ever actually in effect)
 hl.config({
     decoration = {
-        rounding = 4,
         blur = {
             enabled = true,
             size = 8,
@@ -964,7 +946,6 @@ window {
     margin:                      0px;
     padding:                     0px;
     border:                      4px solid;
-    border-radius:               6px;
     border-color:                @background-alt;
     cursor:                      "default";
     background-color:            @background;
@@ -986,7 +967,6 @@ inputbar {
     spacing:                     10px;
     margin:                      0px;
     padding:                     10px;
-    border-radius:               6px;
     background-color:            @background-alt;
     text-color:                  @foreground;
     children:                    [ "textbox-prompt-colon", "entry" ];
@@ -1036,7 +1016,6 @@ listview {
 scrollbar {
     handle-width:                5px ;
     handle-color:                @selected;
-    border-radius:               6px;
     background-color:            @background-alt;
 }
 
@@ -1046,7 +1025,6 @@ element {
     spacing:                     10px;
     margin:                      0px;
     padding:                     6px;
-    border-radius:               6px;
     background-color:            transparent;
     text-color:                  @foreground;
     cursor:                      pointer;
@@ -1098,7 +1076,6 @@ mode-switcher{
 }
 button {
     padding:                     10px;
-    border-radius:               6px;
     background-color:            @background-alt;
     text-color:                  inherit;
     cursor:                      pointer;
@@ -1113,7 +1090,6 @@ message {
     enabled:                     true;
     margin:                      0px;
     padding:                     10px;
-    border-radius:               6px;
     background-color:            @background-alt;
     text-color:                  @foreground;
 }
@@ -1306,7 +1282,6 @@ xdg.configFile."swaync/style.css" = {
   --notification-app-icon-size: calc(var(--notification-icon-size) / 3);
   --notification-group-icon-size: 32px;
   --border: 1px solid var(--noti-border-color);
-  --border-radius: 12px;
   --notification-shadow: 0 0 0 1px rgba(35, 38, 52, 0.3),
     0 1px 3px 1px rgba(35, 38, 52, 0.7), 0 2px 6px 2px rgba(35, 38, 52, 0.3);
   --font-size-body: 15px;
@@ -1342,7 +1317,6 @@ notificationwindow, blankwindow {
   color: var(--text-color);
   text-shadow: none;
   padding: 0;
-  border-radius: 100%;
   margin-top: 8px;
   margin-right: 8px;
   box-shadow: none;
@@ -1373,7 +1347,6 @@ notificationwindow, blankwindow {
 
 .notification-row .notification-background .notification {
   /* The actual notification */
-  border-radius: var(--border-radius);
   border: var(--border);
   padding: 0;
   transition: var(--hover-tranistion);
@@ -1401,7 +1374,6 @@ notificationwindow, blankwindow {
   border: none;
   color: var(--text-color);
   transition: var(--hover-tranistion);
-  border-radius: var(--border-radius);
 }
 
 .notification-row .notification-background .notification .notification-default-action:hover {
@@ -1411,13 +1383,10 @@ notificationwindow, blankwindow {
 
 .notification-row .notification-background .notification .notification-default-action:not(:only-child) {
   /* When alternative actions are visible */
-  border-bottom-left-radius: 0px;
-  border-bottom-right-radius: 0px;
 }
 
 .notification-row .notification-background .notification .notification-default-action .notification-content {
   background: transparent;
-  border-radius: var(--border-radius);
   padding: 0;
 }
 
@@ -1425,7 +1394,6 @@ notificationwindow, blankwindow {
   /* Notification Primary Image */
   -gtk-icon-filter: none;
   -gtk-icon-size: var(--notification-icon-size);
-  border-radius: 100px;
   /* Size in px */
   margin: 4px;
 }
@@ -1493,14 +1461,12 @@ notificationwindow, blankwindow {
   color: var(--text-color);
   caret-color: var(--text-color);
   border: var(--border);
-  border-radius: var(--border-radius);
 }
 
 .notification-row .notification-background .notification .notification-default-action .notification-content .inline-reply .inline-reply-button {
   margin-left: 4px;
   background: rgba(var(--noti-bg), var(--noti-bg-alpha));
   border: var(--border);
-  border-radius: var(--border-radius);
   color: var(--text-color);
 }
 
@@ -1517,8 +1483,6 @@ notificationwindow, blankwindow {
 
 .notification-row .notification-background .notification .notification-alt-actions {
   background: none;
-  border-bottom-left-radius: var(--border-radius);
-  border-bottom-right-radius: var(--border-radius);
   padding: 4px;
 }
 
@@ -1529,7 +1493,6 @@ notificationwindow, blankwindow {
 }
 
 .notification-row .notification-background .notification .notification-action > button {
-  border-radius: var(--border-radius);
   color: var(--text-color);
 }
 
@@ -1611,7 +1574,6 @@ notificationwindow, blankwindow {
   /* The Control Center which contains the old notifications + widgets */
   background: var(--cc-bg);
   color: var(--text-color);
-  border-radius: var(--border-radius);
 }
 
 .control-center .control-center-list-placeholder {
@@ -1655,7 +1617,6 @@ notificationwindow, blankwindow {
 .widget {
   margin: 8px;
   padding: 8px;
-  border-radius: var(--border-radius);
 }
 
 /* Title widget */
@@ -1666,7 +1627,6 @@ notificationwindow, blankwindow {
 
 .widget-title > button {
   margin-left: 8px;
-  border-radius: var(--border-radius);
 }
 
 /* DND widget */
@@ -1677,12 +1637,7 @@ notificationwindow, blankwindow {
 }
 
 .widget-dnd switch {
-  border-radius: var(--border-radius);
   margin-left: 8px;
-}
-
-.widget-dnd switch slider {
-  border-radius: var(--border-radius);
 }
 
 /* Label widget */
@@ -1705,7 +1660,6 @@ notificationwindow, blankwindow {
 
 .widget-mpris .widget-mpris-player {
   margin: 16px 20px;
-  border-radius: var(--border-radius);
   box-shadow: var(--mpris-album-art-shadow);
 }
 
@@ -1724,7 +1678,6 @@ notificationwindow, blankwindow {
 }
 
 .widget-mpris .widget-mpris-player .mpris-overlay .widget-mpris-album-art {
-  border-radius: var(--border-radius);
   box-shadow: var(--mpris-album-art-shadow);
   -gtk-icon-size: var(--mpris-album-art-icon-size);
 }
@@ -1755,10 +1708,6 @@ notificationwindow, blankwindow {
 }
 
 /* Buttons widget */
-.widget-buttons-grid flowboxchild > button {
-  border-radius: var(--border-radius);
-}
-
 .widget-buttons-grid flowboxchild > button.toggle:checked {
   /* style given to the active toggle button */
   background-color: rgb(140, 170, 238);
@@ -1768,21 +1717,6 @@ notificationwindow, blankwindow {
 /* Menubar widget */
 .widget-menubar {
   /* The revealer buttons */
-  /* .AnyName { Name defined in config after #
-    background-color: rgba(var(--noti-bg), 1.0);
-    padding: 8px;
-    margin: 8px;
-    border-radius: 12px;
-  }
-
-  .AnyName>button {
-    background: transparent;
-    border: none;
-  }
-
-  .AnyName>button:hover {
-    background-color: var(--noti-bg-hover);
-  } */
 }
 
 .widget-menubar > .menu-button-bar {
@@ -1800,7 +1734,6 @@ notificationwindow, blankwindow {
 }
 
 .widget-menubar > .menu-button-bar > .widget-menubar-container button {
-  border-radius: var(--border-radius);
   margin: 0 4px;
 }
 
@@ -1809,7 +1742,6 @@ notificationwindow, blankwindow {
 }
 
 .widget-menubar > revealer * button {
-  border-radius: var(--border-radius);
   margin: 8px;
   margin-top: 0;
 }
@@ -1832,7 +1764,6 @@ notificationwindow, blankwindow {
   background-color: rgb(65, 69, 89);
   margin: 8px;
   margin-bottom: 0;
-  border-radius: var(--border-radius);
 }
 
 /* Slider widget */
@@ -1849,7 +1780,6 @@ notificationwindow, blankwindow {
 
 .widget-inhibitors > button {
   margin-left: 8px;
-  border-radius: var(--border-radius);
 }
 '';
 };
