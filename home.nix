@@ -631,7 +631,7 @@
 ---@module 'hl'
 
 hl.monitor({
-    output   = "DP-3", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
+    output   = "DP-1", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
     mode     = "1920x1080@240",
     position = "0x0",
     scale    = 1,
@@ -1947,7 +1947,7 @@ include current-theme.conf
 };
 gtk = {
   enable = true;
-
+  gtk4.theme = null;
   theme = {
     name = "catppuccin-frappe-blue-standard"; # whatever GTK theme you have installed
     package = pkgs.catppuccin-gtk.override {
@@ -1957,10 +1957,6 @@ gtk = {
     };
   };
 
-  iconTheme = {
-    name = "Papirus-Dark";
-    package = pkgs.papirus-icon-theme;
-  };
 
 
   font = {
@@ -1976,13 +1972,7 @@ gtk = {
     gtk-application-prefer-dark-theme = true;
   };
 };
-home.pointerCursor = {
-  name = "catppuccin-mocha-mauve-cursors";
-  package = pkgs.catppuccin-cursors.mochaMauve;
-  size = 24;
-  gtk.enable = true;
-  x11.enable = true;
-};
+
 programs.bash = {
   enable = true;
   shellAliases = {

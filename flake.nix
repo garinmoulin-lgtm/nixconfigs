@@ -12,6 +12,7 @@
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
+        
     };
 
   };
@@ -30,6 +31,8 @@
           home-manager.useUserPackages = true;
           home-manager.users.garinh = {
             imports = [ inputs.catppuccin.homeModules.catppuccin ./home.nix ];
+            catppuccin.enable = true;
+            catppuccin.autoEnable = true;
             #home.stateVersion = "24.11";
           };
         }
