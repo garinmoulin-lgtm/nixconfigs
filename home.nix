@@ -982,7 +982,7 @@ textbox-prompt-colon {
     enabled:                     true;
     padding:                     0px;
     expand:                      false;
-    str:                         "";
+    str:                         " ";
     background-color:            inherit;
     text-color:                  inherit;
 }
@@ -1122,10 +1122,10 @@ xdg.configFile."rofi/catppuccin/shared/colors.rasi" = {
 * {
     background:     #303446;
     background-alt: #414559;
-    foreground:     #f2d5cf;
-    selected:       #f2d5cf;
-    active:         #f2d5cf;
-    urgent:         #f2d5cf;
+    foreground:     #c6d0f5;
+    selected:       #babbf1; 
+    active:         #a6d189; 
+    urgent:         #e78284; 
 }
 '';
 };
@@ -1137,7 +1137,7 @@ xdg.configFile."rofi/catppuccin/shared/fonts.rasi" = {
 /* Text Font */
 
 * {
-    font: "JetBrainsMono Nerd Font Propo 11";
+    font: "JetBrainsMono Nerd Font 11";
 }
 '';
 };
