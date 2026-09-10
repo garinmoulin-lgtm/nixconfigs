@@ -1957,7 +1957,6 @@ gtk = {
   };
 
 
-
   font = {
     name = "Noto Sans";
     size = 11;
@@ -1971,7 +1970,17 @@ gtk = {
     gtk-application-prefer-dark-theme = true;
   };
 };
+home.pointerCursor = {
+  gtk.enable = true;
+  x11.enable = true;
+  name = "catppuccin-frappe-mauve-cursors";
+  package = pkgs.catppuccin-cursors.frappeMauve;
+};
 
+gtk.cursorTheme = {
+  name = "catppuccin-frappe-mauve-cursors";
+  package = pkgs.catppuccin-cursors.frappeMauve;
+};
 programs.bash = {
   enable = true;
   shellAliases = {
