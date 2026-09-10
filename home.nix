@@ -43,23 +43,23 @@
         "on-click": "activate"
     },
   /*  "custom/bar3": {
-    	"format": "<span color='#E78284'> │ </span>",
+    	"format": "<span color='#f2d5cf'> │ </span>",
     	"tooltip": false
     },
     "custom/bar5": {
-    	"format": "<span color='#E78284'> │ </span>",
+    	"format": "<span color='#f2d5cf'> │ </span>",
     	"tooltip": false
     },
     "custom/bar6": {
-    	"format": "<span color='#E78284'> │ </span>",
+    	"format": "<span color='#f2d5cf'> │ </span>",
     	"tooltip": false
     },
     "custom/bar7": {
-    	"format": "<span color='#E78284'> │ </span>",
+    	"format": "<span color='#f2d5cf'> │ </span>",
     	"tooltip": false
     },
     "custom/bar2": {
-    	"format": "<span color='#E78284'> │ </span>",
+    	"format": "<span color='#f2d5cf'> │ </span>",
     	"tooltip": false
     },*/
     "hyprland/window": {
@@ -91,44 +91,44 @@
         ]
     },
     "custom/lock": {
-        "format": "<span color='#81C8BE'>   󰌾   </span>",
+        "format": "<span color='#f2d5cf'> 󰌾  </span>",
         "on-click": "env TZ='America/Chicago' hyprlock",
         "tooltip": true,
         "tooltip-format": "Lock screen"
     },
     "custom/reboot": {
-        "format": "<span color='#CA9EE6'>   󰜉   </span>",
+        "format": "<span color='#f2d5cf'>  󰜉  </span>",
         "on-click": "systemctl reboot",
         "tooltip": true,
         "tooltip-format": "Reboot"
     },
     "custom/sleep": {
-        "format": "<span color='#E5C890'>   󰤄   </span>",
+        "format": "<span color='#f2d5cf'>  󰤄  </span>",
         "on-click": "systemctl suspend",
         "tooltip": true,
         "tooltip-format": "Sleep"
     },
     "custom/power": {
-        "format": "<span color='#E78284'>   󰐥   </span>",
+        "format": "<span color='#f2d5cf'>  󰐥  </span>",
         "on-click": "systemctl poweroff",
         "tooltip": true,
         "tooltip-format": "Power Off"
     },
     "custom/logout": {
-        "format": "<span color='#A6D189'>   󰈆   </span>",
+        "format": "<span color='#f2d5cf'>  󰈆 </span>",
         "on-click": "pkill Hyprland",
         "tooltip": true,
         "tooltip-format": "Log Out"
     },
     /*"custom/wallpaper": {
-      "format": "<span color='#81C8BE'>  󰸉  </span>",
+      "format": "<span color='#f2d5cf'>  󰸉  </span>",
       "on-click": "~/.config/eww/scripts/toggle-picker.sh",
       "tooltip": true,
       "tooltip-format": "Change wallpaper"
     },*/
     "clock": {
-        "format": "<span color='#CA9EE6'> 󰥔 </span><span color='#c6d0f5'>{:%I:%M %p 󰃮 %B %d, %Y}</span>",
-        "format-alt": "<span color='#CA9EE6'> 󰥔 </span><span color='#c6d0f5'>{:%I:%M %p}</span>",
+        "format": "<span color='#f2d5cf'> 󰥔 </span><span color='#c6d0f5'>{:%I:%M %p 󰃮 %B %d, %Y}</span>",
+        "format-alt": "<span color='#f2d5cf'> 󰥔 </span><span color='#c6d0f5'>{:%I:%M %p}</span>",
         "tooltip-format": "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>",
         "timezone": "America/Chicago",
         "calendar": {
@@ -138,11 +138,11 @@
             "on-scroll": 1,
             "on-click-right": "mode",
             "format": {
-                "months": "<span color='#e5c890'><b>{}</b></span>",
-                "days": "<span color='#e78284'>{}</span>",
-                "weeks": "<span color='#a6d189'><b>W{}</b></span>",
-                "weekdays": "<span color='#81c8be'><b>{}</b></span>",
-                "today": "<span color='#ef9f76'><b><u>{}</u></b></span>"
+                "months": "<span color='#c6d0f5'><b>{}</b></span>",
+                "days": "<span color='#c6d0f5'>{}</span>",
+                "weeks": "<span color='#c6d0f5'><b>W{}</b></span>",
+                "weekdays": "<span color='#c6d0f5'><b>{}</b></span>",
+                "today": "<span color='#c6d0f5'><b><u>{}</u></b></span>"
             }
         },
         "actions": {
@@ -154,12 +154,12 @@
         }
     },
     "cpu": {
-        "format": "<span color=\"#E78284\">󰘚</span> <span color=\"#C6D0F5\">{usage}%</span>",
+        "format": "<span color=\"#f2d5cf\">󰘚</span> <span color=\"#c6d0f5\">{usage}%</span>",
         "on-click": "kitty -e btop",
         "interval": 1,
     },
 	"memory": {
-	    "format": "<span color=\"#A6D189\">󰍛</span> <span color=\"#C6D0F5\">{used:0.1f}GiB</span>",
+	    "format": "<span color=\"#f2d5cf\">󰍛</span> <span color=\"#c6d0f5\">{used:0.1f}GiB</span>",
 	    "interval": 1,
 	    "on-click": "kitty -e btop"
 	},
@@ -202,15 +202,15 @@
     },*/
     "custom/media-time": {
         "exec": "~/.config/waybar/scripts/media-time.sh",
-        "format": "<span color=\"#C6D0F5\">  {} </span>",
+        "format": "<span color=\"#c6d0f5\">  {} </span>",
         "interval": 1,
         "tooltip": false
     },
     "network": {
-        "format-wifi": "<span color=\"#99D1DB\">󰖩</span> <span color=\"#C6D0F5\">{essid} ({signalStrength}%) </span>",
-        "format-ethernet": "<span color=\"#8CAAEE\">󰈀</span> <span color=\"#C6D0F5\">{ifname}</span>",
-        "format-linked": "<span color=\"#EA999C\">󰈀</span> <span color=\"#C6D0F5\">{ifname} (No IP)</span>",
-        "format-disconnected": "<span color=\"#EA999C\">󰖪</span> <span color=\"#C6D0F5\">Disconnected</span>",
+        "format-wifi": "<span color=\"#f2d5cf\">󰖩</span> <span color=\"#c6d0f5\">{essid} ({signalStrength}%) </span>",
+        "format-ethernet": "<span color=\"#f2d5cf\">󰈀</span> <span color=\"#c6d0f5\">{ifname}</span>",
+        "format-linked": "<span color=\"#f2d5cf\">󰈀</span> <span color=\"#c6d0f5\">{ifname} (No IP)</span>",
+        "format-disconnected": "<span color=\"#e78284\">󰖪</span> <span color=\"#c6d0f5\">Disconnected</span>",
         "format-alt": "{ifname}: {ipaddr}/{cidr}",
         "tooltip-format": "{ifname}: {ipaddr}",
         "on-click-right": "kitty -e nmtui"
@@ -229,9 +229,9 @@
 	    "max-length": 25,
 	    "restart-interval": 1,
 	    "format-icons": {
-	        "Playing": "<span color=\"#A6D189\" font_size=\"large\"> 󰏦 </span>",
-	        "Paused": "<span color=\"#E5C890\" font_size=\"large\"> 󰐍 </span>",
-	        "Stopped": "<span color=\"#E78284\" font_size=\"large\"> 󰝛 </span>"
+	        "Playing": "<span color=\"#a6d189\" font_size=\"large\"> 󰏦 </span>",
+	        "Paused": "<span color=\"#e5c890\" font_size=\"large\"> 󰐍 </span>",
+	        "Stopped": "<span color=\"#e78284\" font_size=\"large\"> 󰝛 </span>"
 	    },
 	    "exec": "playerctl metadata --follow --format '{\"text\": \"{{markup_escape(title)}}\", \"tooltip\": \"{{playerName}} : {{markup_escape(title)}}\", \"alt\": \"{{status}}\", \"class\": \"{{status}}\"}' 2>/dev/null || echo '{\"text\": \"Nothing playing\", \"alt\": \"Stopped\", \"class\": \"Stopped\", \"tooltip\": \"No media\"}'",
 	    "return-type": "json",
@@ -255,12 +255,12 @@
 	    "tooltip": false
 	},
     "wireplumber#sink": {
-        "format": "{icon} <span color=\"#C6D0F5\">{volume}%</span>",
-        "format-muted": "<span color=\"#E78284\">󰝟</span>",
+        "format": "{icon} <span color=\"#c6d0f5\">{volume}%</span>",
+        "format-muted": "<span color=\"#f2d5cf\">󰝟</span>",
         "format-icons": [
-            "<span color=\"#EF9F76\">󰕿</span>",
-            "<span color=\"#EF9F76\">󰖀</span>",
-            "<span color=\"#EF9F76\">󰕾</span>"
+            "<span color=\"#f2d5cf\">󰕿</span>",
+            "<span color=\"#f2d5cf\">󰖀</span>",
+            "<span color=\"#f2d5cf\">󰕾</span>"
         ],
         "on-click": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
         "on-scroll-down": "wpctl set-volume @DEFAULT_SINK@ 1%-",
@@ -268,7 +268,7 @@
     },
     "disk": {
         "interval": 30,
-        "format": "<span color=\"#81C8BE\">󰋊</span> <span color=\"#C6D0F5\">{percentage_used}%</span>",
+        "format": "<span color=\"#f2d5cf\">󰋊</span> <span color=\"#c6d0f5\">{percentage_used}%</span>",
         "path": "/"
     },
     "tray": {
@@ -280,10 +280,10 @@
         "tooltip-format": "Power profile: {profile}\nDriver: {driver}",
         "tooltip": true,
         "format-icons": {
-            "default": "<span color=\"#EA999C\">󰾞</span>",
-            "performance": "<span color=\"#E78284\">󱐋</span>",
-            "balanced": "<span color=\"#EF9F76\">󰗑</span>",
-            "power-saver": "<span color=\"#81C8BE\">󰌪</span>"
+            "default": "<span color=\"#f2d5cf\">󰾞</span>",
+            "performance": "<span color=\"#f2d5cf\">󱐋</span>",
+            "balanced": "<span color=\"#f2d5cf\">󰗑</span>",
+            "power-saver": "<span color=\"#f2d5cf\">󰌪</span>"
         }
     }
 }
@@ -296,16 +296,16 @@
   /* Catppuccin Frappé TTY Colors */
    @define-color background #303446; /* Base */
    @define-color background-light #414559; /* Surface0 */
-   @define-color foreground #c6d0f5; /* Text */
+   @define-color foreground #f2d5cf; /* Text */
    @define-color black #626880; /* Surface2 */
-   @define-color red #e78284; /* Red */
-   @define-color green #a6d189; /* Green */
-   @define-color yellow #e5c890; /* Yellow */
-   @define-color blue #8caaee; /* Blue */
-   @define-color magenta #f4b8e4; /* Pink */
-   @define-color cyan #99d1db; /* Sky */
-   @define-color white #c6d0f5; /* Text */
-   @define-color orange #ef9f76; /* Peach */
+   @define-color red #f2d5cf; /* Red */
+   @define-color green #f2d5cf; /* Green */
+   @define-color yellow #f2d5cf; /* Yellow */
+   @define-color blue #f2d5cf; /* Blue */
+   @define-color magenta #f2d5cf; /* Pink */
+   @define-color cyan #f2d5cf; /* Sky */
+   @define-color white #f2d5cf; /* Text */
+   @define-color orange #f2d5cf; /* Peach */
    
    /* Module-specific colors */
    @define-color workspaces-color @foreground;
@@ -316,7 +316,7 @@
    
    /* Text and border colors for modules */
    @define-color mode-color @orange;
-   @define-color group-hardware-color #232634;
+   @define-color group-hardware-color #f2d5cf;
    @define-color group-session-color @red;
    @define-color clock-color @blue;
    @define-color cpu-color @green;
@@ -347,7 +347,7 @@
    * {
        /* Base styling for all modules */
        border: none;
-       font-family: "Noto Sans", "Symbols Nerd Font";
+       font-family: "JetBrainsMono", "Symbols Nerd Font";
        font-size: 14px;
        min-height: 0;
        font-weight: 500; 
@@ -374,7 +374,7 @@
    #tray {
        padding: 2px 10px;
        margin: 2px 4px;
-       border: 2px solid #c6d0f5;
+       border: 2px solid #f2d5cf;
        background-color: transparent;
    }
    
@@ -389,9 +389,9 @@
       min-height: 0;
       padding: 2px 7px;
       margin: 0 3px;
-      border: 2px solid #c6d0f5;
+      border: 2px solid #f2d5cf;
       background-color: transparent;
-      color: #c6d0f5;
+      color: #f2d5cf;
       font-weight: 600;
   }
   
@@ -401,7 +401,7 @@
   }
   
   #workspaces button:hover {
-      background-color: alpha(#8caaee, 0.25);
+      background-color: alpha(#f2d5cf, 0.25);
   }
   
   #workspaces button.active,
@@ -417,23 +417,23 @@
   }
   
   #workspaces button.urgent {
-      background-color: #e78284;
-      border-color: #e78284;
+      background-color: #f2d5cf;
+      border-color: #f2d5cf;
       color: #232634;
   }
   
-   /* Module-specific text styling (borders globally set to #c6d0f5) */
+   /* Module-specific text styling (borders globally set to #f2d5cf) */
    #mode {
        color: @mode-color;
    }
    
    #custom-hardware-wrap {
        color: #232634;
-       background-color: #85c1dc;
+       background-color: #f2d5cf;
    }
   
    #window {
-       color: #c6d0f5;
+       color: #f2d5cf;
        padding: 2px 10px;
    }
    
@@ -455,7 +455,7 @@
   
    #temperature.critical {
        color: #232634;
-       background-color: #e78284;
+       background-color: #f2d5cf;
    }
   
    #network {
@@ -488,20 +488,20 @@
    
    #cpu-group {
        color: #232634;
-       background-color: #f4b8e4;
-       border: 2px solid #c6d0f5;
+       background-color: #f2d5cf;
+       border: 2px solid #f2d5cf;
    }
    
    #custom-gpu {
        color: #232634;
-       background-color: #8caaee; 
-       border: 2px solid #c6d0f5;
+       background-color: #f2d5cf; 
+       border: 2px solid #f2d5cf;
    }
    
    #custom-gpu-temperature {
        color: #232634;
-       background-color: #ca9ee6;
-       border: 2px solid #c6d0f5;
+       background-color: #f2d5cf;
+       border: 2px solid #f2d5cf;
    }
    
    #battery {
@@ -556,38 +556,39 @@
    
    tooltip {
        background: #303446;
-       border: 2px solid #c6d0f5;
+       border: 2px solid #f2d5cf;
+       border-radius: 0;
    }
   
    #custom-media-next.active {
-       color: #81c8be;
+       color: #f2d5cf;
    }
   
    #custom-media-prev.active {
-       color: #81c8be;
+       color: #f2d5cf;
    }
   
    /* Tray Menu Styling */
    #tray menu {
        background: #232634;
-       border: 1px solid #c6d0f5;
+       border: 1px solid #f2d5cf;
        padding: 6px;
    }
    
    #tray menu menuitem {
-       color: #c6d0f5;
+       color: #f2d5cf;
        padding: 4px 12px;
        transition: all 0.2s ease;
    }
    
    #tray menu menuitem:hover {
-       background: #8caaee;
+       background: #f2d5cf;
        color: #232634;
    }
    
    #tray {
        background-color: transparent;
-       border-color: #c6d0f5;
+       border-color: #f2d5cf;
        padding: 0 10px;
        margin: 0 2px;
    }
@@ -609,7 +610,7 @@
   /* Outer Waybar Container */
   window#waybar > box {
       background-color: #303446;
-      border: 2px solid #c6d0f5;
+      border: 2px solid #a5adce;
       padding: 2px 6px;
   }
    
@@ -875,9 +876,9 @@ input-field {
     dots_size = 0.33 # Size of input-field dots
     dots_spacing = 0.15 # Spacing of input-field dots
     dots_fade_time = 200 # Milliseconds to fade dots on input
-    outer_color = rgb(202, 158, 230) # Frappé Mauve
+    outer_color = rgb(f2d5cf) # Frappé Mauve
     inner_color = rgb(48, 52, 70)    # Frappé Base
-    font_color = rgb(198, 208, 245)  # Frappé Text
+    font_color = rgb(f2d5cf)  # Frappé Text
     fade_on_empty = false
     placeholder_text = <i>Input Password...</i>
     hide_input = false
@@ -889,7 +890,7 @@ input-field {
 label {
     monitor =
     text = cmd[update:1000] echo "$TIME"
-    color = rgb(198, 208, 245) # Frappé Text
+    color = rgb(f2d5cf) # Frappé Text
     font_size = 64
     font_family = Ioskeley Mono
     
@@ -1121,10 +1122,10 @@ xdg.configFile."rofi/catppuccin/shared/colors.rasi" = {
 * {
     background:     #303446;
     background-alt: #414559;
-    foreground:     #c6d0f5;
-    selected:       #99d1db;
-    active:         #ef9f76;
-    urgent:         #e78284;
+    foreground:     #f2d5cf;
+    selected:       #f2d5cf;
+    active:         #f2d5cf;
+    urgent:         #f2d5cf;
 }
 '';
 };
@@ -1136,7 +1137,7 @@ xdg.configFile."rofi/catppuccin/shared/fonts.rasi" = {
 /* Text Font */
 
 * {
-    font: "Ioskeley Mono 11";
+    font: "JetBrainsMono Nerd Font Propo 11";
 }
 '';
 };
@@ -1267,7 +1268,7 @@ xdg.configFile."swaync/style.css" = {
 	text = ''
 :root {
   --cc-bg: rgba(48, 52, 70, 0.7);
-  --noti-border-color: rgba(198, 208, 245, 0.15);
+  --noti-border-color: rgba(242, 213, 207, 0.15);
   --noti-bg: 48, 52, 70;
   --noti-bg-alpha: 0.8;
   --noti-bg-darker: rgb(41, 44, 60);
@@ -1275,9 +1276,9 @@ xdg.configFile."swaync/style.css" = {
   --noti-bg-focus: rgba(81, 87, 109, 0.6);
   --noti-close-bg: rgb(81, 87, 109);
   --noti-close-bg-hover: rgb(98, 104, 128);
-  --text-color: rgb(198, 208, 245);
+  --text-color: rgb(242, 213, 207);
   --text-color-disabled: rgb(115, 121, 148);
-  --bg-selected: rgb(140, 170, 238);
+  --bg-selected: rgb(242, 213, 207);
   --notification-icon-size: 64px;
   --notification-app-icon-size: calc(var(--notification-icon-size) / 3);
   --notification-group-icon-size: 32px;
@@ -1295,18 +1296,18 @@ xdg.configFile."swaync/style.css" = {
 
 /* Fallback for older CSS themes — Catppuccin Frappé */
 @define-color cc-bg rgba(48, 52, 70, 0.7);
-@define-color noti-border-color rgba(198, 208, 245, 0.15);
+@define-color noti-border-color rgba(242, 213, 207, 0.15);
 @define-color noti-bg rgba(48, 52, 70, 0.8);
 @define-color noti-bg-opaque rgb(48, 52, 70);
 @define-color noti-bg-darker rgb(41, 44, 60);
 @define-color noti-bg-hover rgb(65, 69, 89);
 @define-color noti-bg-hover-opaque rgb(65, 69, 89);
 @define-color noti-bg-focus rgba(81, 87, 109, 0.6);
-@define-color noti-close-bg rgba(198, 208, 245, 0.1);
-@define-color noti-close-bg-hover rgba(198, 208, 245, 0.15);
-@define-color text-color rgb(198, 208, 245);
+@define-color noti-close-bg rgba(242, 213, 207, 0.1);
+@define-color noti-close-bg-hover rgba(242, 213, 207, 0.15);
+@define-color text-color rgb(242, 213, 207);
 @define-color text-color-disabled rgb(115, 121, 148);
-@define-color bg-selected rgb(140, 170, 238);
+@define-color bg-selected rgb(242, 213, 207);
 notificationwindow, blankwindow {
   background: transparent;
 }
@@ -1447,7 +1448,7 @@ notificationwindow, blankwindow {
 .notification-row .notification-background .notification .notification-default-action .notification-content .body-image {
   /* The "extra" optional bottom notification image */
   margin-top: 4px;
-  background-color: rgb(198, 208, 245);
+  background-color: rgb(242, 213, 207);
   -gtk-icon-filter: none;
 }
 
@@ -1710,7 +1711,7 @@ notificationwindow, blankwindow {
 /* Buttons widget */
 .widget-buttons-grid flowboxchild > button.toggle:checked {
   /* style given to the active toggle button */
-  background-color: rgb(140, 170, 238);
+  background-color: rgb(242, 213, 207);
   color: rgb(35, 38, 52);
 }
 
