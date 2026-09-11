@@ -630,7 +630,7 @@
 ---@module 'hl'
 
 hl.monitor({
-    output   = "DP-1", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
+    output   = "DP-3", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
     mode     = "1920x1080@240",
     position = "0x0",
     scale    = 1,
@@ -1987,7 +1987,7 @@ programs.bash = {
   shellAliases = {
     ll = "ls -la";
     gs = "git status";
-    update = "cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake /etc/nixos#nixos --impure && cd";
+    update = "cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake /etc/nixos#nixos --impure && cd && flatpak update -y";
     viconfig = "sudo fresh /etc/nixos/configuration.nix";
     rmold = "nh clean all";
     rmcache = "sudo nix-collect-garbage";
