@@ -1983,9 +1983,7 @@ programs.bash = {
     gs = "git status";
     update = "cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake /etc/nixos#nixos --impure && cd && flatpak update -y";
     viconfig = "sudo fresh /etc/nixos/configuration.nix";
-    rmold = "nh clean all";
-    rmcache = "sudo nix-collect-garbage";
-    home-update = "home-manager switch";
+    clean = "nh clean all";
   };
   bashrcExtra = ''
     source -- ~/.local/share/blesh/ble.sh
