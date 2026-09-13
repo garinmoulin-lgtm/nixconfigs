@@ -14,3 +14,5 @@ using nix profile, however you may append it as you please to configuration.nix.
 
 ## Current Wallpaper Collection (expect more in the future)
 <img src="https://i.imgur.com/T96Rzme.jpeg">
+
+E-mail me for suggestions (for anything related to this page) at garinmoulin@gmail.com
