@@ -10,6 +10,7 @@ possible. For example, the music player "Amberol" has been replaced with *kew*, 
 It does not come with an image viewer pre-installed. However such programs can be temporarily installed and used
 via nix-shell -p {PROGRAM} and used temporarily. If you want to add such programs for yourself I suggest
 using nix profile, however you may append it as you please to configuration.nix.
+
 ## Installation
 Copy and paste the block below to install.
 ```bash
@@ -18,6 +19,7 @@ cd nixconfigs
 chmod +x install.sh
 ./install.sh
 ```
+
 ## Tips
 
 If you want a piece of software and it is not installed, you may temporarily use it using nix-shell:
@@ -46,6 +48,7 @@ pkgs.mkShell {
   '';
 }
 ```
+
 ## Aliases
 AptNix is built with aliases in mind. What do aliases do? Save you a lot of hassle from memorizing long strings of code.
 Here's my list of Aliases:
@@ -73,6 +76,7 @@ window with the dotfile from .config pasted into it, edit there, and paste it in
 
 Also just a clear reminder I did copy the rofi configuration straight from Archcraft, modified colors and angles, and called it a day.
 I still hope you'll enjoy!
+
 ## FAQ
 Q: Is this distro actively maintained?
 
@@ -82,8 +86,10 @@ opinionated in a certain way, so feel free to contact me.
 Q: Who is this for?
 
 A: Primarily enthusiasts, minimalists, tinkerers, etc. Trying to make NixOS easier, and premade apt for anything.
+
 ## Screenshots (will add more, or you can contribute!)
 <img src="https://i.imgur.com/8pJybPQ.png">
+
 ## Current Wallpaper Collection (again, expect more in the future)
 <img src="https://i.imgur.com/T96Rzme.jpeg">
 
