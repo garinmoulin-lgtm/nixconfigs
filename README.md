@@ -11,6 +11,32 @@ It does not come with an image viewer pre-installed. However such programs can b
 via nix-shell -p {PROGRAM} and used temporarily. If you want to add such programs for yourself I suggest
 using nix profile, however you may append it as you please to configuration.nix.
 
+If you want a piece of software and it is not installed, you may temporarily use it using nix-shell:
+
+nix-shell -p {PROGRAM}
+
+But if you want many packages (i.e. as a kernel dev, programmer) and cannot memorize them you may use 
+a file called a *shell.nix*. This file is used to outline which packages to use, and when done, simply garbage
+collect using nh clean.
+
+Example of shell.nix:
+
+```nix
+{ pkgs ? import <nixpkgs> {} }:
+
+pkgs.mkShell {
+  name = "kernel-build-shell";
+
+  buildInputs = with pkgs; [
+	# Programs go here
+  ];
+
+  shellHook = ''
+    echo "whatever you want to indicate your shell is ready"
+  '';
+}
+```
+
 
 ## Current Wallpaper Collection (expect more in the future)
 <img src="https://i.imgur.com/T96Rzme.jpeg">
