@@ -13,8 +13,9 @@ using nix profile, however you may append it as you please to configuration.nix.
 
 If you want a piece of software and it is not installed, you may temporarily use it using nix-shell:
 
+```nix
 nix-shell -p {PROGRAM}
-
+```
 But if you want many packages (i.e. as a kernel dev, programmer) and cannot memorize them you may use 
 a file called a *shell.nix*. This file is used to outline which packages to use, and when done, simply garbage
 collect using nh clean.
