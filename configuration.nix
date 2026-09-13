@@ -83,39 +83,13 @@ programs.nh = {
 # Enable the Hyprland Compositor via its dedicated module
 # This configures polkit, xdg portals, and session files seamlessly
 
-/*nixpkgs.overlays = [
-  (final: prev: {
-    hyprland = prev.hyprland.overrideAttrs (old: {
-      cmakeFlags = (old.cmakeFlags or []) ++ [
-        "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"
-        "-DFETCHCONTENT_SOURCE_DIR_GLAZE=${prev.fetchFromGitHub {
-          owner = "stephenberry";
-          repo = "glaze";
-          rev = "v7.2.0";
-          hash = "sha256-f3NVRi3SXKo42hn0WCw7JsOK3EkdOVJIcuzhPorKjFY=";
-        }}"
-      ];
-    });
-  })
-];*/
+
 programs.hyprland.enable = true;
 xdg.portal = {
   enable = true;
   extraPortals = [ pkgs.xdg-desktop-portal-hyprland ];
 };
-#kmscon tty
-#enable if you really need a cursor and the aesthetic
-/*
-services.kmscon = {
-  enable = true;
-  hwRender = true;
-  config = {
-    font-name = "JetBrainsMono Nerd Font";
-    font-size = 12;
-    xkb-layout = "us";
-  };
-};
-*/
+ 
 # Enable and configure LY
 services.displayManager = {
   ly.enable = true;
@@ -272,30 +246,18 @@ programs.git.enable = true;
  	 udisks2
  	 fresh-editor
      wget
-     cpio
      cmake
-     llvm
-     clang
      protontricks
      winetricks
      wineWow64Packages.stable
      gpu-screen-recorder-gtk
      tty-clock
-     stdenv.cc
-     bison
-     flex
-     pkg-config
-     elfutils          # Needed for kernel header unpacking
-     openssl           # Needed for kernel signing checks
-     bc                # Math tool used in the kernel Makefile
-     gnumake
      lunar-client
      unzip
      yt-dlp
      pkgs.kdePackages.qtmultimedia
      pkgs.qt6.qtmultimedia
      swaynotificationcenter
-     pkg-config
   	 nwg-look
      lavat
 (pkgs.waybar.overrideAttrs (old: {
@@ -352,7 +314,7 @@ programs.git.enable = true;
   # List services that you want to enable:
 
   # Enable the OpenSSH daemon.
-  services.openssh = {
+services.openssh = {
   enable = true;
   ports = [ 22 ];
   settings = {
