@@ -27,6 +27,12 @@ echo "2) Nvidia"
 echo "3) AMD"
 read -p "Which GPU driver do you want to use? [1-3]: " gpu_choice
 
+# 6. Prompt users for Touchpad
+echo "Do you have a touchpad?"
+echo "1) Yes"
+echo "2) No"
+read -p "Enable touchpad support? [1-2]: " touchpad_choice
+
 # Update the username globally across all .nix files in the current directory
 echo "Updating username across configuration files..."
 sed -i "s/garinh/$sys_user/g" ./*.nix
@@ -84,6 +90,14 @@ elif [ "$gpu_choice" = "2" ]; then
     echo "Keeping standard Nvidia GPU configuration..."
 else
     echo "Invalid GPU choice, keeping default (Nvidia)..."
+fi
+
+# Apply Touchpad choice
+if [ "$touchpad_choice" = "1" ]; then
+    echo "Enabling touchpad support..."
+    sed -i 's/# services.xserver.libinput.enable = true;/services.xserver.libinput.enable = true;/g' ./configuration.nix
+else
+    echo "Keeping touchpad support disabled..."
 fi
 
 # Proceed with the original installation routine
