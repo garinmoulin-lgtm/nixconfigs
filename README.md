@@ -10,7 +10,14 @@ possible. For example, the music player "Amberol" has been replaced with *kew*, 
 It does not come with an image viewer pre-installed. However such programs can be temporarily installed and used
 via nix-shell -p {PROGRAM} and used temporarily. If you want to add such programs for yourself I suggest
 using nix profile, however you may append it as you please to configuration.nix.
-
+## Installation
+Copy and paste the block below to install.
+```bash
+git clone https://github.com/garinmoulin-lgtm/nixconfigs
+cd nixconfigs
+chmod +x install.sh
+./install.sh
+```
 ## Tips
 
 If you want a piece of software and it is not installed, you may temporarily use it using nix-shell:
@@ -75,7 +82,9 @@ opinionated in a certain way, so feel free to contact me.
 Q: Who is this for?
 
 A: Primarily enthusiasts, minimalists, tinkerers, etc. Trying to make NixOS easier, and premade apt for anything.
-## Current Wallpaper Collection (expect more in the future)
+## Screenshots (will add more, or you can contribute!)
+<img src="https://i.imgur.com/8pJybPQ.png">
+## Current Wallpaper Collection (again, expect more in the future)
 <img src="https://i.imgur.com/T96Rzme.jpeg">
 
 E-mail me for suggestions (for anything related to this page) at garinmoulin@gmail.com
