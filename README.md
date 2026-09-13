@@ -89,6 +89,7 @@ A: Primarily enthusiasts, minimalists, tinkerers, etc. Trying to make NixOS easi
 
 ## Screenshots (will add more, or you can contribute!)
 <img src="https://i.imgur.com/8pJybPQ.png">
+<img src="https://i.imgur.com/eZQIwd9.png">
 
 ## Current Wallpaper Collection (again, expect more in the future)
 <img src="https://i.imgur.com/T96Rzme.jpeg">
