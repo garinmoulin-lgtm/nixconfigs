@@ -223,7 +223,7 @@
         ]
     },
 	"custom/media": {
-	    "format": " {icon} {text} ",
+	    "format": " {icon} <span color=\"#c6d0f5\">{text} </span>",
 	    "return-type": "json",
 	    "max-length": 25,
 	    "restart-interval": 1,
@@ -303,7 +303,7 @@
    @define-color blue #f2d5cf; /* Blue */
    @define-color magenta #f2d5cf; /* Pink */
    @define-color cyan #f2d5cf; /* Sky */
-   @define-color white #f2d5cf; /* Text */
+   @define-color white #c6d0f5; /* Text */
    @define-color orange #f2d5cf; /* Peach */
    
    /* Module-specific colors */
