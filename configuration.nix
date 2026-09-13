@@ -29,8 +29,8 @@ boot.loader.grub = {
 };
 
   boot.loader.efi.canTouchEfiVariables = true;
-  # Use latest kernel. Baseline, cachy @ line 157
-  boot.kernelPackages = pkgs.linuxPackages_latest;
+  # Use latest kernel. You can switch to cachy (using chaotic flake) by appending _cachyos rather than _latest.
+  boot.kernelPackages = pkgs.linuxPackages_cachyos;
   
   nix.settings.trusted-users = [ "root" "garinh" ];
   networking.hostName = "nixos"; # Define your hostname.
