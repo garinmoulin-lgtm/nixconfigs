@@ -13,3 +13,4 @@
 !amd/**
 !intel/
 !intel/**
+!install.sh
