@@ -668,7 +668,6 @@ hl.config({
     }
 })
 
--- exec-once=noctalia
 
 -- Consolidated decoration/blur block (previously split across 3 hl.config calls
 -- that overwrote each other; only the last one was ever actually in effect)
@@ -697,7 +696,8 @@ hl.config({
     input = {
         kb_layout = "us",
         follow_mouse = 1,
-        sensitivity = 0,
+        accel_profile = "flat",
+        sensitivity = 0.0,
     },
 })
 hl.config({
@@ -716,12 +716,6 @@ hl.config({
     cursor = {
         inactive_timeout = 0,
         no_hardware_cursors = true,
-    },
-})
-hl.config({
-    input = {
-        accel_profile = "flat",
-        sensitivity = 0.0,   -- keep at 0 for 1:1, adjust if needed alongside flat profile
     },
 })
 -- anims here
