@@ -11,6 +11,8 @@ It does not come with an image viewer pre-installed. However such programs can b
 via nix-shell -p {PROGRAM} and used temporarily. If you want to add such programs for yourself I suggest
 using nix profile, however you may append it as you please to configuration.nix.
 
+## Tips
+
 If you want a piece of software and it is not installed, you may temporarily use it using nix-shell:
 
 ```nix
@@ -37,8 +39,42 @@ pkgs.mkShell {
   '';
 }
 ```
+## Aliases
+AptNix is built with aliases in mind. What do aliases do? Save you a lot of hassle from memorizing long strings of code.
+Here's my list of Aliases:
+```bash
+alias -- gs='git status'
+alias -- clean='nh clean all'
+alias -- ll='ls -la'
+alias -- update='cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake /etc/nixos#nixos --impure && cd && flatpak update -y'
+alias -- viconfig='sudo fresh /etc/nixos/configuration.nix'
+```
+TL;DR:
+
+Most of these aliases come with nixos.
+- ll is to see permissions.
+- gs is another built in alias to check, well, git status.
+- clean is to wipe build cache, temporary leftovers from nix-shell apps, and remove old generations.
+- update... you guessed it! Updates, and rebuilds the system.
+- viconfig is based off of a similar concept to visudo - allows you to edit the configuration.nix via fresh-editor.
 
 
+## Additional information
+Dotfiles, to be redistributable, are configured and managed declaratively via home-manager. As a result, it's a bit harder 
+to manage configurations and change them. You can either edit directly via home.nix, or alternatively, open another
+window with the dotfile from .config pasted into it, edit there, and paste it into home.nix.
+
+Also just a clear reminder I did copy the rofi configuration straight from Archcraft, modified colors and angles, and called it a day.
+I still hope you'll enjoy!
+## FAQ
+Q: Is this distro actively maintained?
+
+A: Sort of. It is primarily me sharing my configuration with the world. So it is maintained by me. However programs may be 
+opinionated in a certain way, so feel free to contact me.
+
+Q: Who is this for?
+
+A: Primarily enthusiasts, minimalists, tinkerers, etc. Trying to make NixOS easier, and premade apt for anything.
 ## Current Wallpaper Collection (expect more in the future)
 <img src="https://i.imgur.com/T96Rzme.jpeg">
 
