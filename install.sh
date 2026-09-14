@@ -101,7 +101,7 @@ fi
 
 if [ "$touchpad_choice" = "1" ]; then
     echo "Enabling touchpad support..."
-    sed -i 's/# services.xserver.libinput.enable = true;/services.xserver.libinput.enable = true;/g' ./configuration.nix
+    sed -i 's/# services.libinput.enable = true;/services.libinput.enable = true;/g' ./configuration.nix
 else
     echo "Keeping touchpad support disabled..."
 fi
