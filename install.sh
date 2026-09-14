@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # --- Fail loudly, with the line number, instead of silently continuing ---
-trap 'echo -e "\n[FAILED] Script aborted on line $LINENO. Last command exit code: $?" >&2' ERR
+trap 'echo -e "\n[FAILED] install.sh aborted on line $LINENO. Last command exit code: $?" >&2' ERR
 
 # 1. Require root privileges
 if [ "$EUID" -ne 0 ]; then
@@ -10,38 +10,50 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# 2. Prompt users for system username
+# 2. Prompt for system username
 read -p "Enter the new username for the system: " sys_user
 
-# 3. Prompt users for display configuration
-echo "Hyprland Display Configuration"
-read -p "Enter your display output (e.g., eDP-1, DP-1, DP-3): " disp_out
-read -p "Enter your display mode (e.g., 1920x1080@60, 2560x1440@144): " disp_mode
+# Validate it BEFORE using it in sed — an empty or malformed value here would
+# either no-op every substitution or, worse, get interpreted as sed regex/
+# replacement syntax (/, &, \) and corrupt the config files silently.
+if [[ ! "$sys_user" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+    echo "Error: '$sys_user' is not a valid Linux username." >&2
+    echo "Use lowercase letters, digits, '-' or '_', starting with a letter or '_'." >&2
+    exit 1
+fi
 
-# 4. Prompt users for Kernel choice
+# 3. Prompt for Kernel choice
 echo "Select Kernel:"
 echo "1) Base (latest)"
 echo "2) CachyOS"
 read -p "Which kernel do you want to use? (See configuration.nix comment for details) [1-2]: " kernel_choice
 
-# 5. Prompt users for GPU choice
+# 4. Prompt for GPU choice
 echo "Select GPU Driver:"
 echo "1) Intel"
 echo "2) Nvidia"
 echo "3) AMD"
 read -p "Which GPU driver do you want to use? [1-3]: " gpu_choice
 
-# 6. Prompt users for Touchpad
+# 5. Prompt for Touchpad
 echo "Do you have a touchpad?"
 echo "1) Yes"
 echo "2) No"
 read -p "Enable touchpad support? [1-2]: " touchpad_choice
 
-# --- ARCHITECTURE CHANGE: Modify files locally before copying ---
+# --- Modify files locally before copying ---
 echo "Updating configuration files locally in $(pwd)..."
 sed -i "s/garinh/$sys_user/g" ./*.nix
-sed -i "s/output   = \"DP-3\"/output   = \"$disp_out\"/g" ./home.nix
-sed -i "s/mode     = \"1920x1080@240\"/mode     = \"$disp_mode\"/g" ./home.nix
+
+# Sanity check: make sure the username substitution actually took everywhere.
+# (Skip the check if the user genuinely chose "garinh" as their username.)
+if [ "$sys_user" != "garinh" ]; then
+    if grep -l "garinh" ./*.nix >/dev/null 2>&1; then
+        echo "[FAILED] Leftover 'garinh' still found after substitution in:" >&2
+        grep -l "garinh" ./*.nix >&2
+        exit 1
+    fi
+fi
 
 if [ "$kernel_choice" = "1" ]; then
     echo "Setting kernel to linuxPackages_latest..."
@@ -105,7 +117,9 @@ fi
 echo "Copying modified configuration files to /etc/nixos..."
 cp ./*.nix /etc/nixos/
 
-# --- BUG FIXES: Exporting required Nix configuration flags ---
+# --- Exporting required Nix configuration flags (belt-and-suspenders; the
+#     config also sets nix.settings.experimental-features permanently, but
+#     that only takes effect AFTER the first successful switch below) ---
 echo "Exporting NIX_CONFIG flags to prevent flake installation failures..."
 export NIX_CONFIG="experimental-features = nix-command flakes
 warn-dirty = false"
@@ -120,6 +134,15 @@ git config --global --add safe.directory /etc/nixos
 if [ ! -d .git ]; then
     echo "No git repo found in /etc/nixos, initializing one..."
     git init
+
+    # Ensure git has an identity to commit with (root often has none set)
+    if [ -z "$(git config --global user.email || true)" ]; then
+        git config --global user.email "root@nixos.local"
+    fi
+    if [ -z "$(git config --global user.name || true)" ]; then
+        git config --global user.name "NixOS Install Script"
+    fi
+
     git add -A
     git commit -m "Initial NixOS configuration" --quiet
 else
@@ -146,4 +169,9 @@ if ! flatpak update -y; then
 fi
 
 echo "Installation complete."
-echo "OS installed!"
+echo ""
+echo "Next steps:"
+echo "  1. Reboot."
+echo "  2. Log into Hyprland."
+echo "  3. Run post-install.sh (as your normal user, NOT with sudo) to"
+echo "     auto-detect your monitor and finish the display configuration."

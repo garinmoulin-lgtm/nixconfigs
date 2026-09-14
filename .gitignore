@@ -14,3 +14,4 @@
 !intel/
 !intel/**
 !install.sh
+!post-install.sh
