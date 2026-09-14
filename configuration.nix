@@ -258,7 +258,6 @@ programs.git.enable = true;
      pkgs.kdePackages.qtmultimedia
      pkgs.qt6.qtmultimedia
      swaynotificationcenter
-  	 nwg-look
      lavat
 (pkgs.waybar.overrideAttrs (old: {
   buildInputs = (old.buildInputs or []) ++ [ pkgs.modemmanager ];
@@ -290,7 +289,10 @@ programs.git.enable = true;
      catppuccin-cursors.mochaDark
      catppuccin-cursors.mochaGreen
      libsForQt5.qt5ct
+     nwg-look
+     qt6Packages.qtstyleplugin-kvantum
      qt6Packages.qt6ct
+     catppuccin-kvantum
      adwaita-qt
      adwaita-qt6
      pipes

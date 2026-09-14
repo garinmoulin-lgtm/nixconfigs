@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, pkgs, lib, ... }:
 
 {
   home.username = "garinh";
@@ -1964,6 +1964,24 @@ gtk = {
     gtk-application-prefer-dark-theme = true;
   };
 };
+qt = {
+  enable = true;
+  platformTheme.name = "qtct";
+  style.name = "kvantum";
+};
+  xdg.configFile."Kvantum/catppuccin-frappe-blue" = {
+    source =
+      "${pkgs.catppuccin-kvantum}/share/Kvantum/catppuccin-frappe-blue";
+  };
+xdg.configFile."Kvantum/kvantum.kvconfig" = {
+  force = true;
+  text = lib.mkForce ''
+    [General]
+    theme=catppuccin-frappe-blue
+  '';
+};
+
+
 home.pointerCursor = {
   enable = true;
   gtk.enable = true;
@@ -1976,6 +1994,7 @@ gtk.cursorTheme = {
   name = "catppuccin-frappe-mauve-cursors";
   package = pkgs.catppuccin-cursors.frappeMauve;
 };
+
 programs.bash = {
   enable = true;
   shellAliases = {
