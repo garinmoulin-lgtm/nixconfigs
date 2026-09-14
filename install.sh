@@ -7,7 +7,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # 2. Prompt users for system username
-read -p "Enter the new username for the system: " sys_user
+read -p "Enter the username for the system: " sys_user
 
 # 3. Prompt users for display configuration
 echo "Hyprland Display Configuration"
@@ -33,16 +33,12 @@ echo "1) Yes"
 echo "2) No"
 read -p "Enable touchpad support? [1-2]: " touchpad_choice
 
-# Update the username globally across all .nix files in the current directory
-echo "Updating username across configuration files..."
+# --- ARCHITECTURE CHANGE: Modify files locally before copying ---
+echo "Updating configuration files locally in $(pwd)..."
 sed -i "s/garinh/$sys_user/g" ./*.nix
-
-# Update the Hyprland monitor output and mode inside home.nix
-echo "Updating display configuration in home.nix..."
 sed -i "s/output   = \"DP-3\"/output   = \"$disp_out\"/g" ./home.nix
 sed -i "s/mode     = \"1920x1080@240\"/mode     = \"$disp_mode\"/g" ./home.nix
 
-# Apply Kernel choice
 if [ "$kernel_choice" = "1" ]; then
     echo "Setting kernel to linuxPackages_latest..."
     sed -i 's/boot.kernelPackages = pkgs.linuxPackages_cachyos;/boot.kernelPackages = pkgs.linuxPackages_latest;/g' ./configuration.nix
@@ -53,46 +49,34 @@ else
     sed -i 's/boot.kernelPackages = pkgs.linuxPackages_cachyos;/boot.kernelPackages = pkgs.linuxPackages_latest;/g' ./configuration.nix
 fi
 
-# Apply GPU choice based on official NixOS documentation
 if [ "$gpu_choice" = "1" ]; then
     echo "Applying Intel GPU configuration..."
     sed -i 's/services.xserver.videoDrivers = \[ "nvidia" \];/services.xserver.videoDrivers = \[ "intel" \];/g' ./configuration.nix
     sed -i '/boot.blacklistedKernelModules = \[ "acpi_pad" "nouveau" \];/a \ \ boot.initrd.kernelModules = [ "i915" ];' ./configuration.nix
-    
-    # Disable Nvidia configurations in configuration.nix
     sed -i '/hardware.nvidia = {/,/};/s/^/#/' ./configuration.nix
     sed -i '/boot.extraModprobeConfig =/,/;/s/^/#/' ./configuration.nix
     sed -i '/boot.kernelParams = \[ "nvidia-drm.modeset=1" \];/s/^/#/' ./configuration.nix
     sed -i '/WLR_NO_HARDWARE_CURSORS = "1";/s/^/#/' ./configuration.nix
-    
-    # Disable Nvidia env vars in home.nix (Hyprland config)
     sed -i 's/hl.env("LIBVA_DRIVER_NAME", "nvidia")/-- hl.env("LIBVA_DRIVER_NAME", "nvidia")/g' ./home.nix
     sed -i 's/hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")/-- hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")/g' ./home.nix
     sed -i 's/hl.env("GBM_BACKEND", "nvidia-drm")/-- hl.env("GBM_BACKEND", "nvidia-drm")/g' ./home.nix
-
 elif [ "$gpu_choice" = "3" ]; then
     echo "Applying AMD GPU configuration..."
     sed -i 's/services.xserver.videoDrivers = \[ "nvidia" \];/services.xserver.videoDrivers = \[ "amdgpu" \];/g' ./configuration.nix
     sed -i '/boot.blacklistedKernelModules = \[ "acpi_pad" "nouveau" \];/a \ \ boot.initrd.kernelModules = [ "amdgpu" ];' ./configuration.nix
-    
-    # Disable Nvidia configurations in configuration.nix
     sed -i '/hardware.nvidia = {/,/};/s/^/#/' ./configuration.nix
     sed -i '/boot.extraModprobeConfig =/,/;/s/^/#/' ./configuration.nix
     sed -i '/boot.kernelParams = \[ "nvidia-drm.modeset=1" \];/s/^/#/' ./configuration.nix
     sed -i '/WLR_NO_HARDWARE_CURSORS = "1";/s/^/#/' ./configuration.nix
-
-    # Disable Nvidia env vars in home.nix (Hyprland config)
     sed -i 's/hl.env("LIBVA_DRIVER_NAME", "nvidia")/-- hl.env("LIBVA_DRIVER_NAME", "nvidia")/g' ./home.nix
     sed -i 's/hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")/-- hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")/g' ./home.nix
     sed -i 's/hl.env("GBM_BACKEND", "nvidia-drm")/-- hl.env("GBM_BACKEND", "nvidia-drm")/g' ./home.nix
-    
 elif [ "$gpu_choice" = "2" ]; then
     echo "Keeping standard Nvidia GPU configuration..."
 else
     echo "Invalid GPU choice, keeping default (Nvidia)..."
 fi
 
-# Apply Touchpad choice
 if [ "$touchpad_choice" = "1" ]; then
     echo "Enabling touchpad support..."
     sed -i 's/# services.xserver.libinput.enable = true;/services.xserver.libinput.enable = true;/g' ./configuration.nix
@@ -100,12 +84,19 @@ else
     echo "Keeping touchpad support disabled..."
 fi
 
-# Proceed with the original installation routine
-echo "copying configuration files..."
+echo "Copying modified configuration files to /etc/nixos..."
 cp ./*.nix /etc/nixos/
 
-echo "installing the distro..."
-cd /etc/nixos && nix flake update && nixos-rebuild switch --flake /etc/nixos#nixos --impure && cd && flatpak update -y
+# --- BUG FIXES: Exporting required Nix configuration flags ---
+echo "Exporting NIX_CONFIG flags to prevent flake installation failures..."
+export NIX_CONFIG="experimental-features = nix-command flakes
+warn-dirty = false"
+
+echo "Staging new config files in git (required for flakes to see them)..."
+cd /etc/nixos && git add -A
+
+echo "Installing the distro..."
+nix flake update && nixos-rebuild switch --flake /etc/nixos#nixos --impure && cd - && flatpak update -y
 
 echo "Installation complete."
 echo "OS installed!"
