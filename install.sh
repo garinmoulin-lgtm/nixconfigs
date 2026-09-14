@@ -111,7 +111,20 @@ export NIX_CONFIG="experimental-features = nix-command flakes
 warn-dirty = false"
 
 echo "Staging new config files in git (required for flakes to see them)..."
-cd /etc/nixos && git add -A
+cd /etc/nixos
+
+# Avoid "detected dubious ownership" fatal error when running as root
+git config --global --add safe.directory /etc/nixos
+
+# Initialize the repo if this is a fresh install with no git history yet
+if [ ! -d .git ]; then
+    echo "No git repo found in /etc/nixos, initializing one..."
+    git init
+    git add -A
+    git commit -m "Initial NixOS configuration" --quiet
+else
+    git add -A
+fi
 
 echo "Running nix flake update..."
 if ! nix flake update; then
