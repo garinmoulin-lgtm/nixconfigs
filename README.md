@@ -11,6 +11,8 @@ It does not come with an image viewer pre-installed. However such programs can b
 via nix-shell -p {PROGRAM} and used temporarily. If you want to add such programs for yourself I suggest
 using nix profile, however you may append it as you please to configuration.nix.
 
+I cannot emphasize this enough but it is *absolutely necessary* that you read through the *entire* README.
+
 ## Installation
 Copy and paste the block below to install.
 ```bash
@@ -73,6 +75,14 @@ Most of these aliases come with nixos.
 Dotfiles, to be redistributable, are configured and managed declaratively via home-manager. As a result, it's a bit harder 
 to manage configurations and change them. You can either edit directly via home.nix, or alternatively, open another
 window with the dotfile from .config pasted into it, edit there, and paste it into home.nix.
+
+You *need* to put the wallpaper at:
+
+```bash
+~/Pictures/Wallpapers/hk.png
+```
+
+I made that up kind of a long time ago, but it needs to be there, and only there.
 
 Also just a clear reminder I did copy the rofi configuration straight from Archcraft, modified colors and angles, and called it a day.
 I still hope you'll enjoy!
