@@ -18,10 +18,18 @@ Copy and paste the block below to install.
 ```bash
 git clone https://github.com/garinmoulin-lgtm/nixconfigs
 cd nixconfigs
-chmod +x install.sh
-./install.sh
+chmod +x install.sh post-install.sh
+sudo ./install.sh
 ```
 
+Then, after that, there's another script to tune for your monitor. Run:
+```bash
+./post-install.sh
+```
+
+Your installation is complete!
+-- Do note that installation is a *Work in Progress.* More options, optimizations, and injections need to be added before that 
+installer can become stable. Thank you.
 ## Tips
 
 If you want a piece of software and it is not installed, you may temporarily use it using nix-shell:
@@ -50,7 +58,12 @@ pkgs.mkShell {
   '';
 }
 ```
+## Binds
+Keybinds are pretty important. Note that these are opinionated - but don't worry,
+there's not too many. Ill list them:
 
+Super + Up, Down, Left, Right - Select a Hyprland Window
+Super + Shift + Left, Right - Change to Workspace Down and Up, respectively (note that the workspaces scroll sideways but the numbers go up and down.)
 ## Aliases
 AptNix is built with aliases in mind. What do aliases do? Save you a lot of hassle from memorizing long strings of code.
 Here's my list of Aliases:
