@@ -13,7 +13,7 @@ using nix profile, however you may append it as you please to configuration.nix.
 
 I cannot emphasize this enough but it is *absolutely necessary* that you read through the *entire* README.
 
-## Installation
+## Installation (WIP - UNSTABLE)
 Copy and paste the block below to install.
 ```bash
 git clone https://github.com/garinmoulin-lgtm/nixconfigs
@@ -29,7 +29,13 @@ Then, after that, there's another script to tune for your monitor. Run:
 
 Your installation is complete!
 -- Do note that installation is a *Work in Progress.* More options, optimizations, and injections need to be added before that 
-installer can become stable. Thank you.
+installer can become stable. Right now a working prototype exists; it installs all dotfiles, and validates all configurations. However
+currently it dirties the /etc/nixos git tree and the warning pops up on every rebuild. Right now, it's in full prototype form - it's vibecoded, I'll spill it.
+But that doesn't stop it from somewhat working. But right now there are kinks in the hose; holes in our boat, and it's best that I (or you, if you decide to contribute)
+patch these holes, for a better, smoother, fully working experience.
+
+As of now, its WIP.
+Contributors/Volunteers particularly in this area would be much, much appreciated.
 ## Tips
 
 If you want a piece of software and it is not installed, you may temporarily use it using nix-shell:
