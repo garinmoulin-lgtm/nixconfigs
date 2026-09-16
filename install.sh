@@ -41,6 +41,82 @@ echo "1) Yes"
 echo "2) No"
 read -p "Enable touchpad support? [1-2]: " touchpad_choice
 
+# Locates ble.sh after the rebuild below, to confirm
+# `programs.bash.blesh.enable = true;` actually took effect. How it's wired
+# in (confirmed against nixpkgs source, nixos/modules/programs/bash/blesh.nix):
+# the module sets
+#   programs.bash.interactiveShellInit = lib.mkBefore ''
+#     source ${pkgs.blesh}/share/blesh/ble.sh
+#   '';
+# which NixOS's bash module bakes into /etc/bashrc as a literal
+# `source /nix/store/<hash>-blesh-<version>/share/blesh/ble.sh` line.
+# That's the authoritative place to look — not /etc/profile.d, and not a
+# blind /nix/store scan (slow, and can match unrelated things).
+find_blesh() {
+    # 1. Authoritative: read the resolved store path straight out of /etc/bashrc.
+    if [ -r /etc/bashrc ]; then
+        local found
+        found="$(grep -oE '/nix/store/[^ ]+/share/blesh/ble\.sh' /etc/bashrc 2>/dev/null | head -n1 || true)"
+        if [ -n "$found" ] && [ -f "$found" ]; then
+            echo "$found"
+            return 0
+        fi
+    fi
+
+    # 2. Fallback: search the Nix store directly for the package directory.
+    #    Scoped with -maxdepth so it doesn't crawl the entire store.
+    local store_found
+    store_found="$(find /nix/store -maxdepth 1 -type d -name 'blesh-*' 2>/dev/null | sort -V | tail -n1 || true)"
+    if [ -n "$store_found" ] && [ -f "$store_found/share/blesh/ble.sh" ]; then
+        echo "$store_found/share/blesh/ble.sh"
+        return 0
+    fi
+
+    return 1
+}
+
+# 6. Detect and prompt for CPU core count to use during the build.
+#    Relevant because from-source builds (e.g. linux_cachyos, if its binary
+#    cache isn't trusted yet — see the note printed after kernel_choice=2
+#    below) can OOM on memory-constrained VMs when Nix parallelizes too
+#    aggressively. Try a few detection methods in order of preference.
+detect_cores() {
+    if command -v nproc >/dev/null 2>&1; then
+        nproc --all
+        return
+    fi
+    if [ -r /proc/cpuinfo ]; then
+        grep -c '^processor' /proc/cpuinfo
+        return
+    fi
+    if command -v lscpu >/dev/null 2>&1; then
+        lscpu -p=CPU 2>/dev/null | grep -c '^[0-9]'
+        return
+    fi
+    echo 1
+}
+
+detected_cores="$(detect_cores)"
+echo "Detected $detected_cores CPU thread(s)."
+if [ "$kernel_choice" = "2" ]; then
+    echo "Note: CachyOS kernel builds are memory-hungry if built from source"
+    echo "(happens whenever the chaotic-nyx binary cache isn't trusted yet"
+    echo "on this system). If you're on a VM with limited RAM, consider"
+    echo "using fewer cores than detected to reduce peak memory usage."
+fi
+read -p "How many cores should Nix use for building? [default: $detected_cores]: " chosen_cores
+chosen_cores="${chosen_cores:-$detected_cores}"
+
+if ! [[ "$chosen_cores" =~ ^[0-9]+$ ]] || [ "$chosen_cores" -lt 1 ]; then
+    echo "Invalid input, defaulting to $detected_cores." >&2
+    chosen_cores="$detected_cores"
+fi
+if [ "$chosen_cores" -gt "$detected_cores" ]; then
+    echo "Warning: requested $chosen_cores exceeds detected $detected_cores; using $detected_cores instead." >&2
+    chosen_cores="$detected_cores"
+fi
+echo "Using $chosen_cores core(s) for this build."
+
 # --- Modify files locally before copying ---
 echo "Updating configuration files locally in $(pwd)..."
 sed -i "s/garinh/$sys_user/g" ./*.nix
@@ -54,6 +130,16 @@ if [ "$sys_user" != "garinh" ]; then
         exit 1
     fi
 fi
+
+# Persist the chosen core count into configuration.nix so future rebuilds
+# (including post-install.sh's) respect it without needing the flag again.
+# Remove any pre-existing lines first — same dedup logic as the kernelModules
+# fix below — so re-running this script doesn't stack duplicate declarations.
+sed -i '/nix.settings.cores = [0-9]*;/d' ./configuration.nix
+sed -i '/nix.settings.max-jobs = [0-9]*;/d' ./configuration.nix
+sed -i "/nix.settings.trusted-users = \[ \"root\" \"$sys_user\" \];/a\\
+  nix.settings.cores = $chosen_cores;\\
+  nix.settings.max-jobs = $chosen_cores;" ./configuration.nix
 
 if [ "$kernel_choice" = "1" ]; then
     echo "Setting kernel to linuxPackages_latest..."
@@ -101,7 +187,7 @@ fi
 
 if [ "$touchpad_choice" = "1" ]; then
     echo "Enabling touchpad support..."
-    sed -i 's/# services.libinput.enable = true;/services.libinput.enable = true;/g' ./configuration.nix
+    sed -i 's/# services.xserver.libinput.enable = true;/services.xserver.libinput.enable = true;/g' ./configuration.nix
 else
     echo "Keeping touchpad support disabled..."
 fi
@@ -111,6 +197,14 @@ dup_count=$(grep -c 'boot.initrd.kernelModules' ./configuration.nix || true)
 if [ "$dup_count" -gt 1 ]; then
     echo "[FAILED] configuration.nix has $dup_count 'boot.initrd.kernelModules' lines (expected 1). Aborting before copy." >&2
     grep -n 'boot.initrd.kernelModules' ./configuration.nix >&2
+    exit 1
+fi
+
+# Same check for the cores/max-jobs settings we just inserted.
+cores_dup_count=$(grep -c 'nix.settings.cores = ' ./configuration.nix || true)
+if [ "$cores_dup_count" -gt 1 ]; then
+    echo "[FAILED] configuration.nix has $cores_dup_count 'nix.settings.cores' lines (expected 1). Aborting before copy." >&2
+    grep -n 'nix.settings.cores = ' ./configuration.nix >&2
     exit 1
 fi
 
@@ -155,8 +249,13 @@ if ! nix flake update; then
     exit 1
 fi
 
-echo "Running nixos-rebuild switch..."
-if ! nixos-rebuild switch --flake /etc/nixos#nixos --impure; then
+# --cores is passed explicitly here because the nix.settings.cores value we
+# just persisted into configuration.nix only takes effect system-wide AFTER
+# a successful switch (it's applied during activation, not evaluation) — so
+# for THIS first build, the file alone isn't enough; the flag makes sure the
+# chosen core count is actually honored on this initial run too.
+echo "Running nixos-rebuild switch (using $chosen_cores core(s))..."
+if ! nixos-rebuild switch --flake /etc/nixos#nixos --impure --cores "$chosen_cores"; then
     echo "[FAILED] nixos-rebuild switch failed. System was NOT switched to the new configuration." >&2
     exit 1
 fi
@@ -166,6 +265,14 @@ cd -
 echo "Running flatpak update..."
 if ! flatpak update -y; then
     echo "[WARNING] flatpak update failed, but NixOS rebuild already succeeded. Continuing." >&2
+fi
+
+echo "Verifying blesh installation..."
+if blesh_path="$(find_blesh)"; then
+    echo "Found ble.sh: $blesh_path"
+else
+    echo "[WARNING] Could not locate ble.sh after the rebuild." >&2
+    echo "Check that 'programs.bash.blesh.enable = true;' is set in configuration.nix." >&2
 fi
 
 echo "Installation complete."
