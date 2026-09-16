@@ -315,7 +315,7 @@ programs.git.enable = true;
 # Virtualization
 # Use this. It does use a daemon.
  virtualisation.libvirtd.enable = true;
-
+# programs.virt-manager.enable = true;
   # List services that you want to enable:
 
   # Enable the OpenSSH daemon.
