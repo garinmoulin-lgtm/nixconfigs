@@ -214,7 +214,6 @@ services.udev.extraRules = ''
   KERNEL=="js*", SUBSYSTEM=="input", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
   SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
 '';
-services.udev.packages = with pkgs; [ oversteer ];
 # make sure you're in the input group
   # 2. Tell NixOS to use the CachyOS kernel package
   # Options include: linuxPackages-cachyos-latest, linuxPackages-cachyos-lts, etc.
@@ -273,11 +272,11 @@ programs.git.enable = true;
      hyprlock
      fastfetch
      psmisc
+     jq
      kitty
      rofi
      btop
      kew
-     go
      pavucontrol
      flatpak
      mdadm
