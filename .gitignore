@@ -6,7 +6,6 @@
 !configuration.nix
 !flake.nix
 !home.nix
-!kernel.nix
 !nvidia/
 !nvidia/**
 !amd/
