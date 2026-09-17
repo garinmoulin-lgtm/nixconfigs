@@ -2003,14 +2003,16 @@ programs.bash = {
     update = "cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake /etc/nixos#nixos --impure && cd && flatpak update -y";
     viconfig = "sudo fresh /etc/nixos/configuration.nix";
     clean = "nh clean all";
+    reload = "source ~/.bashrc";
   };
   bashrcExtra = ''
-    source -- ~/.local/share/blesh/ble.sh
+    source -- "${pkgs.blesh}/share/blesh/ble.sh" --noattach
     eval "$(starship init bash)"
     export PATH=~/bin:$PATH
     export NIXPKGS_ALLOW_UNFREE=1
     export PATH="$HOME/.npm-global/bin:$PATH"
     fastfetch
+    [[ ! ''${BLE_VERSION-} ]] || ble-attach
   '';
 };
 }

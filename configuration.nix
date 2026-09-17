@@ -48,8 +48,9 @@ boot.loader.grub = {
 
   # Select internationalisation properties.
   i18n.defaultLocale = "en_US.UTF-8";
-  #nix helper
+  # Bash line editor
   programs.bash.blesh.enable = true;
+    #nix helper
 programs.nh = {
   enable = true;
   clean = {
