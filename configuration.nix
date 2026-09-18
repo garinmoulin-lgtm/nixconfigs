@@ -255,6 +255,7 @@ programs.git.enable = true;
      lunar-client
      unzip
      yt-dlp
+     xdg-utils
      pkgs.kdePackages.qtmultimedia
      pkgs.qt6.qtmultimedia
      swaynotificationcenter
