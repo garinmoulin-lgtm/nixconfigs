@@ -117,6 +117,20 @@ if [ "$chosen_cores" -gt "$detected_cores" ]; then
 fi
 echo "Using $chosen_cores core(s) for this build."
 
+# Nvidia-only hl.env() lines in home.nix's Hyprland Lua config. On Intel/AMD
+# these force the wrong GLX/GBM/VA-API backends (black screen, llvmpipe
+# software rendering, or broken video decode), so they must be disabled for
+# any non-Nvidia GPU choice. Keep this list in sync with the block in home.nix
+# headed "Nvidia env vars".
+NVIDIA_HYPR_ENV_VARS='LIBVA_DRIVER_NAME|__GLX_VENDOR_LIBRARY_NAME|NVD_BACKEND|GBM_BACKEND|__GL_GSYNC_ALLOWED|__GL_VRR_ALLOWED|WLR_NO_HARDWARE_CURSORS'
+
+# Comments out (Lua "-- ") every line in NVIDIA_HYPR_ENV_VARS. Anchored to the
+# start of the line, so already-commented lines are left alone and re-running
+# this script doesn't stack "-- -- " prefixes.
+disable_nvidia_hypr_env() {
+    sed -i -E "s/^([[:space:]]*)(hl\.env\(\"($NVIDIA_HYPR_ENV_VARS)\")/\1-- \2/" ./home.nix
+}
+
 # --- Modify files locally before copying ---
 echo "Updating configuration files locally in $(pwd)..."
 sed -i "s/garinh/$sys_user/g" ./*.nix
@@ -162,9 +176,7 @@ if [ "$gpu_choice" = "1" ]; then
     sed -i '/boot.extraModprobeConfig =/,/;/s/^/#/' ./configuration.nix
     sed -i '/boot.kernelParams = \[ "nvidia-drm.modeset=1" \];/s/^/#/' ./configuration.nix
     sed -i '/WLR_NO_HARDWARE_CURSORS = "1";/s/^/#/' ./configuration.nix
-    sed -i 's/hl.env("LIBVA_DRIVER_NAME", "nvidia")/-- hl.env("LIBVA_DRIVER_NAME", "nvidia")/g' ./home.nix
-    sed -i 's/hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")/-- hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")/g' ./home.nix
-    sed -i 's/hl.env("GBM_BACKEND", "nvidia-drm")/-- hl.env("GBM_BACKEND", "nvidia-drm")/g' ./home.nix
+    disable_nvidia_hypr_env
 elif [ "$gpu_choice" = "3" ]; then
     echo "Applying AMD GPU configuration..."
     sed -i 's/services.xserver.videoDrivers = \[ "nvidia" \];/services.xserver.videoDrivers = \[ "amdgpu" \];/g' ./configuration.nix
@@ -176,9 +188,7 @@ elif [ "$gpu_choice" = "3" ]; then
     sed -i '/boot.extraModprobeConfig =/,/;/s/^/#/' ./configuration.nix
     sed -i '/boot.kernelParams = \[ "nvidia-drm.modeset=1" \];/s/^/#/' ./configuration.nix
     sed -i '/WLR_NO_HARDWARE_CURSORS = "1";/s/^/#/' ./configuration.nix
-    sed -i 's/hl.env("LIBVA_DRIVER_NAME", "nvidia")/-- hl.env("LIBVA_DRIVER_NAME", "nvidia")/g' ./home.nix
-    sed -i 's/hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")/-- hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")/g' ./home.nix
-    sed -i 's/hl.env("GBM_BACKEND", "nvidia-drm")/-- hl.env("GBM_BACKEND", "nvidia-drm")/g' ./home.nix
+    disable_nvidia_hypr_env
 elif [ "$gpu_choice" = "2" ]; then
     echo "Keeping standard Nvidia GPU configuration..."
 else
@@ -206,6 +216,15 @@ if [ "$cores_dup_count" -gt 1 ]; then
     echo "[FAILED] configuration.nix has $cores_dup_count 'nix.settings.cores' lines (expected 1). Aborting before copy." >&2
     grep -n 'nix.settings.cores = ' ./configuration.nix >&2
     exit 1
+fi
+
+# Sanity check: for Intel/AMD, no Nvidia hl.env() line may remain active in home.nix.
+if [ "$gpu_choice" = "1" ] || [ "$gpu_choice" = "3" ]; then
+    if grep -nE "^[[:space:]]*hl\.env\(\"($NVIDIA_HYPR_ENV_VARS)\"" ./home.nix >/dev/null 2>&1; then
+        echo "[FAILED] Nvidia hl.env() lines are still active in home.nix after the non-Nvidia GPU edit:" >&2
+        grep -nE "^[[:space:]]*hl\.env\(\"($NVIDIA_HYPR_ENV_VARS)\"" ./home.nix >&2
+        exit 1
+    fi
 fi
 
 echo "Copying modified configuration files to /etc/nixos..."
