@@ -271,6 +271,7 @@ programs.git.enable = true;
      ffmpeg
      micro
      hyprlock
+     vlc
      fastfetch
      psmisc
      jq
