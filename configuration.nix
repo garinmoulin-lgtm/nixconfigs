@@ -272,10 +272,11 @@ programs.git.enable = true;
      micro
      hyprlock
      vlc
+     ghostty
      fastfetch
      psmisc
      jq
-     kitty
+     # kitty
      rofi
      btop
      kew

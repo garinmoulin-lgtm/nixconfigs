@@ -713,19 +713,12 @@ hl.bind("SUPER + down", hl.dsp.focus({ direction = "down" }))
 
 -- Trigger the rofi power menu
 
-hl.bind("SUPER" .. " + " .. "Return", hl.dsp.exec_cmd("kitty"))
+hl.bind("SUPER" .. " + " .. "Return", hl.dsp.exec_cmd("ghostty"))
 
 hl.bind("SUPER" .. " + " .. "Q", hl.dsp.window.close())
 
 hl.bind("SUPER + SHIFT" .. " + " .. "E", hl.dsp.exit())
 
--- True minimize without hidden workspaces (Super and Minus)
-
-hl.bind("SUPER" .. " + " .. "minus", hl.dsp.exec_cmd("hyprctl minimize"))
-
--- Unminimize the last minimized window layout item (Super and Equal)
-
-hl.bind("SUPER" .. " + " .. "equal", hl.dsp.exec_cmd("hyprctl unminimize"))
 
 -- Captures the entire screen and copies it directly to your clipboard
 -- Pressing Print captures the entire screen straight to your clipboard
@@ -744,8 +737,6 @@ hl.bind("SUPER + SHIFT" .. " + " .. "V", hl.dsp.exec_cmd("hyprctl clients -j| jq
 -- Toggle Rofi App Launcher using Super and Tab
 
 hl.bind("SUPER" .. " + " .. "TAB", hl.dsp.exec_cmd("pkill rofi || rofi -show drun -theme-str 'window { close-on-click:true; } '"))
-
-hl.bind("SUPER" .. " + " .. "M", hl.dsp.exec_cmd("nautilus"))
 
 -- Delete or replace the bottom section with ONLY this line:
 
@@ -1971,6 +1962,18 @@ color14 #94E2D5
 # white
 color7  #BAC2DE
 color15 #A6ADC8
+'';
+};
+xdg.configFile."ghostty/config.ghostty" = {
+    force = true;
+    text = ''
+theme = Catppuccin Mocha
+background-opacity = 0.7
+
+font-family = JetBrains Mono
+font-size = 11
+font-thicken = true
+font-thicken-strength = 40
 '';
 };
 gtk = {
