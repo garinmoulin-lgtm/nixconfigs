@@ -713,7 +713,7 @@ hl.bind("SUPER + down", hl.dsp.focus({ direction = "down" }))
 
 -- Trigger the rofi power menu
 
-hl.bind("SUPER" .. " + " .. "Return", hl.dsp.exec_cmd("ghostty"))
+hl.bind("SUPER" .. " + " .. "Return", hl.dsp.exec_cmd("kitty"))
 
 hl.bind("SUPER" .. " + " .. "Q", hl.dsp.window.close())
 
@@ -1962,18 +1962,6 @@ color14 #94E2D5
 # white
 color7  #BAC2DE
 color15 #A6ADC8
-'';
-};
-xdg.configFile."ghostty/config.ghostty" = {
-    force = true;
-    text = ''
-theme = Catppuccin Mocha
-background-opacity = 0.7
-
-font-family = JetBrains Mono
-font-size = 11
-font-thicken = true
-font-thicken-strength = 40
 '';
 };
 gtk = {
