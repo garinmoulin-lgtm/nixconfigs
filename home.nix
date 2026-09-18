@@ -829,9 +829,9 @@ input-field {
     dots_size = 0.33 # Size of input-field dots
     dots_spacing = 0.15 # Spacing of input-field dots
     dots_fade_time = 200 # Milliseconds to fade dots on input
-    outer_color = rgb(f2d5cf) # Frappé Mauve
-    inner_color = rgb(48, 52, 70)    # Frappé Base
-    font_color = rgb(f2d5cf)  # Frappé Text
+    outer_color = rgb(f5e0dc) # Mocha Mauve
+    inner_color = rgb(30, 30, 46)    # Mocha Base
+    font_color = rgb(f5e0dc)  # Mocha Text
     fade_on_empty = false
     placeholder_text = <i>Input Password...</i>
     hide_input = false
@@ -843,7 +843,7 @@ input-field {
 label {
     monitor =
     text = cmd[update:1000] echo "$TIME"
-    color = rgb(f2d5cf) # Frappé Text
+    color = rgb(f5e0dc) # Mocha Text
     font_size = 64
     font_family = Ioskeley Mono
     
@@ -1073,12 +1073,12 @@ xdg.configFile."rofi/catppuccin/shared/colors.rasi" = {
 /* Colors */
 
 * {
-    background:     #303446;
-    background-alt: #414559;
-    foreground:     #c6d0f5;
-    selected:       #babbf1; 
-    active:         #a6d189; 
-    urgent:         #e78284; 
+    background:     #1e1e2e;
+    background-alt: #313244;
+    foreground:     #cdd6f4;
+    selected:       #b4befe; 
+    active:         #a6e3a1; 
+    urgent:         #f38ba8; 
 }
 '';
 };
@@ -1220,24 +1220,24 @@ xdg.configFile."swaync/style.css" = {
 	force = true;
 	text = ''
 :root {
-  --cc-bg: rgba(48, 52, 70, 0.7);
-  --noti-border-color: rgba(242, 213, 207, 0.15);
-  --noti-bg: 48, 52, 70;
+  --cc-bg: rgba(30, 30, 46, 0.7);
+  --noti-border-color: rgba(245, 224, 220, 0.15);
+  --noti-bg: 30, 30, 46;
   --noti-bg-alpha: 0.8;
-  --noti-bg-darker: rgb(41, 44, 60);
-  --noti-bg-hover: rgb(65, 69, 89);
-  --noti-bg-focus: rgba(81, 87, 109, 0.6);
-  --noti-close-bg: rgb(81, 87, 109);
-  --noti-close-bg-hover: rgb(98, 104, 128);
-  --text-color: rgb(242, 213, 207);
-  --text-color-disabled: rgb(115, 121, 148);
-  --bg-selected: rgb(242, 213, 207);
+  --noti-bg-darker: rgb(24, 24, 37);
+  --noti-bg-hover: rgb(49, 50, 68);
+  --noti-bg-focus: rgba(69, 71, 90, 0.6);
+  --noti-close-bg: rgb(69, 71, 90);
+  --noti-close-bg-hover: rgb(88, 91, 112);
+  --text-color: rgb(245, 224, 220);
+  --text-color-disabled: rgb(108, 112, 134);
+  --bg-selected: rgb(245, 224, 220);
   --notification-icon-size: 64px;
   --notification-app-icon-size: calc(var(--notification-icon-size) / 3);
   --notification-group-icon-size: 32px;
   --border: 1px solid var(--noti-border-color);
-  --notification-shadow: 0 0 0 1px rgba(35, 38, 52, 0.3),
-    0 1px 3px 1px rgba(35, 38, 52, 0.7), 0 2px 6px 2px rgba(35, 38, 52, 0.3);
+  --notification-shadow: 0 0 0 1px rgba(17, 17, 27, 0.3),
+    0 1px 3px 1px rgba(17, 17, 27, 0.7), 0 2px 6px 2px rgba(17, 17, 27, 0.3);
   --font-size-body: 15px;
   --font-size-summary: 16px;
   /* Deprecated variables (because of their typos). Keeeping them around for backwards compatibility. */
@@ -1248,19 +1248,19 @@ xdg.configFile."swaync/style.css" = {
 }
 
 /* Fallback for older CSS themes — Catppuccin Frappé */
-@define-color cc-bg rgba(48, 52, 70, 0.7);
-@define-color noti-border-color rgba(242, 213, 207, 0.15);
-@define-color noti-bg rgba(48, 52, 70, 0.8);
-@define-color noti-bg-opaque rgb(48, 52, 70);
-@define-color noti-bg-darker rgb(41, 44, 60);
-@define-color noti-bg-hover rgb(65, 69, 89);
-@define-color noti-bg-hover-opaque rgb(65, 69, 89);
-@define-color noti-bg-focus rgba(81, 87, 109, 0.6);
-@define-color noti-close-bg rgba(242, 213, 207, 0.1);
-@define-color noti-close-bg-hover rgba(242, 213, 207, 0.15);
-@define-color text-color rgb(242, 213, 207);
-@define-color text-color-disabled rgb(115, 121, 148);
-@define-color bg-selected rgb(242, 213, 207);
+@define-color cc-bg rgba(30, 30, 46, 0.7);
+@define-color noti-border-color rgba(245, 224, 220, 0.15);
+@define-color noti-bg rgba(30, 30, 46, 0.8);
+@define-color noti-bg-opaque rgb(30, 30, 46);
+@define-color noti-bg-darker rgb(24, 24, 37);
+@define-color noti-bg-hover rgb(49, 50, 68);
+@define-color noti-bg-hover-opaque rgb(49, 50, 68);
+@define-color noti-bg-focus rgba(69, 71, 90, 0.6);
+@define-color noti-close-bg rgba(245, 224, 220, 0.1);
+@define-color noti-close-bg-hover rgba(245, 224, 220, 0.15);
+@define-color text-color rgb(245, 224, 220);
+@define-color text-color-disabled rgb(108, 112, 134);
+@define-color bg-selected rgb(245, 224, 220);
 notificationwindow, blankwindow {
   background: transparent;
 }
@@ -1356,7 +1356,7 @@ notificationwindow, blankwindow {
   /* Notification app icon (only visible when the primary image is set) */
   -gtk-icon-filter: none;
   -gtk-icon-size: var(--notification-app-icon-size);
-  -gtk-icon-shadow: 0 1px 4px rgba(35, 38, 52, 0.8);
+  -gtk-icon-shadow: 0 1px 4px rgba(17, 17, 27, 0.8);
   margin: 6px;
 }
 
@@ -1401,7 +1401,7 @@ notificationwindow, blankwindow {
 .notification-row .notification-background .notification .notification-default-action .notification-content .body-image {
   /* The "extra" optional bottom notification image */
   margin-top: 4px;
-  background-color: rgb(242, 213, 207);
+  background-color: rgb(245, 224, 220);
   -gtk-icon-filter: none;
 }
 
@@ -1601,10 +1601,10 @@ notificationwindow, blankwindow {
 
 /* Mpris widget */
 :root {
-  --mpris-album-art-overlay: rgba(35, 38, 52, 0.55);
-  --mpris-button-hover: rgba(35, 38, 52, 0.5);
+  --mpris-album-art-overlay: rgba(17, 17, 27, 0.55);
+  --mpris-button-hover: rgba(17, 17, 27, 0.5);
   --mpris-album-art-icon-size: 96px;
-  --mpris-album-art-shadow: 0px 0px 10px rgba(35, 38, 52, 0.75);
+  --mpris-album-art-shadow: 0px 0px 10px rgba(17, 17, 27, 0.75);
 }
 
 .widget-mpris {
@@ -1664,8 +1664,8 @@ notificationwindow, blankwindow {
 /* Buttons widget */
 .widget-buttons-grid flowboxchild > button.toggle:checked {
   /* style given to the active toggle button */
-  background-color: rgb(242, 213, 207);
-  color: rgb(35, 38, 52);
+  background-color: rgb(245, 224, 220);
+  color: rgb(17, 17, 27);
 }
 
 /* Menubar widget */
@@ -1715,7 +1715,7 @@ notificationwindow, blankwindow {
 }
 
 .per-app-volume {
-  background-color: rgb(65, 69, 89);
+  background-color: rgb(49, 50, 68);
   margin: 8px;
   margin-bottom: 0;
 }
