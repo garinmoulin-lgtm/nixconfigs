@@ -68,8 +68,21 @@ pkgs.mkShell {
 Keybinds are pretty important. Note that these are opinionated - but don't worry,
 there's not too many. Ill list them:
 
-Super + Up, Down, Left, Right - Select a Hyprland Window
-Super + Shift + Left, Right - Change to Workspace Down and Up, respectively (note that the workspaces scroll sideways but the numbers go up and down.)
+- Super + Up, Down, Left, Right - Select a Window
+- Super + Shift + Left, Right - Change to Workspace Down and Up, respectively (note that the workspaces scroll sideways but the numbers go up and down.)
+- Super + Ctrl + Left, Right - Moves the currently highlighted window to a workspace left and right.
+- Super + Enter - Opens Kitty tty.
+- Super + Tab - Opens Rofi App launcher.
+- Super + Q - Quits an App.
+- Super + F - Maximizes a Window.
+- Super + Shift + F - *Fullscreens* a Window.
+- Super + V - Toggles between Floating and Not floating windows.
+
+Mouse keybinds:
+
+- Super + Hold Left Click - Moves a window. Standard Hyprland.
+- Super + Hold Right Click - Resizes a window, also standard.
+- Just holding RMB at the borders - Resizes; User Friendly addition.
 ## Aliases
 AptNix is built with aliases in mind. What do aliases do? Save you a lot of hassle from memorizing long strings of code.
 Here's my list of Aliases:
