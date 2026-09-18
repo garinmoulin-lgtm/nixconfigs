@@ -25,7 +25,7 @@ boot.loader.grub = {
     repo = "grub";
     rev = "main";              # or pin to a specific commit/tag for reproducibility
     sha256 = "jgM22pvCQvb0bjQQXoiqGMgScR9AgCK3OfDF5Ud+/mk=";                # leave blank first build — Nix will error with the correct hash, paste it back in
-  } + "/src/catppuccin-frappe-grub-theme";
+  } + "/src/catppuccin-mocha-grub-theme";
 };
 
   boot.loader.efi.canTouchEfiVariables = true;
@@ -286,18 +286,12 @@ programs.git.enable = true;
      hyprshot
      gnome-themes-extra
      bibata-cursors
-     catppuccin-cursors.mochaDark
-     catppuccin-cursors.mochaGreen
-     libsForQt5.qt5ct
+     catppuccin-cursors.mochaMauve
      nwg-look
-     qt6Packages.qtstyleplugin-kvantum
-     qt6Packages.qt6ct
-     catppuccin-kvantum
      adwaita-qt
      adwaita-qt6
      pipes
      libreoffice
-     kdePackages.qt6ct
      adwaita-icon-theme
      nautilus
      wl-clipboard
