@@ -194,7 +194,7 @@ programs.nix-ld.enable = true;
   users.users."garinh" = {
     isNormalUser = true;
     description = "garinh";
-    extraGroups = [ "networkmanager" "wheel" "input" "libvirtd" ];
+    extraGroups = [ "networkmanager" "wheel" "input" /*"libvirtd" */];
     packages = with pkgs; [
     #  thunderbird
     ];
@@ -298,7 +298,7 @@ programs.git.enable = true;
      playerctl
      telegram-desktop
      nodejs
-     gnome-boxes
+     # gnome-boxes
   ];
   # Some programs need SUID wrappers, can be configured further or are
   # started in user sessions.
@@ -309,7 +309,7 @@ programs.git.enable = true;
   # };
 # Virtualization
 # Use this. It does use a daemon.
- virtualisation.libvirtd.enable = true;
+ # virtualisation.libvirtd.enable = true;
 # programs.virt-manager.enable = true;
   # List services that you want to enable:
 
