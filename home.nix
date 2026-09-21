@@ -1918,7 +1918,6 @@ color15 #A6ADC8
 };
 gtk = {
   enable = true;
-  gtk4.theme = null;
   theme = {
     name = "catppuccin-mocha-blue-standard"; # whatever GTK theme you have installed
     package = pkgs.catppuccin-gtk.override {
@@ -1927,6 +1926,7 @@ gtk = {
       variant = "mocha";
     };
   };
+    gtk4.theme = config.gtk.theme;
 
 
   font = {
