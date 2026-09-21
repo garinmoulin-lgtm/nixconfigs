@@ -121,8 +121,6 @@ fonts = {
 
     # Ioskeley Mono - the exact Berkeley Mono mimic configuration built over Iosevka
     # Options include: .normal, .normal-NF (Nerd Font patched), .condensed, etc.
-    ioskeley-mono.normal-NF       # Pre-patched with Nerd Font glyphs
-
     # Clean, modern sans-serif typeface
     noto-fonts
   ];
