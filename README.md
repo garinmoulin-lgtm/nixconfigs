@@ -13,6 +13,12 @@ using nix profile, however you may append it as you please to configuration.nix.
 
 I cannot emphasize this enough but it is *absolutely necessary* that you read through the *entire* README.
 
+## News
+I will soon switch over entirely from Mocha to Evergreen forest and clean up bits of my code. It's hard doing it but with the help of AI nowadays
+it should be fine.
+
+Note that I am still defining colors, adding flakes manually and cleaning code, but I'm letting AI translate the color
+palettes from one to another to be less of a load. Thanks.
 ## Installation (WIP - UNSTABLE)
 Copy and paste the block below to install.
 ```bash
