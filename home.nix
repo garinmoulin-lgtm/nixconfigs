@@ -7,301 +7,252 @@
 
   programs.home-manager.enable = true;
 
-  xdg.configFile."waybar/config.jsonc" = {
-  force = true;
-  text = ''
-{
-    "layer": "top",
-    "position": "top",
-    "margin-top": 8,
-    "margin-left": 10,
-    "margin-right": 10,
-    "spacing": 1,
-	"height": 30, // bump this up from whatever it currently is
-    "modules-left": [
-        "group/hardware",
-        "hyprland/workspaces",
-        "hyprland/window"
-    ],
-    "modules-center": [
-    	"group/media-player",
-        "custom/media-time",
-        "tray"
-    ],
-    "modules-right": [
-    	"clock",
-        "wireplumber#sink",
-        "network",
-        "group/session"
-    ],
-    "hyprland/workspaces": {
-        "format": "{id}",
-        "on-click": "activate"
-    },
-    "hyprland/window": {
-        "format": "<span color='#cdd6f4'>  {title}  </span>",
-        "max-length": 35,
-        "rewrite": {
-            "(.*) - Mozilla Firefox": "🌎 $1",
-            "(.*) - zsh": "> [$1]"
-        }
-    },
-	"group/hardware": {
-	    "orientation": "horizontal",
-	    "modules": [
-	        "power-profiles-daemon",
-	        "memory",
-	        "cpu",
-	        "disk"
-	    ]
-	},
-	
-    "group/session": {
-        "orientation": "horizontal",
-        "modules": [
-            "custom/lock",
-            "custom/reboot",
-            "custom/sleep",
-            "custom/power",
-            "custom/logout"
-        ]
-    },
-    "custom/lock": {
-        "format": "<span color='#f5e0dc'> 󰌾  </span>",
-        "on-click": "env TZ='America/Chicago' hyprlock",
-        "tooltip": true,
-        "tooltip-format": "Lock screen"
-    },
-    "custom/reboot": {
-        "format": "<span color='#f5e0dc'>  󰜉  </span>",
-        "on-click": "systemctl reboot",
-        "tooltip": true,
-        "tooltip-format": "Reboot"
-    },
-    "custom/sleep": {
-        "format": "<span color='#f5e0dc'>  󰤄  </span>",
-        "on-click": "systemctl suspend",
-        "tooltip": true,
-        "tooltip-format": "Sleep"
-    },
-    "custom/power": {
-        "format": "<span color='#f5e0dc'>  󰐥  </span>",
-        "on-click": "systemctl poweroff",
-        "tooltip": true,
-        "tooltip-format": "Power Off"
-    },
-    "custom/logout": {
-        "format": "<span color='#f5e0dc'>  󰈆 </span>",
-        "on-click": "pkill Hyprland",
-        "tooltip": true,
-        "tooltip-format": "Log Out"
-    },
-    "clock": {
-        "format": "<span color='#f5e0dc'> 󰥔 </span><span color='#cdd6f4'>{:%I:%M %p 󰃮 %B %d, %Y}</span>",
-        "format-alt": "<span color='#f5e0dc'> 󰥔 </span><span color='#cdd6f4'>{:%I:%M %p}</span>",
-        "tooltip-format": "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>",
-        "timezone": "America/Chicago",
-        "calendar": {
-            "mode": "month",
-            "mode-mon-col": 3,
-            "weeks-pos": "right",
-            "on-scroll": 1,
-            "on-click-right": "mode",
-            "format": {
-                "months": "<span color='#f5e0dc'><b>{}</b></span>",
-                "days": "<span color='#f5e0dc'>{}</span>",
-                "weeks": "<span color='#f5e0dc'><b>W{}</b></span>",
-                "weekdays": "<span color='#f5e0dc'><b>{}</b></span>",
-                "today": "<span color='#f5e0dc'><b><u>{}</u></b></span>"
-            }
-        },
-        "actions": {
-            "on-click-right": "mode",
-            "on-click-forward": "tz_up",
-            "on-click-backward": "tz_down",
-            "on-scroll-up": "shift_up",
-            "on-scroll-down": "shift_down"
-        }
-    },
-    "cpu": {
-        "format": "<span color=\"#f5e0dc\">󰘚</span> <span color=\"#cdd6f4\">{usage}%</span>",
-        "on-click": "kitty -e btop",
-        "interval": 1,
-    },
-	"memory": {
-	    "format": "<span color=\"#f5e0dc\">󰍛</span> <span color=\"#cdd6f4\">{used:0.1f}GiB</span>",
-	    "interval": 1,
-	    "on-click": "kitty -e btop"
-	},
-	
-   /* "battery": {
-        "states": {
-            "good": 95,
-            "warning": 30,
-            "critical": 15
-        },
-        "format": "{icon} {capacity}%",
-        "format-charging": "󰂄 {capacity}%",
-        "format-plugged": "󰚥 {capacity}%",
-        "format-alt": "{icon} {time}",
-        "format-icons": [
-            "󰂎",
-            "󰁺",
-            "󰁻",
-            "󰁼",
-            "󰁽",
-            "󰁾",
-            "󰁿",
-            "󰂀",
-            "󰂁",
-            "󰂂",
-            "󰁹"
-        ]
-    },*/
-    "custom/media-time": {
-        "exec": "~/.config/waybar/scripts/media-time.sh",
-        "format": "<span color=\"#cdd6f4\">  {} </span>",
-        "interval": 1,
-        "tooltip": false
-    },
-    "network": {
-        "format-wifi": "<span color=\"#f5e0dc\">󰖩</span> <span color=\"#cdd6f4\">{essid} ({signalStrength}%) </span>",
-        "format-ethernet": "<span color=\"#f5e0dc\">󰈀</span> <span color=\"#cdd6f4\">{ifname}</span>",
-        "format-linked": "<span color=\"#f5e0dc\">󰈀</span> <span color=\"#cdd6f4\">{ifname} (No IP)</span>",
-        "format-disconnected": "<span color=\"#f38ba8\">󰖪</span> <span color=\"#cdd6f4\">Disconnected</span>",
-        "format-alt": "{ifname}: {ipaddr}/{cidr}",
-        "tooltip-format": "{ifname}: {ipaddr}",
-        "on-click-right": "kitty -e nmtui"
-    },
-    "group/media-player": {
-        "orientation": "horizontal",
-        "modules": [
-            "custom/media",
-            "custom/media-prev",
-            "custom/media-next"
-        ]
-    },
-	"custom/media": {
-	    "format": " {icon} <span color=\"#cdd6f4\">{text} </span>",
-	    "return-type": "json",
-	    "max-length": 25,
-	    "restart-interval": 1,
-	    "format-icons": {
-	        "Playing": "<span color=\"#a6e3a1\" font_size=\"large\"> 󰏦 </span>",
-	        "Paused": "<span color=\"#f9e2af\" font_size=\"large\"> 󰐍 </span>",
-	        "Stopped": "<span color=\"#f38ba8\" font_size=\"large\"> 󰝛 </span>"
-	    },
-	    "exec": "playerctl metadata --follow --format '{\"text\": \"{{markup_escape(title)}}\", \"tooltip\": \"{{playerName}} : {{markup_escape(title)}}\", \"alt\": \"{{status}}\", \"class\": \"{{status}}\"}' 2>/dev/null || echo '{\"text\": \"Nothing playing\", \"alt\": \"Stopped\", \"class\": \"Stopped\", \"tooltip\": \"No media\"}'",
-	    "return-type": "json",
-	    "exec-if": "true",
-	    "on-click": "playerctl play-pause",
-	    "on-scroll-up": "playerctl next",
-	    "on-scroll-down": "playerctl previous"
-	},
-	"custom/media-prev": {
-		"interval": 1,
-	    "exec": "playerctl status 2>/dev/null | grep -q 'Playing\\|Paused' && echo '{\"text\": \"  󰼥  \", \"class\": \"active\"}' || echo '{\"text\": \"\", \"class\": \"inactive\"}'",
-	    "return-type": "json",
-	    "on-click": "playerctl previous",
-	    "tooltip": false
-	},
-	"custom/media-next": {
-		"interval": 1,
-	    "exec": "playerctl status 2>/dev/null | grep -q 'Playing\\|Paused' && echo '{\"text\": \"  󰼦  \", \"class\": \"active\"}' || echo '{\"text\": \"\", \"class\": \"inactive\"}'",
-	    "return-type": "json",
-	    "on-click": "playerctl next",
-	    "tooltip": false
-	},
-    "wireplumber#sink": {
-        "format": "{icon} <span color=\"#cdd6f4\">{volume}%</span>",
-        "format-muted": "<span color=\"#f5e0dc\">󰝟</span>",
-        "format-icons": [
-            "<span color=\"#f5e0dc\">󰕿</span>",
-            "<span color=\"#f5e0dc\">󰖀</span>",
-            "<span color=\"#f5e0dc\">󰕾</span>"
-        ],
-        "on-click": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
-        "on-scroll-down": "wpctl set-volume @DEFAULT_SINK@ 1%-",
-        "on-scroll-up": "wpctl set-volume @DEFAULT_SINK@ 1%+ --limit 1.0"
-    },
-    "disk": {
-        "interval": 30,
-        "format": "<span color=\"#f5e0dc\">󰋊</span> <span color=\"#cdd6f4\">{percentage_used}%</span>",
-        "path": "/"
-    },
-    "tray": {
-        "icon-size": 16,
-        "spacing": 5
-    },
-    "power-profiles-daemon": {
-        "format": "{icon}",
-        "tooltip-format": "Power profile: {profile}\nDriver: {driver}",
-        "tooltip": true,
-        "format-icons": {
-            "default": "<span color=\"#f5e0dc\">󰾞</span>",
-            "performance": "<span color=\"#f5e0dc\">󱐋</span>",
-            "balanced": "<span color=\"#f5e0dc\">󰗑</span>",
-            "power-saver": "<span color=\"#f5e0dc\">󰌪</span>"
-        }
-    }
-}
-
-'';
-};
-  xdg.configFile."waybar/style.css" = {
-  	
-  force = true;
-  text = ''
+  programs.waybar = {
+    enable = true;
+    # Same override as configuration.nix, so the waybar HM installs is the identical build
+    package = pkgs.waybar.overrideAttrs (old: {
+      buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.modemmanager ];
+      mesonFlags = (old.mesonFlags or [ ]) ++ [
+        "-Dcava=disabled"
+        "-Dsystemd=disabled"
+      ];
+      env.NIX_CFLAGS_COMPILE = "-march=native -O3";
+      doInstallCheck = false;
+    });
+    settings = {
+      mainBar = {
+      layer = "top";
+      position = "top";
+      margin-top = 8;
+      margin-left = 10;
+      margin-right = 10;
+      spacing = 1;
+      height = 30;
+      modules-left = [ "group/hardware" "hyprland/workspaces" "hyprland/window" ];
+      modules-center = [ "group/media-player" "custom/media-time" "tray" ];
+      modules-right = [ "clock" "wireplumber#sink" "network" "group/session" ];
+      "hyprland/workspaces" = {
+        format = "{id}";
+        on-click = "activate";
+      };
+      "hyprland/window" = {
+        format = "<span color='#cdd6f4'>  {title}  </span>";
+        max-length = 35;
+        rewrite = {
+          "(.*) - Mozilla Firefox" = "🌎 $1";
+          "(.*) - zsh" = "> [$1]";
+        };
+      };
+      "group/hardware" = {
+        orientation = "horizontal";
+        modules = [ "power-profiles-daemon" "memory" "cpu" "disk" ];
+      };
+      "group/session" = {
+        orientation = "horizontal";
+        modules = [
+          "custom/lock"
+          "custom/reboot"
+          "custom/sleep"
+          "custom/power"
+          "custom/logout"
+        ];
+      };
+      "custom/lock" = {
+        format = "<span color='#f5e0dc'> 󰌾  </span>";
+        on-click = "env TZ='America/Chicago' hyprlock";
+        tooltip = true;
+        tooltip-format = "Lock screen";
+      };
+      "custom/reboot" = {
+        format = "<span color='#f5e0dc'>  󰜉  </span>";
+        on-click = "systemctl reboot";
+        tooltip = true;
+        tooltip-format = "Reboot";
+      };
+      "custom/sleep" = {
+        format = "<span color='#f5e0dc'>  󰤄  </span>";
+        on-click = "systemctl suspend";
+        tooltip = true;
+        tooltip-format = "Sleep";
+      };
+      "custom/power" = {
+        format = "<span color='#f5e0dc'>  󰐥  </span>";
+        on-click = "systemctl poweroff";
+        tooltip = true;
+        tooltip-format = "Power Off";
+      };
+      "custom/logout" = {
+        format = "<span color='#f5e0dc'>  󰈆 </span>";
+        on-click = "pkill Hyprland";
+        tooltip = true;
+        tooltip-format = "Log Out";
+      };
+      clock = {
+        format = "<span color='#f5e0dc'> 󰥔 </span><span color='#cdd6f4'>{:%I:%M %p 󰃮 %B %d, %Y}</span>";
+        format-alt = "<span color='#f5e0dc'> 󰥔 </span><span color='#cdd6f4'>{:%I:%M %p}</span>";
+        tooltip-format = "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>";
+        timezone = "America/Chicago";
+        calendar = {
+          mode = "month";
+          mode-mon-col = 3;
+          weeks-pos = "right";
+          on-scroll = 1;
+          on-click-right = "mode";
+          format = {
+            months = "<span color='#f5e0dc'><b>{}</b></span>";
+            days = "<span color='#f5e0dc'>{}</span>";
+            weeks = "<span color='#f5e0dc'><b>W{}</b></span>";
+            weekdays = "<span color='#f5e0dc'><b>{}</b></span>";
+            today = "<span color='#f5e0dc'><b><u>{}</u></b></span>";
+          };
+        };
+        actions = {
+          on-click-right = "mode";
+          on-click-forward = "tz_up";
+          on-click-backward = "tz_down";
+          on-scroll-up = "shift_up";
+          on-scroll-down = "shift_down";
+        };
+      };
+      cpu = {
+        format = ''<span color="#f5e0dc">󰘚</span> <span color="#cdd6f4">{usage}%</span>'';
+        on-click = "kitty -e btop";
+        interval = 1;
+      };
+      memory = {
+        format = ''<span color="#f5e0dc">󰍛</span> <span color="#cdd6f4">{used:0.1f}GiB</span>'';
+        interval = 1;
+        on-click = "kitty -e btop";
+      };
+      "custom/media-time" = {
+        exec = "~/.config/waybar/scripts/media-time.sh";
+        format = ''<span color="#cdd6f4">  {} </span>'';
+        interval = 1;
+        tooltip = false;
+      };
+      network = {
+        format-wifi = ''<span color="#f5e0dc">󰖩</span> <span color="#cdd6f4">{essid} ({signalStrength}%) </span>'';
+        format-ethernet = ''<span color="#f5e0dc">󰈀</span> <span color="#cdd6f4">{ifname}</span>'';
+        format-linked = ''<span color="#f5e0dc">󰈀</span> <span color="#cdd6f4">{ifname} (No IP)</span>'';
+        format-disconnected = ''<span color="#f38ba8">󰖪</span> <span color="#cdd6f4">Disconnected</span>'';
+        format-alt = "{ifname}: {ipaddr}/{cidr}";
+        tooltip-format = "{ifname}: {ipaddr}";
+        on-click-right = "kitty -e nmtui";
+      };
+      "group/media-player" = {
+        orientation = "horizontal";
+        modules = [ "custom/media" "custom/media-prev" "custom/media-next" ];
+      };
+      "custom/media" = {
+        format = '' {icon} <span color="#cdd6f4">{text} </span>'';
+        return-type = "json";
+        max-length = 25;
+        restart-interval = 1;
+        format-icons = {
+          Playing = ''<span color="#a6e3a1" font_size="large"> 󰏦 </span>'';
+          Paused = ''<span color="#f9e2af" font_size="large"> 󰐍 </span>'';
+          Stopped = ''<span color="#f38ba8" font_size="large"> 󰝛 </span>'';
+        };
+        exec = "playerctl metadata --follow --format '{\"text\": \"{{markup_escape(title)}}\", \"tooltip\": \"{{playerName}} : {{markup_escape(title)}}\", \"alt\": \"{{status}}\", \"class\": \"{{status}}\"}' 2>/dev/null || echo '{\"text\": \"Nothing playing\", \"alt\": \"Stopped\", \"class\": \"Stopped\", \"tooltip\": \"No media\"}'";
+        exec-if = "true";
+        on-click = "playerctl play-pause";
+        on-scroll-up = "playerctl next";
+        on-scroll-down = "playerctl previous";
+      };
+      "custom/media-prev" = {
+        interval = 1;
+        exec = "playerctl status 2>/dev/null | grep -q 'Playing\\|Paused' && echo '{\"text\": \"  󰼥  \", \"class\": \"active\"}' || echo '{\"text\": \"\", \"class\": \"inactive\"}'";
+        return-type = "json";
+        on-click = "playerctl previous";
+        tooltip = false;
+      };
+      "custom/media-next" = {
+        interval = 1;
+        exec = "playerctl status 2>/dev/null | grep -q 'Playing\\|Paused' && echo '{\"text\": \"  󰼦  \", \"class\": \"active\"}' || echo '{\"text\": \"\", \"class\": \"inactive\"}'";
+        return-type = "json";
+        on-click = "playerctl next";
+        tooltip = false;
+      };
+      "wireplumber#sink" = {
+        format = ''{icon} <span color="#cdd6f4">{volume}%</span>'';
+        format-muted = ''<span color="#f5e0dc">󰝟</span>'';
+        format-icons = [
+          ''<span color="#f5e0dc">󰕿</span>''
+          ''<span color="#f5e0dc">󰖀</span>''
+          ''<span color="#f5e0dc">󰕾</span>''
+        ];
+        on-click = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle";
+        on-scroll-down = "wpctl set-volume @DEFAULT_SINK@ 1%-";
+        on-scroll-up = "wpctl set-volume @DEFAULT_SINK@ 1%+ --limit 1.0";
+      };
+      disk = {
+        interval = 30;
+        format = ''<span color="#f5e0dc">󰋊</span> <span color="#cdd6f4">{percentage_used}%</span>'';
+        path = "/";
+      };
+      tray = {
+        icon-size = 16;
+        spacing = 5;
+      };
+      power-profiles-daemon = {
+        format = "{icon}";
+        tooltip-format = "Power profile: {profile}\nDriver: {driver}";
+        tooltip = true;
+        format-icons = {
+          default = ''<span color="#f5e0dc">󰾞</span>'';
+          performance = ''<span color="#f5e0dc">󱐋</span>'';
+          balanced = ''<span color="#f5e0dc">󰗑</span>'';
+          power-saver = ''<span color="#f5e0dc">󰌪</span>'';
+        };
+      };
+    };
+    };
+    style = lib.mkForce ''
 /* Catppuccin Mocha Colors - AptNix, by gmlgtm */
  @define-color background #1e1e2e; /* Base */
  @define-color background-light #313244; /* Surface0 */
- @define-color foreground #f5e0dc; /* Text */
+ @define-color foreground #f5e0dc; /* Rosewater */
  @define-color black #585b70; /* Surface2 */
- @define-color red #f5e0dc; /* Red */
- @define-color green #f5e0dc; /* Green */
- @define-color yellow #f5e0dc; /* Yellow */
- @define-color blue #f5e0dc; /* Blue */
- @define-color magenta #f5e0dc; /* Pink */
- @define-color cyan #f5e0dc; /* Sky */
+ @define-color crust #11111b; /* Crust */
+ @define-color subtext #a6adc8; /* Subtext0 */
  @define-color white #cdd6f4; /* Text */
- @define-color orange #f5e0dc; /* Peach */
  
  /* Module-specific colors */
  @define-color workspaces-color @foreground;
- @define-color workspaces-focused-bg @green;
- @define-color workspaces-focused-fg @cyan;
- @define-color workspaces-urgent-bg @red;
+ @define-color workspaces-focused-bg @foreground;
+ @define-color workspaces-focused-fg @foreground;
+ @define-color workspaces-urgent-bg @foreground;
  @define-color workspaces-urgent-fg @black;
  
  /* Text and border colors for modules */
- @define-color mode-color @orange;
- @define-color group-hardware-color #f5e0dc;
- @define-color group-session-color @red;
- @define-color clock-color @blue;
- @define-color cpu-color @green;
- @define-color memory-color @magenta;
- @define-color temperature-color @yellow;
- @define-color temperature-critical-color @red;
- @define-color battery-color @cyan;
- @define-color battery-charging-color @green;
- @define-color battery-warning-color @yellow;
- @define-color battery-critical-color @red;
- @define-color network-color @blue;
- @define-color network-disconnected-color @red;
- @define-color pulseaudio-color @orange;
- @define-color pulseaudio-muted-color @red;
- @define-color wireplumber-color @orange;
- @define-color wireplumber-muted-color @red;
- @define-color backlight-color @yellow;
- @define-color disk-color @cyan;
- @define-color updates-color @orange;
- @define-color quote-color @green;
+ @define-color mode-color @foreground;
+ @define-color group-hardware-color @foreground;
+ @define-color group-session-color @foreground;
+ @define-color clock-color @foreground;
+ @define-color cpu-color @foreground;
+ @define-color memory-color @foreground;
+ @define-color temperature-color @foreground;
+ @define-color temperature-critical-color @foreground;
+ @define-color battery-color @foreground;
+ @define-color battery-charging-color @foreground;
+ @define-color battery-warning-color @foreground;
+ @define-color battery-critical-color @foreground;
+ @define-color network-color @foreground;
+ @define-color network-disconnected-color @foreground;
+ @define-color pulseaudio-color @foreground;
+ @define-color pulseaudio-muted-color @foreground;
+ @define-color wireplumber-color @foreground;
+ @define-color wireplumber-muted-color @foreground;
+ @define-color backlight-color @foreground;
+ @define-color disk-color @foreground;
+ @define-color updates-color @foreground;
+ @define-color quote-color @foreground;
  @define-color idle-inhibitor-color @foreground;
- @define-color idle-inhibitor-active-color @red;
- @define-color power-profiles-daemon-color @cyan;
- @define-color power-profiles-daemon-performance-color @red;
- @define-color power-profiles-daemon-balanced-color @yellow;
- @define-color power-profiles-daemon-power-saver-color @green;
+ @define-color idle-inhibitor-active-color @foreground;
+ @define-color power-profiles-daemon-color @foreground;
+ @define-color power-profiles-daemon-performance-color @foreground;
+ @define-color power-profiles-daemon-balanced-color @foreground;
+ @define-color power-profiles-daemon-power-saver-color @foreground;
  
  * {
      /* Base styling for all modules */
@@ -333,7 +284,7 @@
  #tray {
      padding: 2px 10px;
      margin: 2px 4px;
-     border: 2px solid #f5e0dc;
+     border: 2px solid @foreground;
      background-color: transparent;
  }
  
@@ -348,51 +299,51 @@
     min-height: 0;
     padding: 2px 7px;
     margin: 0 3px;
-    border: 2px solid #f5e0dc;
+    border: 2px solid @foreground;
     background-color: transparent;
-    color: #f5e0dc;
+    color: @foreground;
     font-weight: 600;
 }
 
 #workspaces button label {
     opacity: 1;
-    color: #cdd6f4;
+    color: @white;
 }
 
 #workspaces button:hover {
-    background-color: alpha(#f5e0dc, 0.25);
+    background-color: alpha(@foreground, 0.25);
 }
 
 #workspaces button.active,
 #workspaces button.focused {
-    background-color: #f5e0dc;
-    border-color: #f5e0dc;
-    color: #11111b;
+    background-color: @foreground;
+    border-color: @foreground;
+    color: @crust;
 }
 
 #workspaces button.active label,
 #workspaces button.focused label {
-    color: #11111b;
+    color: @crust;
 }
 
 #workspaces button.urgent {
-    background-color: #f5e0dc;
-    border-color: #f5e0dc;
-    color: #11111b;
+    background-color: @foreground;
+    border-color: @foreground;
+    color: @crust;
 }
 
- /* Module-specific text styling (borders globally set to #f5e0dc) */
+ /* Module-specific text styling (borders globally set to @foreground) */
  #mode {
      color: @mode-color;
  }
  
  #custom-hardware-wrap {
-     color: #11111b;
-     background-color: #f5e0dc;
+     color: @crust;
+     background-color: @foreground;
  }
 
  #window {
-     color: #f5e0dc;
+     color: @foreground;
      padding: 2px 10px;
  }
  
@@ -413,8 +364,8 @@
  }
 
  #temperature.critical {
-     color: #11111b;
-     background-color: #f5e0dc;
+     color: @crust;
+     background-color: @foreground;
  }
 
  #network {
@@ -446,21 +397,21 @@
  }
  
  #cpu-group {
-     color: #11111b;
-     background-color: #f5e0dc;
-     border: 2px solid #f5e0dc;
+     color: @crust;
+     background-color: @foreground;
+     border: 2px solid @foreground;
  }
  
  #custom-gpu {
-     color: #11111b;
-     background-color: #f5e0dc; 
-     border: 2px solid #f5e0dc;
+     color: @crust;
+     background-color: @foreground; 
+     border: 2px solid @foreground;
  }
  
  #custom-gpu-temperature {
-     color: #11111b;
-     background-color: #f5e0dc;
-     border: 2px solid #f5e0dc;
+     color: @crust;
+     background-color: @foreground;
+     border: 2px solid @foreground;
  }
  
  #battery {
@@ -514,40 +465,40 @@
  }
  
  tooltip {
-     background: #1e1e2e;
-     border: 2px solid #f5e0dc;
+     background: @background;
+     border: 2px solid @foreground;
      border-radius: 0;
  }
 
  #custom-media-next.active {
-     color: #f5e0dc;
+     color: @foreground;
  }
 
  #custom-media-prev.active {
-     color: #f5e0dc;
+     color: @foreground;
  }
 
  /* Tray Menu Styling */
  #tray menu {
-     background: #11111b;
-     border: 1px solid #f5e0dc;
+     background: @crust;
+     border: 1px solid @foreground;
      padding: 6px;
  }
  
  #tray menu menuitem {
-     color: #f5e0dc;
+     color: @foreground;
      padding: 4px 12px;
      transition: all 0.2s ease;
  }
  
  #tray menu menuitem:hover {
-     background: #f5e0dc;
-     color: #11111b;
+     background: @foreground;
+     color: @crust;
  }
  
  #tray {
      background-color: transparent;
-     border-color: #f5e0dc;
+     border-color: @foreground;
      padding: 0 10px;
      margin: 0 2px;
  }
@@ -558,7 +509,7 @@
  
  #tray>.needs-attention {
      -gtk-icon-effect: highlight;
-     color: @red;
+     color: @foreground;
  }
  
 /* Base window */
@@ -568,8 +519,8 @@ window#waybar {
 
 /* Outer Waybar Container */
 window#waybar > box {
-    background-color: #1e1e2e;
-    border: 2px solid #a6adc8;
+    background-color: @background;
+    border: 2px solid @subtext;
     padding: 2px 6px;
 }
  
@@ -577,11 +528,17 @@ window#waybar > box {
  #modules-right > widget:last-child {
      margin: 0 4px;
 }
-'';
-};
-  xdg.configFile."hypr/hyprland.lua" = {
-  force = true;
-  text = ''
+    '';
+  };
+
+  wayland.windowManager.hyprland = {
+    enable = true;
+    package = null;        # use programs.hyprland from configuration.nix
+    portalPackage = null;  # portal already set in configuration.nix
+    configType = "lua";
+    settings = lib.mkForce { };
+    systemd.enable = false; # your Lua already runs dbus-update-activation-environment
+    extraConfig = ''
 -- Generated by hyprconf2lua v1.3.2
 -- https://github.com/Prateek-squadron/hyprconf2lua
 -- Manual review may be needed for complex directives
@@ -795,248 +752,192 @@ hl.plugin.hyprbars.add_button({
     action = "hyprctl dispatch 'hl.dsp.window.float({action=\"toggle\"})'",
 })
 ]]
-'';
-};
-  xdg.configFile."rofi/config.rasi" = {
-  force = true;
-  text = ''
-  
-@theme "~/.config/rofi/catppuccin/launcher.rasi"
+    '';
+  };
 
-'';
-};
-  xdg.configFile."rofi/catppuccin/launcher.rasi" = {
-  force = true;
-  text = ''
-  /**
- * Copyright (C) 2020-2024 Aditya Shakya <adi1090x@gmail.com>
- **/
+  programs.rofi = {
+    enable = true;
+    settings = {
+      modi = "drun,run,filebrowser";
+      show-icons = true;
+      display-drun = "";
+      display-run = "";
+      display-filebrowser = "";
+      drun-display-format = "{name}";
+    };
+    theme = lib.mkForce (
+      let
+        inherit (config.lib.formats.rasi) mkLiteral;
+      in
+      {
+        "*" = {
+          background = mkLiteral "#1e1e2e";
+          background-alt = mkLiteral "#313244";
+          foreground = mkLiteral "#cdd6f4";
+          selected = mkLiteral "#b4befe";
+          active = mkLiteral "#a6e3a1";
+          urgent = mkLiteral "#f38ba8";
+          font = "JetBrainsMono Nerd Font 11";
+        };
+        "window" = {
+          transparency = "real";
+          location = mkLiteral "west";
+          anchor = mkLiteral "west";
+          fullscreen = false;
+          width = mkLiteral "500px";
+          height = mkLiteral "96%";
+          x-offset = mkLiteral "20px";
+          y-offset = mkLiteral "0px";
+          enabled = true;
+          margin = mkLiteral "0px";
+          padding = mkLiteral "0px";
+          border = mkLiteral "4px solid";
+          border-color = mkLiteral "@background-alt";
+          cursor = "default";
+          background-color = mkLiteral "@background";
+        };
+        "mainbox" = {
+          enabled = true;
+          spacing = mkLiteral "20px";
+          margin = mkLiteral "0px";
+          padding = mkLiteral "20px";
+          background-color = mkLiteral "transparent";
+          children = [ "inputbar" "message" "listview" "mode-switcher" ];
+        };
+        "inputbar" = {
+          enabled = true;
+          spacing = mkLiteral "10px";
+          margin = mkLiteral "0px";
+          padding = mkLiteral "10px";
+          background-color = mkLiteral "@background-alt";
+          text-color = mkLiteral "@foreground";
+          children = [ "textbox-prompt-colon" "entry" ];
+        };
+        "prompt" = {
+          enabled = true;
+          background-color = mkLiteral "inherit";
+          text-color = mkLiteral "inherit";
+        };
+        "textbox-prompt-colon" = {
+          enabled = true;
+          padding = mkLiteral "0px";
+          expand = false;
+          str = " ";
+          background-color = mkLiteral "inherit";
+          text-color = mkLiteral "inherit";
+        };
+        "entry" = {
+          enabled = true;
+          padding = mkLiteral "0px";
+          background-color = mkLiteral "inherit";
+          text-color = mkLiteral "inherit";
+          cursor = mkLiteral "text";
+          placeholder = "Search...";
+          placeholder-color = mkLiteral "inherit";
+        };
+        "listview" = {
+          enabled = true;
+          columns = 1;
+          lines = 12;
+          cycle = true;
+          dynamic = true;
+          scrollbar = true;
+          layout = mkLiteral "vertical";
+          reverse = false;
+          fixed-height = true;
+          fixed-columns = true;
+          spacing = mkLiteral "5px";
+          background-color = mkLiteral "transparent";
+          text-color = mkLiteral "@foreground";
+          cursor = "default";
+        };
+        "scrollbar" = {
+          handle-width = mkLiteral "5px";
+          handle-color = mkLiteral "@selected";
+          background-color = mkLiteral "@background-alt";
+        };
+        "element" = {
+          enabled = true;
+          spacing = mkLiteral "10px";
+          margin = mkLiteral "0px";
+          padding = mkLiteral "6px";
+          background-color = mkLiteral "transparent";
+          text-color = mkLiteral "@foreground";
+          cursor = mkLiteral "pointer";
+        };
+        "element normal.normal, element alternate.normal" = {
+          background-color = mkLiteral "var(background)";
+          text-color = mkLiteral "var(foreground)";
+        };
+        "element normal.urgent, element alternate.urgent, element selected.active" = {
+          background-color = mkLiteral "var(urgent)";
+          text-color = mkLiteral "var(background)";
+        };
+        "element normal.active, element alternate.active, element selected.urgent" = {
+          background-color = mkLiteral "var(active)";
+          text-color = mkLiteral "var(background)";
+        };
+        "element selected.normal" = {
+          background-color = mkLiteral "var(selected)";
+          text-color = mkLiteral "var(background)";
+        };
+        "element-icon" = {
+          background-color = mkLiteral "transparent";
+          text-color = mkLiteral "inherit";
+          size = mkLiteral "24px";
+          cursor = mkLiteral "inherit";
+        };
+        "element-text" = {
+          background-color = mkLiteral "transparent";
+          text-color = mkLiteral "inherit";
+          highlight = mkLiteral "inherit";
+          cursor = mkLiteral "inherit";
+          vertical-align = mkLiteral "0.5";
+          horizontal-align = mkLiteral "0.0";
+        };
+        "mode-switcher" = {
+          enabled = true;
+          spacing = mkLiteral "10px";
+          margin = mkLiteral "0px";
+          padding = mkLiteral "0px 0px";
+          background-color = mkLiteral "transparent";
+          text-color = mkLiteral "@foreground";
+        };
+        "button" = {
+          padding = mkLiteral "10px";
+          background-color = mkLiteral "@background-alt";
+          text-color = mkLiteral "inherit";
+          cursor = mkLiteral "pointer";
+        };
+        "button selected" = {
+          background-color = mkLiteral "var(urgent)";
+          text-color = mkLiteral "var(background)";
+        };
+        "message" = {
+          enabled = true;
+          margin = mkLiteral "0px";
+          padding = mkLiteral "10px";
+          background-color = mkLiteral "@background-alt";
+          text-color = mkLiteral "@foreground";
+        };
+        "textbox" = {
+          background-color = mkLiteral "transparent";
+          text-color = mkLiteral "@foreground";
+          vertical-align = mkLiteral "0.5";
+          horizontal-align = mkLiteral "0.0";
+          highlight = mkLiteral "none";
+          placeholder-color = mkLiteral "@foreground";
+          blink = true;
+          markup = true;
+        };
+        "error-message" = {
+          padding = mkLiteral "20px";
+          background-color = mkLiteral "@background";
+          text-color = mkLiteral "@foreground";
+        };
+      });
+  };
 
-/*****----- Configuration -----*****/
-configuration {
-	modi:                       "drun,run,filebrowser";
-    show-icons:                 true;
-    display-drun:               "";
-    display-run:                "";
-    display-filebrowser:        "";
-	drun-display-format:        "{name}";
-}
-
-/*****----- Global Properties -----*****/
-@import                          "shared/colors.rasi"
-@import                          "shared/fonts.rasi"
-
-/*****----- Main Window -----*****/
-window {
-    /* properties for window widget */
-    transparency:                "real";
-    location:                    west;
-    anchor:                      west;
-    fullscreen:                  false;
-    width:                       500px;
-    height:                      96%;
-    x-offset:                    20px;
-    y-offset:                    0px;
-
-    /* properties for all widgets */
-    enabled:                     true;
-    margin:                      0px;
-    padding:                     0px;
-    border:                      4px solid;
-    border-color:                @background-alt;
-    cursor:                      "default";
-    background-color:            @background;
-}
-
-/*****----- Main Box -----*****/
-mainbox {
-    enabled:                     true;
-    spacing:                     20px;
-    margin:                      0px;
-    padding:                     20px;
-    background-color:            transparent;
-    children:                    [ "inputbar", "message", "listview", "mode-switcher" ];
-}
-
-/*****----- Inputbar -----*****/
-inputbar {
-    enabled:                     true;
-    spacing:                     10px;
-    margin:                      0px;
-    padding:                     10px;
-    background-color:            @background-alt;
-    text-color:                  @foreground;
-    children:                    [ "textbox-prompt-colon", "entry" ];
-}
-
-prompt {
-    enabled:                     true;
-    background-color:            inherit;
-    text-color:                  inherit;
-}
-textbox-prompt-colon {
-    enabled:                     true;
-    padding:                     0px;
-    expand:                      false;
-    str:                         " ";
-    background-color:            inherit;
-    text-color:                  inherit;
-}
-entry {
-    enabled:                     true;
-    padding:                     0px;
-    background-color:            inherit;
-    text-color:                  inherit;
-    cursor:                      text;
-    placeholder:                 "Search...";
-    placeholder-color:           inherit;
-}
-
-/*****----- Listview -----*****/
-listview {
-    enabled:                     true;
-    columns:                     1;
-    lines:                       12;
-    cycle:                       true;
-    dynamic:                     true;
-    scrollbar:                   true;
-    layout:                      vertical;
-    reverse:                     false;
-    fixed-height:                true;
-    fixed-columns:               true;
-    
-    spacing:                     5px;
-    background-color:            transparent;
-    text-color:                  @foreground;
-    cursor:                      "default";
-}
-scrollbar {
-    handle-width:                5px ;
-    handle-color:                @selected;
-    background-color:            @background-alt;
-}
-
-/*****----- Elements -----*****/
-element {
-    enabled:                     true;
-    spacing:                     10px;
-    margin:                      0px;
-    padding:                     6px;
-    background-color:            transparent;
-    text-color:                  @foreground;
-    cursor:                      pointer;
-}
-element normal.normal,
-element alternate.normal {
-    background-color:            var(background);
-    text-color:                  var(foreground);
-}
-element normal.urgent,
-element alternate.urgent,
-element selected.active {
-    background-color:            var(urgent);
-    text-color:                  var(background);
-}
-element normal.active,
-element alternate.active,
-element selected.urgent {
-    background-color:            var(active);
-    text-color:                  var(background);
-}
-element selected.normal {
-    background-color:            var(selected);
-    text-color:                  var(background);
-}
-element-icon {
-    background-color:            transparent;
-    text-color:                  inherit;
-    size:                        24px;
-    cursor:                      inherit;
-}
-element-text {
-    background-color:            transparent;
-    text-color:                  inherit;
-    highlight:                   inherit;
-    cursor:                      inherit;
-    vertical-align:              0.5;
-    horizontal-align:            0.0;
-}
-
-/*****----- Mode Switcher -----*****/
-mode-switcher{
-    enabled:                     true;
-    spacing:                     10px;
-    margin:                      0px;
-    padding:                     0px 0px;
-    background-color:            transparent;
-    text-color:                  @foreground;
-}
-button {
-    padding:                     10px;
-    background-color:            @background-alt;
-    text-color:                  inherit;
-    cursor:                      pointer;
-}
-button selected {
-    background-color:            var(urgent);
-    text-color:                  var(background);
-}
-
-/*****----- Message -----*****/
-message {
-    enabled:                     true;
-    margin:                      0px;
-    padding:                     10px;
-    background-color:            @background-alt;
-    text-color:                  @foreground;
-}
-textbox {
-    background-color:            transparent;
-    text-color:                  @foreground;
-    vertical-align:              0.5;
-    horizontal-align:            0.0;
-    highlight:                   none;
-    placeholder-color:           @foreground;
-    blink:                       true;
-    markup:                      true;
-}
-error-message {
-    padding:                     20px;
-    background-color:            @background;
-    text-color:                  @foreground;
-}
-
-'';
-};
-xdg.configFile."rofi/catppuccin/shared/colors.rasi" = {
-	force = true;
-	text = ''
-/* Copyright (C) 2020-2024 Aditya Shakya <adi1090x@gmail.com> */
-
-/* Colors */
-
-* {
-    background:     #1e1e2e;
-    background-alt: #313244;
-    foreground:     #cdd6f4;
-    selected:       #b4befe; 
-    active:         #a6e3a1; 
-    urgent:         #f38ba8; 
-}
-'';
-};
-xdg.configFile."rofi/catppuccin/shared/fonts.rasi" = {
-	force = true;
-	text = ''
-/* Copyright (C) 2020-2024 Aditya Shakya <adi1090x@gmail.com> */
-
-/* Text Font */
-
-* {
-    font: "JetBrainsMono Nerd Font 11";
-}
-'';
-};
 xdg.configFile."waybar/scripts/media-time.sh" = {
     executable = true;
     force = true;
@@ -1053,115 +954,106 @@ fi
 printf '%d:%02d / %d:%02d\n' $((pos/60)) $((pos%60)) $((dur/60)) $((dur%60))
 '';
 };
-xdg.configFile."swaync/config.json" = {
-	force = true;
-	text = ''
-{
-  "$schema": "/etc/xdg/swaync/configSchema.json",
-  "ignore-gtk-theme": true,
-  "positionX": "right",
-  "positionY": "top",
-  "layer": "overlay",
-  "control-center-layer": "top",
-  "layer-shell": true,
-  "layer-shell-cover-screen": true,
-  "cssPriority": "user",
-  "control-center-margin-top": 0,
-  "control-center-margin-bottom": 0,
-  "control-center-margin-right": 0,
-  "control-center-margin-left": 0,
-  "notification-2fa-action": true,
-  "notification-inline-replies": false,
-  "notification-body-image-height": 100,
-  "notification-body-image-width": 200,
-  "timeout": 10,
-  "timeout-low": 5,
-  "timeout-critical": 0,
-  "fit-to-screen": true,
-  "relative-timestamps": true,
-  "control-center-width": 500,
-  "control-center-height": 600,
-  "notification-window-width": 500,
-  "keyboard-shortcuts": true,
-  "notification-grouping": true,
-  "image-visibility": "when-available",
-  "transition-time": 200,
-  "hide-on-clear": false,
-  "hide-on-action": true,
-  "text-empty": "No Notifications",
-  "script-fail-notify": true,
-  "scripts": {
-    "example-script": {
-      "app-name": "example.app.id",
-      "exec": "echo 'Do something...'",
-      "urgency": "Normal"
-    },
-    "example-action-script": {
-      "app-name": "example.app.id",
-      "exec": "echo 'Do something actionable!'",
-      "urgency": "Normal",
-      "run-on": "action"
-    }
-  },
-  "notification-visibility": {
-    "example-name": {
-      "state": "muted",
-      "urgency": "Normal",
-      "app-name": "example.app.id"
-    }
-  },
-  "widgets": [
-    "inhibitors",
-    "title",
-    "dnd",
-    "notifications"
-  ],
-  "widget-config": {
-    "notifications": {
-      "vexpand": true
-    },
-    "inhibitors": {
-      "text": "Inhibitors",
-      "button-text": "Clear All",
-      "clear-all-button": true
-    },
-    "title": {
-      "text": "Notifications",
-      "clear-all-button": true,
-      "button-text": "Clear All"
-    },
-    "dnd": {
-      "text": "Do Not Disturb"
-    },
-    "label": {
-      "max-lines": 5,
-      "text": "Label Text"
-    },
-    "mpris": {
-      "blacklist": [],
-      "autohide": false,
-      "show-album-art": "always",
-      "loop-carousel": false
-    },
-    "buttons-grid": {
-      "buttons-per-row": 7,
-      "actions": [
-        {
-          "label": "直",
-          "type": "toggle",
-          "active": true,
-          "command": "sh -c '[[ $SWAYNC_TOGGLE_STATE == true ]] && nmcli radio wifi on || nmcli radio wifi off'",
-          "update-command": "sh -c '[[ $(nmcli radio wifi) == \"enabled\" ]] && echo true || echo false'"
-        }
-      ]
-    }
-  }
-}
-'';
-};
-xdg.configFile."swaync/style.css" = {
-	force = true;
-	text = ''
+
+  services.swaync = {
+    enable = true;
+    settings = {
+      "$schema" = "/etc/xdg/swaync/configSchema.json";
+      ignore-gtk-theme = true;
+      positionX = "right";
+      positionY = "top";
+      layer = "overlay";
+      control-center-layer = "top";
+      layer-shell = true;
+      layer-shell-cover-screen = true;
+      cssPriority = "user";
+      control-center-margin-top = 0;
+      control-center-margin-bottom = 0;
+      control-center-margin-right = 0;
+      control-center-margin-left = 0;
+      notification-2fa-action = true;
+      notification-inline-replies = false;
+      notification-body-image-height = 100;
+      notification-body-image-width = 200;
+      timeout = 10;
+      timeout-low = 5;
+      timeout-critical = 0;
+      fit-to-screen = true;
+      relative-timestamps = true;
+      control-center-width = 500;
+      control-center-height = 600;
+      notification-window-width = 500;
+      keyboard-shortcuts = true;
+      notification-grouping = true;
+      image-visibility = "when-available";
+      transition-time = 200;
+      hide-on-clear = false;
+      hide-on-action = true;
+      text-empty = "No Notifications";
+      script-fail-notify = true;
+      scripts = {
+        example-script = {
+          app-name = "example.app.id";
+          exec = "echo 'Do something...'";
+          urgency = "Normal";
+        };
+        example-action-script = {
+          app-name = "example.app.id";
+          exec = "echo 'Do something actionable!'";
+          urgency = "Normal";
+          run-on = "action";
+        };
+      };
+      notification-visibility = {
+        example-name = {
+          state = "muted";
+          urgency = "Normal";
+          app-name = "example.app.id";
+        };
+      };
+      widgets = [ "inhibitors" "title" "dnd" "notifications" ];
+      widget-config = {
+        notifications = {
+          vexpand = true;
+        };
+        inhibitors = {
+          text = "Inhibitors";
+          button-text = "Clear All";
+          clear-all-button = true;
+        };
+        title = {
+          text = "Notifications";
+          clear-all-button = true;
+          button-text = "Clear All";
+        };
+        dnd = {
+          text = "Do Not Disturb";
+        };
+        label = {
+          max-lines = 5;
+          text = "Label Text";
+        };
+        mpris = {
+          blacklist = [ ];
+          autohide = false;
+          show-album-art = "always";
+          loop-carousel = false;
+        };
+        buttons-grid = {
+          buttons-per-row = 7;
+          actions = [
+            {
+              label = "直";
+              type = "toggle";
+              active = true;
+              command = "sh -c '[[ $SWAYNC_TOGGLE_STATE == true ]] && nmcli radio wifi on || nmcli radio wifi off'";
+              update-command = "sh -c '[[ $(nmcli radio wifi) == \"enabled\" ]] && echo true || echo false'";
+            }
+          ];
+        };
+      };
+    };
+    style = lib.mkForce ''
 :root {
   --cc-bg: rgba(30, 30, 46, 0.7);
   --noti-border-color: rgba(245, 224, 220, 0.15);
@@ -1174,7 +1066,6 @@ xdg.configFile."swaync/style.css" = {
   --noti-close-bg-hover: rgb(88, 91, 112);
   --text-color: rgb(245, 224, 220);
   --text-color-disabled: rgb(108, 112, 134);
-  --bg-selected: rgb(245, 224, 220);
   --notification-icon-size: 64px;
   --notification-app-icon-size: calc(var(--notification-icon-size) / 3);
   --notification-group-icon-size: 32px;
@@ -1190,20 +1081,6 @@ xdg.configFile."swaync/style.css" = {
   --group-collapse-transition: var(--group-collapse-tranistion);
 }
 
-/* Fallback for older CSS themes — Catppuccin Frappé */
-@define-color cc-bg rgba(30, 30, 46, 0.7);
-@define-color noti-border-color rgba(245, 224, 220, 0.15);
-@define-color noti-bg rgba(30, 30, 46, 0.8);
-@define-color noti-bg-opaque rgb(30, 30, 46);
-@define-color noti-bg-darker rgb(24, 24, 37);
-@define-color noti-bg-hover rgb(49, 50, 68);
-@define-color noti-bg-hover-opaque rgb(49, 50, 68);
-@define-color noti-bg-focus rgba(69, 71, 90, 0.6);
-@define-color noti-close-bg rgba(245, 224, 220, 0.1);
-@define-color noti-close-bg-hover rgba(245, 224, 220, 0.15);
-@define-color text-color rgb(245, 224, 220);
-@define-color text-color-disabled rgb(108, 112, 134);
-@define-color bg-selected rgb(245, 224, 220);
 notificationwindow, blankwindow {
   background: transparent;
 }
@@ -1678,244 +1555,190 @@ notificationwindow, blankwindow {
 .widget-inhibitors > button {
   margin-left: 8px;
 }
-'';
-};
-xdg.configFile."fastfetch/config.jsonc" = {
-	force = true;
-	text = ''
-{
-    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
-    "logo": {
-        "padding": {
-            "top": 1,
-            "right": 3
+    '';
+  };
+
+  programs.fastfetch = {
+    enable = true;
+    settings = {
+      "$schema" = "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json";
+      logo = {
+        padding = {
+          top = 1;
+          right = 3;
+        };
+      };
+      display = {
+        separator = " │ ";
+      };
+      modules = [
+        {
+          type = "custom";
+          format = "╭───────────╮";
         }
-    },
-    "display": {
-        "separator": " │ " // This creates the clean continuous vertical line for everything
-    },
-    "modules": [
-    	{
-    		"type": "custom",
-    		"format": "╭───────────╮"
-    		
-    	},
         {
-            "type": "user",
-            "key": "│ user    ",
-            "keyColor": "red"
-        },
-        {
-            "type": "host",
-            "key": "│󰋜 hname   ",
-            "keyColor": "green"
-        },
-        {
-            "type": "command",
-            "key": "│󰋔 os age  ",
-            "keyColor": "yellow",
-            "text": "birth_install=$(stat -c %W /); current=$(date +%s); time_progression=$((current - birth_install)); days_difference=$((time_progression / 86400)); echo $days_difference days"
-        },
-        {
-            "type": "uptime",
-            "key": "│󱎫 uptime  ",
-            "keyColor": "blue"
-        },
-        {
-            "type": "os",
-            "key": "│ distro  ",
-            "keyColor": "cyan"
-        },
-        {
-            "type": "kernel",
-            "key": "│󰒋 kernel  ",
-            "keyColor": "magenta"
-        },
-        {
-            "type": "wm",
-            "key": "│󱂬 wm      ",
-            "keyColor": "green"
-        },
-        {
-            "type": "lm",
-            "key": "│󰧨 desktop ",
-            "keyColor": "cyan"
-        },
-        {
-            "type": "terminal",
-            "key": "│ term    ",
-            "keyColor": "red"
-        },
-        {
-            "type": "shell",
-            "key": "│󰞷 shell   ",
-            "keyColor": "green"
-        },
-        {
-            "type": "cpu",
-            "key": "│󰻠 cpu     ",
-            "keyColor": "yellow"
-        },
-        {
-            "type": "gpu",
-            "key": "│󰢮 gpu     ",
-            "keyColor": "yellow"
-        },
-        {
-            "type": "disk",
-            "key": "│󰋊 disk    ",
-            "keyColor": "blue"
-        },
-        {
-            "type": "memory",
-            "key": "│󰍛 memory  ",
-            "keyColor": "cyan"
-        },
-        {
-            "type": "localip",
-            "key": "│ local ip",
-            "keyColor": "blue"
-        },
-        {
-            "type": "packages",
-            "key": "│ packages",
-            "keyColor": "green"
-        },
-        // --- This builds the tiny box ONLY around the colors label ---
-        {
-            "type": "custom",
-            "format": "├───────────┤" // Connects cleanly into the separator line
-        },
-        {
-            "type": "colors",
-            "key": "│🎨 colors ", // Acts as the left wall of the tiny box
-            "symbol": "circle"
-        },
-        {
-            "type": "custom",
-            "format": "╰───────────╯" // Closes the tiny box at the bottom
+          type = "user";
+          key = "│ user    ";
+          keyColor = "red";
         }
-    ]
-}
-'';
-};
-xdg.configFile."kitty/kitty.conf" = {
-    force = true;
-    text = ''
-# By gmlgtm, part of the AptNix project
-# BEGIN_KITTY_THEME
-# Catppuccin-Mocha
-include current-theme.conf
-# END_KITTY_THEME
+        {
+          type = "host";
+          key = "│󰋜 hname   ";
+          keyColor = "green";
+        }
+        {
+          type = "command";
+          key = "│󰋔 os age  ";
+          keyColor = "yellow";
+          text = "birth_install=$(stat -c %W /); current=$(date +%s); time_progression=$((current - birth_install)); days_difference=$((time_progression / 86400)); echo $days_difference days";
+        }
+        {
+          type = "uptime";
+          key = "│󱎫 uptime  ";
+          keyColor = "blue";
+        }
+        {
+          type = "os";
+          key = "│ distro  ";
+          keyColor = "cyan";
+        }
+        {
+          type = "kernel";
+          key = "│󰒋 kernel  ";
+          keyColor = "magenta";
+        }
+        {
+          type = "wm";
+          key = "│󱂬 wm      ";
+          keyColor = "green";
+        }
+        {
+          type = "lm";
+          key = "│󰧨 desktop ";
+          keyColor = "cyan";
+        }
+        {
+          type = "terminal";
+          key = "│ term    ";
+          keyColor = "red";
+        }
+        {
+          type = "shell";
+          key = "│󰞷 shell   ";
+          keyColor = "green";
+        }
+        {
+          type = "cpu";
+          key = "│󰻠 cpu     ";
+          keyColor = "yellow";
+        }
+        {
+          type = "gpu";
+          key = "│󰢮 gpu     ";
+          keyColor = "yellow";
+        }
+        {
+          type = "disk";
+          key = "│󰋊 disk    ";
+          keyColor = "blue";
+        }
+        {
+          type = "memory";
+          key = "│󰍛 memory  ";
+          keyColor = "cyan";
+        }
+        {
+          type = "localip";
+          key = "│ local ip";
+          keyColor = "blue";
+        }
+        {
+          type = "packages";
+          key = "│ packages";
+          keyColor = "green";
+        }
+        {
+          type = "custom";
+          format = "├───────────┤";
+        }
+        {
+          type = "colors";
+          key = "│🎨 colors ";
+          symbol = "circle";
+        }
+        {
+          type = "custom";
+          format = "╰───────────╯";
+        }
+      ];
+    };
+  };
 
-scrollback_lines 10000
-background_opacity 0.7
-cursor_shape beam
-shell_integration no-cursor
+  programs.kitty = {
+    enable = true;
+    themeFile = lib.mkForce null;
+    font.name = "JetBrainsMono Nerd Font Mono";
+    shellIntegration = {
+      mode = null; # set via settings below, so HM does not force "no-rc"
+      enableBashIntegration = false;
+      enableZshIntegration = false;
+      enableFishIntegration = false;
+    };
+    settings = {
+      scrollback_lines = 10000;
+      background_opacity = "0.7";
+      cursor_shape = "beam";
+      shell_integration = "no-cursor";
+      cursor_trail = 1;
+      repaint_delay = 5;
+      input_delay = 1;
+      sync_to_monitor = "no";
+      confirm_os_window_close = 0;
+      cursor_trail_start_threshold = 0;
+      foreground = "#CDD6F4";
+      background = "#1E1E2E";
+      selection_foreground = "#1E1E2E";
+      selection_background = "#F5E0DC";
+      cursor = "#F5E0DC";
+      cursor_text_color = "#1E1E2E";
+      url_color = "#F5E0DC";
+      active_border_color = "#B4BEFE";
+      inactive_border_color = "#6C7086";
+      bell_border_color = "#F9E2AF";
+      wayland_titlebar_color = "system";
+      active_tab_foreground = "#11111B";
+      active_tab_background = "#CBA6F7";
+      inactive_tab_foreground = "#CDD6F4";
+      inactive_tab_background = "#181825";
+      tab_bar_background = "#11111B";
+      mark1_foreground = "#1E1E2E";
+      mark1_background = "#B4BEFE";
+      mark2_foreground = "#1E1E2E";
+      mark2_background = "#CBA6F7";
+      mark3_foreground = "#1E1E2E";
+      mark3_background = "#74C7EC";
+      color0 = "#45475A";
+      color8 = "#585B70";
+      color1 = "#F38BA8";
+      color9 = "#F38BA8";
+      color2 = "#A6E3A1";
+      color10 = "#A6E3A1";
+      color3 = "#F9E2AF";
+      color11 = "#F9E2AF";
+      color4 = "#89B4FA";
+      color12 = "#89B4FA";
+      color5 = "#F5C2E7";
+      color13 = "#F5C2E7";
+      color6 = "#94E2D5";
+      color14 = "#94E2D5";
+      color7 = "#BAC2DE";
+      color15 = "#A6ADC8";
+    };
+  };
+  # kitty rewrites kitty.conf itself (e.g. the font/theme kittens), turning HM's
+  # symlink into a regular file; force lets HM replace it
+  xdg.configFile."kitty/kitty.conf".force = true;
 
-# Performance optimizations
-cursor_trail 1
-repaint_delay 5
-input_delay 1
-sync_to_monitor no
-
-#QoL features
-confirm_os_window_close 0
-cursor_trail_start_threshold 0
-
-# BEGIN_KITTY_FONTS
-font_family      family="JetBrainsMono Nerd Font Mono"
-bold_font        auto
-italic_font      auto
-bold_italic_font auto
-# END_KITTY_FONTS
-'';
-};
-xdg.configFile."kitty/current-theme.conf" = {
-    force = true;
-    text = ''
-# vim:ft=kitty
-
-## name:     Catppuccin-Mocha
-## author:   Pocco81 (https://github.com/Pocco81)
-## license:  MIT
-## upstream: https://github.com/catppuccin/kitty/blob/main/themes/mocha.conf
-## blurb:    Soothing pastel theme for the high-spirited!
-
-
-
-# The basic colors
-foreground              #CDD6F4
-background              #1E1E2E
-selection_foreground    #1E1E2E
-selection_background    #F5E0DC
-
-# Cursor colors
-cursor                  #F5E0DC
-cursor_text_color       #1E1E2E
-
-# URL underline color when hovering with mouse
-url_color               #F5E0DC
-
-# Kitty window border colors
-active_border_color     #B4BEFE
-inactive_border_color   #6C7086
-bell_border_color       #F9E2AF
-
-# OS Window titlebar colors
-wayland_titlebar_color system
-macos_titlebar_color system
-
-# Tab bar colors
-active_tab_foreground   #11111B
-active_tab_background   #CBA6F7
-inactive_tab_foreground #CDD6F4
-inactive_tab_background #181825
-tab_bar_background      #11111B
-
-# Colors for marks (marked text in the terminal)
-mark1_foreground #1E1E2E
-mark1_background #B4BEFE
-mark2_foreground #1E1E2E
-mark2_background #CBA6F7
-mark3_foreground #1E1E2E
-mark3_background #74C7EC
-
-# The 16 terminal colors
-
-# black
-color0 #45475A
-color8 #585B70
-
-# red
-color1 #F38BA8
-color9 #F38BA8
-
-# green
-color2  #A6E3A1
-color10 #A6E3A1
-
-# yellow
-color3  #F9E2AF
-color11 #F9E2AF
-
-# blue
-color4  #89B4FA
-color12 #89B4FA
-
-# magenta
-color5  #F5C2E7
-color13 #F5C2E7
-
-# cyan
-color6  #94E2D5
-color14 #94E2D5
-
-# white
-color7  #BAC2DE
-color15 #A6ADC8
-'';
-};
 gtk = {
   enable = true;
   theme = {
