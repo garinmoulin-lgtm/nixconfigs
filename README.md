@@ -14,8 +14,8 @@ using nix profile, however you may append it as you please to configuration.nix.
 I cannot emphasize this enough but it is *absolutely necessary* that you read through the *entire* README.
 
 ## News
-I will soon switch over entirely from Mocha to Evergreen forest and clean up bits of my code. It's hard doing it but with the help of AI nowadays
-it should be fine.
+I'm attempting to increase reliability via switching from the dotfile method to the home manager module.
+I'll see how that works out but it should lead to increased reproducibility.
 
 Note that I am still defining colors, adding flakes manually and cleaning code, but I'm letting AI translate the color
 palettes from one to another to be less of a load. Thanks.
