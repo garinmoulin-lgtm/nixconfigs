@@ -227,7 +227,6 @@ services.udisks2.enable = true;
   programs.firefox.enable = true;
   #power prof daemon
   services.power-profiles-daemon.enable = true;
-  #hehe wm
   # Allow unfree packages
   nixpkgs.config.allowUnfree = true;
 programs.starship.enable = true;
