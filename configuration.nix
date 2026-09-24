@@ -275,7 +275,7 @@ programs.git.enable = true;
      kitty
      rofi
      btop
-     kew
+     cmus
      pavucontrol
      flatpak
      mdadm
