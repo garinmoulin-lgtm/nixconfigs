@@ -1800,4 +1800,66 @@ programs.bash = {
     [[ ! ''${BLE_VERSION-} ]] || ble-attach
   '';
 };
+
+  # Lock screen (launched from the waybar lock button)
+  # Measured from the reference screenshot and scaled to 1920x1080
+  programs.hyprlock = {
+    enable = true;
+    package = null; # hyprlock is installed system-wide in configuration.nix (needed for PAM)
+    # mkForce: catppuccin's autoEnable otherwise sources its own full hyprlock.conf
+    # (corner clock, keyboard-layout label, mauve input field) on top of this one
+    settings = lib.mkForce {
+      general = {
+        hide_cursor = false; # cursor is visible in the reference
+      };
+
+      background = [
+        {
+          monitor = "";
+          path = "${config.home.homeDirectory}/Pictures/Wallpapers/hk.png";
+          blur_passes = 3;
+        }
+      ];
+
+      # Clock: 07:44 — ink ~238x64px, centered 74px above screen center
+      label = [
+        {
+          monitor = "";
+          text = "$TIME";
+          color = "rgb(f5e0dc)"; # Rosewater
+          font_size = 64;
+          font_family = "JetBrainsMono Nerd Font";
+          position = "0, 74";
+          halign = "center";
+          valign = "center";
+        }
+      ];
+
+      # Password pill: ~225x56px, centered 27px below screen center
+      input-field = [
+        {
+          monitor = "";
+          size = "200, 50";
+          position = "0, -20";
+          halign = "center";
+          valign = "center";
+          rounding = -1; # full pill
+          outline_thickness = 3;
+          outer_color = "rgb(f5e0dc)"; # Rosewater border, same as the clock
+          inner_color = "rgb(313244)"; # Surface0 fill
+          font_color = "rgb(f5e0dc)";  # Text
+          font_family = "JetBrainsMono Nerd Font";
+          placeholder_text = "<i>Input Password...</i>";
+          fade_on_empty = false;
+          dots_center = true;
+          check_color = "rgb(f9e2af)";
+          fail_color = "rgb(f38ba8)";
+          dots_size = 0.33;    # 0.2–0.8, fraction of the field height
+          dots_spacing = 0.15; # 0.0–1.0, gap between dots, relative to dot size
+        }
+      ];
+    };
+  };
+  # replaces any hand-written ~/.config/hypr/hyprlock.conf instead of failing activation
+  xdg.configFile."hypr/hyprlock.conf".force = true;
 }
