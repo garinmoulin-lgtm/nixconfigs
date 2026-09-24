@@ -1685,6 +1685,7 @@ notificationwindow, blankwindow {
       enableFishIntegration = false;
     };
     settings = {
+      remember_window_size = "no";
       scrollback_lines = 10000;
       background_opacity = "0.7";
       cursor_shape = "beam";
