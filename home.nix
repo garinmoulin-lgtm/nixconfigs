@@ -663,11 +663,11 @@ hl.bind("SUPER + down", hl.dsp.focus({ direction = "down" }))
 
 -- Trigger the rofi power menu
 
-hl.bind("SUPER" .. " + " .. "Return", hl.dsp.exec_cmd("kitty"))
+hl.bind("SUPER + Return", hl.dsp.exec_cmd("kitty"))
 
-hl.bind("SUPER" .. " + " .. "Q", hl.dsp.window.close())
+hl.bind("SUPER + Q", hl.dsp.window.close())
 
-hl.bind("SUPER + SHIFT" .. " + " .. "E", hl.dsp.exit())
+hl.bind("SUPER + SHIFT + E", hl.dsp.exit())
 
 
 -- Captures the entire screen and copies it directly to your clipboard
@@ -676,23 +676,23 @@ hl.bind("SUPER + SHIFT" .. " + " .. "E", hl.dsp.exit())
 
 -- True fullscreen (Hides waybar and gaps)
 
-hl.bind("SUPER" .. " + " .. "F", hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" }))
+hl.bind("SUPER + F", hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" }))
 hl.bind("SUPER + SHIFT + F", hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" }))
-hl.bind("SUPER" .. " + " .. "V", hl.dsp.window.float())
+hl.bind("SUPER + V", hl.dsp.window.float())
 
 -- Forces every window on the workspace into floating mode
 
-hl.bind("SUPER + SHIFT" .. " + " .. "V", hl.dsp.exec_cmd("hyprctl clients -j| jq -r '.[]| select(.workspace.id=='$(hyprctl activeworkspace -j| jq '.id')')| . address'| xargs -I { } hyprctl dispatch togglefloating address:{ }"))
+hl.bind("SUPER + SHIFT + V", hl.dsp.exec_cmd("hyprctl clients -j| jq -r '.[]| select(.workspace.id=='$(hyprctl activeworkspace -j| jq '.id')')| . address'| xargs -I { } hyprctl dispatch togglefloating address:{ }"))
 
 -- Toggle Rofi App Launcher using Super and Tab
 
-hl.bind("SUPER" .. " + " .. "TAB", hl.dsp.exec_cmd("pkill rofi || rofi -show drun -theme-str 'window { close-on-click:true; } '"))
+hl.bind("SUPER + TAB", hl.dsp.exec_cmd("pkill rofi || rofi -show drun -theme-str 'window { close-on-click:true; } '"))
 
 -- Delete or replace the bottom section with ONLY this line:
 
-hl.bind("SUPER" .. " + " .. "mouse:272", hl.dsp.window.drag(), { mouse = true })
+hl.bind("SUPER + mouse:272", hl.dsp.window.drag(), { mouse = true })
 
-hl.bind("SUPER" .. " + " .. "mouse:273", hl.dsp.window.resize(), { mouse = true })
+hl.bind("SUPER + mouse:273", hl.dsp.window.resize(), { mouse = true })
 
 -- TODO: manual review: blurls = "waybar"
 
