@@ -197,15 +197,15 @@
       };
     };
     };
-    style = lib.mkForce ''
+    # no mkForce: catppuccin prepends @import of its Mocha palette (@rosewater, @base, ...)
+    style = ''
 /* Catppuccin Mocha Colors - AptNix, by gmlgtm */
- @define-color background #1e1e2e; /* Base */
- @define-color background-light #313244; /* Surface0 */
- @define-color foreground #f5e0dc; /* Rosewater */
- @define-color black #585b70; /* Surface2 */
- @define-color crust #11111b; /* Crust */
- @define-color subtext #a6adc8; /* Subtext0 */
- @define-color white #cdd6f4; /* Text */
+ @define-color background @base;
+ @define-color background-light @surface0;
+ @define-color foreground @rosewater;
+ @define-color black @surface2;
+ @define-color subtext @subtext0;
+ @define-color white @text;
  
  /* Module-specific colors */
  @define-color workspaces-color @foreground;
@@ -536,6 +536,9 @@ window#waybar > box {
 
 ---@module 'hl'
 
+-- Catppuccin palette (written to ~/.config/hypr/themes/catppuccin.lua by catppuccin/nix)
+local colors = require('themes.catppuccin')
+
 hl.monitor({
     output   = "DP-1", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
     mode     = "1920x1080@240",
@@ -612,8 +615,8 @@ hl.config({
         gaps_in = 4,
         gaps_out = 8,
         border_size = 2,
-        ["col.active_border"]   = "rgba(7f849cee)",    
-        ["col.inactive_border"] = "rgba(45475a99)",  
+        ["col.active_border"]   = "rgba(" .. colors.overlay1Alpha .. "ee)",    
+        ["col.inactive_border"] = "rgba(" .. colors.surface1Alpha .. "99)",  
         resize_on_border = true,
         extend_border_grab_area = 20,  -- pixels of grab area beyond the visible border
         hover_icon_on_border = true,
@@ -704,8 +707,8 @@ end)
     plugin = {
         hyprbars = {
             bar_height = 20,
-            bar_color = "rgb(1e1e2e)",
-            ["col.text"] = "rgb(cdd6f4)",
+            bar_color = colors.base,
+            ["col.text"] = colors.text,
             bar_text_size = 14,
             bar_text_font = "SF Pro Text",
             bar_button_padding = 10,
@@ -718,22 +721,22 @@ end)
 
 -- buttons are added separately
 hl.plugin.hyprbars.add_button({
-    bg_color = "rgb(f38ba8)",
-    fg_color = "rgb(1e1e2e)",
+    bg_color = colors.red,
+    fg_color = colors.base,
     size = 15,
     icon = "󱎘",
     action = "hyprctl dispatch 'hl.dsp.window.close()'",
 })
 hl.plugin.hyprbars.add_button({
-    bg_color = "rgb(a6e3a1)",
-    fg_color = "rgb(1e1e2e)",
+    bg_color = colors.green,
+    fg_color = colors.base,
     size = 15,
     icon = "",
     action = "hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"toggle\" })'",
 })
 hl.plugin.hyprbars.add_button({
-    bg_color = "rgb(cba6f7)",
-    fg_color = "rgb(1e1e2e)",
+    bg_color = colors.mauve,
+    fg_color = colors.base,
     size = 15,
     icon = "",
     action = "hyprctl dispatch 'hl.dsp.window.float({action=\"toggle\"})'",
@@ -757,13 +760,15 @@ hl.plugin.hyprbars.add_button({
         inherit (config.lib.formats.rasi) mkLiteral;
       in
       {
+        # Mocha palette file written to ~/.local/share/rofi/themes by catppuccin/nix
+        "@import" = "catppuccin-mocha";
         "*" = {
-          background = mkLiteral "#1e1e2e";
-          background-alt = mkLiteral "#313244";
-          foreground = mkLiteral "#cdd6f4";
-          selected = mkLiteral "#b4befe";
-          active = mkLiteral "#a6e3a1";
-          urgent = mkLiteral "#f38ba8";
+          background = mkLiteral "@base";
+          background-alt = mkLiteral "@surface0";
+          foreground = mkLiteral "@text";
+          selected = mkLiteral "@lavender";
+          active = mkLiteral "@green";
+          urgent = mkLiteral "@red";
           font = "JetBrainsMono Nerd Font 11";
         };
         "window" = {
@@ -1793,9 +1798,9 @@ programs.bash = {
   programs.hyprlock = {
     enable = true;
     package = null; # hyprlock is installed system-wide in configuration.nix (needed for PAM)
-    # mkForce: catppuccin's autoEnable otherwise sources its own full hyprlock.conf
-    # (corner clock, keyboard-layout label, mauve input field) on top of this one
-    settings = lib.mkForce {
+    # no mkForce: catppuccin sources its Mocha palette ($rosewater, $surface0, ...);
+    # its default layout is turned off with useDefaultConfig = false below
+    settings = {
       general = {
         hide_cursor = false; # cursor is visible in the reference
       };
@@ -1813,7 +1818,7 @@ programs.bash = {
         {
           monitor = "";
           text = "$TIME";
-          color = "rgb(f5e0dc)"; # Rosewater
+          color = "$rosewater";
           font_size = 64;
           font_family = "JetBrainsMono Nerd Font";
           position = "0, 74";
@@ -1832,21 +1837,23 @@ programs.bash = {
           valign = "center";
           rounding = -1; # full pill
           outline_thickness = 3;
-          outer_color = "rgb(f5e0dc)"; # Rosewater border, same as the clock
-          inner_color = "rgb(313244)"; # Surface0 fill
-          font_color = "rgb(f5e0dc)";  # Text
+          outer_color = "$rosewater";
+          inner_color = "$surface0";
+          font_color = "$rosewater";
           font_family = "JetBrainsMono Nerd Font";
           placeholder_text = "<i>Input Password...</i>";
           fade_on_empty = false;
           dots_center = true;
-          check_color = "rgb(f9e2af)";
-          fail_color = "rgb(f38ba8)";
+          check_color = "$yellow";
+          fail_color = "$red";
           dots_size = 0.33;    # 0.2–0.8, fraction of the field height
           dots_spacing = 0.15; # 0.0–1.0, gap between dots, relative to dot size
         }
       ];
     };
   };
+  # keep catppuccin's palette for hyprlock, but not its corner clock / layout / mauve field
+  catppuccin.hyprlock.useDefaultConfig = false;
   # replaces any hand-written ~/.config/hypr/hyprlock.conf instead of failing activation
   xdg.configFile."hypr/hyprlock.conf".force = true;
 }
