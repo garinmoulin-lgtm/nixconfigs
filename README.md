@@ -19,8 +19,96 @@ I'll see how that works out but it should lead to increased reproducibility.
 
 Note that I am still defining colors, adding flakes manually and cleaning code, but I'm letting AI translate the color
 palettes from one to another to be less of a load. Thanks.
-## Installation (WIP - UNSTABLE)
+## Manual Installation (Recommended)
+Since it's a distributed config, it's pretty easy to install manually.
+First, clone the repo:
+```bash
+git clone https://github.com/garinmoulin-lgtm/nixconfigs
+cd nixconfigs
+```
+Next, you'll want to configure drivers. I currently have mine set up for my Nvidia build. Likely you'll want to change that to 
+your graphics card driverset.
+Let's go over the three:
+```nix
+# AMD
+services.xserver.videoDrivers = [ "amdgpu" ];
+hardware.graphics = {
+  enable = true;
+  enable32Bit = true; # for Steam/Wine etc.
+};
+```
+```nix
+# Intel
+services.xserver.videoDrivers = [ "modesetting" ]; # or "intel" for legacy processors
+hardware.graphics = {
+  enable = true;
+  enable32Bit = true;
+  extraPackages = with pkgs; [ intel-media-driver vpl-gpu-rt ]; # VAAPI/QSV
+};
+```
+```nix
+# Nvidia
+services.xserver.videoDrivers = [ "nvidia" ];
+hardware.nvidia = {
+  modesetting.enable = true;
+  open = true; # Turing+
+  nvidiaSettings = true;
+  package = config.boot.kernelPackages.nvidiaPackages.stable;
+};
+```
+Swap the driver I have set up for whatever you have.
+Then, run:
+```bash
+cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake /etc/nixos#nixos && cd && flatpak update -y
+```
+This will update the whole system.
+
+However, we're not done yet. For now though, reboot, and select Hyprland in Ly, NOT Hyprland (uswm-managed).
+For whatever reason, it just doesn't like to work properly with it.
+Run:
+```bash
+hyprctl monitors
+```
+And when you run it you'll see many monitor configurations. But only focus on these two:
+```
+Monitor DP-1 (ID 0):
+	1920x1080@239.75999 at 0x0
+```
+And further down, you'll see available modes.
+```
+availableModes: 1920x1080@60.00Hz 1920x1080@239.76Hz 1920x1080@143.98Hz
+```
+Scroll to about line 530-630, somewhere there, and find the monitor block.
+This is mine, already in the config, and you'll want to set it up using your values.
+```lua
+hl.monitor({
+    output   = "[Your monitor here]", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
+    mode     = "[Your preffered availableMode here]",
+    position = "0x0",
+    scale    = 1, -- might be different...
+})
+```
+Then, scroll a bit down until you see the
+```lua
+-- Env vars
+```
+comment. For Nvidia GPU users (20 Series Up), keep it the same. For AMD and Intel, swap all those out
+for:
+```lua
+-- AMD
+hl.env("LIBVA_DRIVER_NAME", "radeonsi")
+hl.env("QT_QPA_PLATFORMTHEME", "qt5ct")
+```
+```lua
+-- Intel
+hl.env("LIBVA_DRIVER_NAME", "iHD")
+hl.env("QT_QPA_PLATFORMTHEME", "qt5ct")
+```
+Then, close out of /etc/nixos/home.nix, run *update* and you're finished.
+## Automated Installation (WIP - UNSTABLE)
 Copy and paste the block below to install.
+
+NOTE: AS OF 9/22/26 THIS IS UNUSABLE UNTIL PATCHED.
 ```bash
 git clone https://github.com/garinmoulin-lgtm/nixconfigs
 cd nixconfigs
