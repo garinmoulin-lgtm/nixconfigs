@@ -2,7 +2,7 @@
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
 
-{ config, pkgs, ... }:
+{ config, pkgs, lib, ... }:
 
 {
   imports =
@@ -14,18 +14,11 @@
   boot.blacklistedKernelModules = [ "acpi_pad" "nouveau" ];
   # Bootloader.
   #boot.loader.systemd-boot.enable = true;
-boot.loader.grub = {
-  enable = true;
-  efiSupport = true;
-  device = "nodev";
-  useOSProber = true;
-
-  theme = pkgs.fetchFromGitHub {
-    owner = "catppuccin";
-    repo = "grub";
-    rev = "main";              # or pin to a specific commit/tag for reproducibility
-    sha256 = "jgM22pvCQvb0bjQQXoiqGMgScR9AgCK3OfDF5Ud+/mk=";                # leave blank first build — Nix will error with the correct hash, paste it back in
-  } + "/src/catppuccin-mocha-grub-theme";
+boot.loader.grub.enable = false;
+boot.loader.systemd-boot.enable = lib.mkForce false;
+boot.lanzaboote = {
+    enable = true;
+    pkiBundle = "/var/lib/sbctl";
 };
 
   boot.loader.efi.canTouchEfiVariables = true;
@@ -257,6 +250,7 @@ programs.git.enable = true;
      swaynotificationcenter
      lavat
      waybar
+     sbctl
      ffmpeg
      micro
      hyprlock
@@ -271,6 +265,7 @@ programs.git.enable = true;
      pavucontrol
      flatpak
      mdadm
+     efibootmgr
      util-linux
      awww
      hyprshot
