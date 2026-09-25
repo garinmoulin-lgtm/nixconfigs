@@ -256,15 +256,7 @@ programs.git.enable = true;
      pkgs.qt6.qtmultimedia
      swaynotificationcenter
      lavat
-(pkgs.waybar.overrideAttrs (old: {
-  buildInputs = (old.buildInputs or []) ++ [ pkgs.modemmanager ];
-  mesonFlags = (old.mesonFlags or []) ++ [ 
-      "-Dcava=disabled"
-      "-Dsystemd=disabled"
-  ];
-  env.NIX_CFLAGS_COMPILE = "-march=native -O3";
-  doInstallCheck = false;
-}))
+     waybar
      ffmpeg
      micro
      hyprlock

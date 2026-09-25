@@ -9,16 +9,6 @@
 
   programs.waybar = {
     enable = true;
-    # Same override as configuration.nix, so the waybar HM installs is the identical build
-    package = pkgs.waybar.overrideAttrs (old: {
-      buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.modemmanager ];
-      mesonFlags = (old.mesonFlags or [ ]) ++ [
-        "-Dcava=disabled"
-        "-Dsystemd=disabled"
-      ];
-      env.NIX_CFLAGS_COMPILE = "-march=native -O3";
-      doInstallCheck = false;
-    });
     settings = {
       mainBar = {
       layer = "top";

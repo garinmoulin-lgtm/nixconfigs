@@ -21,7 +21,19 @@
     nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
-        { nixpkgs.overlays = [ waybar.overlays.default ]; }
+      {
+          nixpkgs.overlays = [
+            waybar.overlays.default
+            (final: prev: {
+              waybar = prev.waybar.overrideAttrs (old: {
+                buildInputs = (old.buildInputs or [ ]) ++ [ prev.modemmanager ];
+                mesonFlags = (old.mesonFlags or [ ]) ++ [ "-Dcava=disabled" "-Dsystemd=disabled" ];
+                env.NIX_CFLAGS_COMPILE = "-march=native -O3";
+                doInstallCheck = false;
+              });
+            })
+          ];
+        }
         ./configuration.nix
         chaotic.nixosModules.default
 
