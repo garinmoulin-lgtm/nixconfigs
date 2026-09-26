@@ -1776,7 +1776,8 @@ gtk.cursorTheme = {
 programs.bash = {
   enable = true;
   shellAliases = {
-    ll = "ls -la";
+    ll = "ls --color=auto -la";
+    ls = "ls --color=auto";
     gs = "git status";
     update = "cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake /etc/nixos#nixos && cd && flatpak update -y";
     viconfig = "sudo fresh /etc/nixos/configuration.nix";
