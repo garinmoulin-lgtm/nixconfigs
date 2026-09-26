@@ -223,7 +223,8 @@ Q: Who is this for?
 
 A: Primarily enthusiasts, minimalists, tinkerers, etc. Trying to make NixOS easier, and premade apt for anything.
 
-## Screenshots (will add more, or you can contribute!)
+## Gallery
+Feel free to contribute!
 <img src="https://i.imgur.com/8pJybPQ.png">
 <img src="https://i.imgur.com/eZQIwd9.png">
 <img src="https://i.imgur.com/fJHbucs.png">
