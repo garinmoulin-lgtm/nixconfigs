@@ -614,7 +614,7 @@ hl.config({
     general = {
         gaps_in = 4,
         gaps_out = 8,
-        border_size = 1,
+        border_size = 0,
         ["col.active_border"]   = "rgba(" .. colors.overlay1Alpha .. "ee)",    
         ["col.inactive_border"] = "rgba(" .. colors.surface1Alpha .. "99)",  
         resize_on_border = true,
