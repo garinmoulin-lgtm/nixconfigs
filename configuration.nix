@@ -19,6 +19,7 @@ boot.loader.systemd-boot.enable = lib.mkForce false;
 boot.lanzaboote = {
     enable = true;
     pkiBundle = "/var/lib/sbctl";
+    settings.default = "@saved";
 };
 
   boot.loader.efi.canTouchEfiVariables = true;
@@ -128,8 +129,8 @@ fonts = {
 #zram and such (oh yes)
 zramSwap = {
   enable = true;
-  algorithm = "zstd";
-  memoryPercent = 150;  # 1.5x RAM as compressed swap
+  algorithm = "lz4";
+  memoryPercent = 100;  # 1x RAM as compressed swap
 };
   # Configure keymap in X11
   services.xserver.xkb = {
@@ -292,6 +293,7 @@ programs.git.enable = true;
   #   enable = true;
   #   enableSSHSupport = true;
   # };
+  
 # Virtualization
 # Use this. It does use a daemon.
 virtualisation.libvirtd = {
