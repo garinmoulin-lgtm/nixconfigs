@@ -262,6 +262,7 @@ programs.git.enable = true;
      kitty
      rofi
      btop
+     lsd
      cmus
      pavucontrol
      flatpak
