@@ -39,7 +39,11 @@
           ];
         }
         ./configuration.nix
-        chaotic.nixosModules.default
+        # Not using chaotic.nixosModules.default: its nyx-registry module sets the
+        # renamed nix.nixPath option and triggers an eval warning on unstable.
+        # Swap back once chaotic-cx/nyx#3037 is merged.
+        chaotic.nixosModules.nyx-cache
+        chaotic.nixosModules.nyx-overlay
         lanzaboote.nixosModules.lanzaboote
         home-manager.nixosModules.home-manager
         {
