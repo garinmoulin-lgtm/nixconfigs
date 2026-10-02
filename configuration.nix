@@ -143,7 +143,7 @@ zramSwap = {
 services.xserver.videoDrivers = [ "nvidia" ];
 #nvidia
 hardware.nvidia = {
-  package = config.boot.kernelPackages.nvidiaPackages.latest;
+  package = pkgs.nvidia_cachyos; # chaotic: prebuilt for linuxPackages_cachyos (was config.boot.kernelPackages.nvidiaPackages.latest)
   open = true;
   modesetting.enable = true;
   powerManagement.enable = true;
@@ -219,6 +219,7 @@ services.udev.extraRules = ''
 services.udisks2.enable = true;
   # Install firefox.
   programs.firefox.enable = true;
+  programs.firefox.package = pkgs.firefox_nightly; # chaotic: Firefox Nightly instead of stable
   #power prof daemon
   services.power-profiles-daemon.enable = true;
   # Allow unfree packages
@@ -244,7 +245,7 @@ programs.git.enable = true;
      tty-clock
      lunar-client
      unzip
-     yt-dlp
+     yt-dlp_git # chaotic
      xdg-utils
      pkgs.kdePackages.qtmultimedia
      pkgs.qt6.qtmultimedia
@@ -283,7 +284,7 @@ programs.git.enable = true;
      nautilus
      wl-clipboard
      playerctl
-     telegram-desktop
+     telegram-desktop_git # chaotic
      nodejs
      gnome-boxes
   ];
