@@ -305,6 +305,7 @@ virtualisation.libvirtd = {
   onBoot = "ignore";             # don't restart VMs that were running at shutdown
   onShutdown = "shutdown";       # default is "suspend", which leads to resuming on next boot
 };
+virtualisation.docker.enable = true;
 # programs.virt-manager.enable = true;
   # List services that you want to enable:
 
