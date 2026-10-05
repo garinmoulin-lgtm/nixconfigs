@@ -188,7 +188,7 @@ programs.nix-ld.enable = true;
   users.users."garinh" = {
     isNormalUser = true;
     description = "garinh";
-    extraGroups = [ "networkmanager" "wheel" "input" "libvirtd" ];
+    extraGroups = [ "networkmanager" "wheel" "input" "libvirtd" "docker" ];
     packages = with pkgs; [
     ];
   };
