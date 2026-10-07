@@ -80,6 +80,7 @@ hl.config({
 -- that overwrote each other; only the last one was ever actually in effect)
 hl.config({
     decoration = {
+        rounding = 8,
         blur = {
             enabled = true,
             size = 8,

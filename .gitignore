@@ -6,12 +6,8 @@
 !configuration.nix
 !flake.nix
 !home.nix
-!nvidia/
-!nvidia/**
-!amd/
-!amd/**
-!intel/
-!intel/**
 !install.sh
 !post-install.sh
 !hk.png
+!quickshell/
+!quickshell/**
