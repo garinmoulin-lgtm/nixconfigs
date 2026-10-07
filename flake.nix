@@ -12,7 +12,10 @@
         url = "github:Alexays/Waybar";
         inputs.nixpkgs.follows = "nixpkgs";
     };
-
+    quickshell = {
+        url = "git+https://git.outfoxxed.me/outfoxxed/quickshell";
+        inputs.nixpkgs.follows = "nixpkgs";
+    };
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -21,7 +24,7 @@
 
   };
 
-  outputs = { self, nixpkgs, catppuccin, home-manager, waybar, chaotic, lanzaboote, ... }@inputs: {
+  outputs = { self, nixpkgs, catppuccin, home-manager, waybar, chaotic, lanzaboote, quickshell, ... }@inputs: {
     nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
