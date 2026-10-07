@@ -2,7 +2,7 @@
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
 
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, inputs, ... }:
 
 {
   imports =
@@ -116,14 +116,14 @@ fonts = {
     # Ioskeley Mono - the exact Berkeley Mono mimic configuration built over Iosevka
     # Options include: .normal, .normal-NF (Nerd Font patched), .condensed, etc.
     # Clean, modern sans-serif typeface
-    noto-fonts
+    inputs.apple-fonts.packages.${pkgs.stdenv.hostPlatform.system}.sf-pro-nerd
   ];
 
 
   # Inform your desktop environment how to prioritize these fonts
   fontconfig.defaultFonts = {
     monospace = [ "Ioskeley Mono" "JetBrainsMono Nerd Font" ];
-    sansSerif = [ "Noto Sans" ];
+    sansSerif = [ "SF Pro Nerd" ];
   };
 };
 #zram and such (oh yes)

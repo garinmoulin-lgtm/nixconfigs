@@ -16,12 +16,16 @@
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
+    apple-fonts = {
+      url = "github:Lyndeno/apple-fonts.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, catppuccin, home-manager, chaotic, lanzaboote, quickshell, ... }@inputs: {
+  outputs = { self, nixpkgs, catppuccin, home-manager, chaotic, lanzaboote, quickshell, apple-fonts, ... }@inputs: {
     nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
+      specialArgs = { inherit inputs; };
       modules = [
         ./configuration.nix
         # Not using chaotic.nixosModules.default: its nyx-registry module sets the

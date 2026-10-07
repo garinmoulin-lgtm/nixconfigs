@@ -626,7 +626,7 @@ gtk = {
 
 
   font = {
-    name = "Noto Sans";
+    name = "SF Pro";
     size = 11;
   };
 
