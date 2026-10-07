@@ -7,519 +7,1924 @@
 
   programs.home-manager.enable = true;
 
-  programs.waybar = {
-    enable = true;
-    settings = {
-      mainBar = {
-      layer = "top";
-      position = "top";
-      margin-top = 8;
-      margin-left = 10;
-      margin-right = 10;
-      spacing = 1;
-      height = 30;
-      modules-left = [ "group/hardware" "hyprland/workspaces" "hyprland/window" ];
-      modules-center = [ "group/media-player" "custom/media-time" "tray" ];
-      modules-right = [ "clock" "wireplumber#sink" "network" "group/session" ];
-      "hyprland/workspaces" = {
-        format = "{id}";
-        on-click = "activate";
-      };
-      "hyprland/window" = {
-        format = "<span color='#cdd6f4'>  {title}  </span>";
-        max-length = 35;
-        rewrite = {
-          "(.*) - Mozilla Firefox" = "🌎 $1";
-          "(.*) - zsh" = "> [$1]";
-        };
-      };
-      "group/hardware" = {
-        orientation = "horizontal";
-        modules = [ "power-profiles-daemon" "memory" "cpu" "disk" ];
-      };
-      "group/session" = {
-        orientation = "horizontal";
-        modules = [
-          "custom/lock"
-          "custom/reboot"
-          "custom/sleep"
-          "custom/power"
-          "custom/logout"
-        ];
-      };
-      "custom/lock" = {
-        format = "<span color='#f5e0dc'> 󰌾  </span>";
-        on-click = "env TZ='America/Chicago' hyprlock";
-        tooltip = true;
-        tooltip-format = "Lock screen";
-      };
-      "custom/reboot" = {
-        format = "<span color='#f5e0dc'>  󰜉  </span>";
-        on-click = "systemctl reboot";
-        tooltip = true;
-        tooltip-format = "Reboot";
-      };
-      "custom/sleep" = {
-        format = "<span color='#f5e0dc'>  󰤄  </span>";
-        on-click = "systemctl suspend";
-        tooltip = true;
-        tooltip-format = "Sleep";
-      };
-      "custom/power" = {
-        format = "<span color='#f5e0dc'>  󰐥  </span>";
-        on-click = "systemctl poweroff";
-        tooltip = true;
-        tooltip-format = "Power Off";
-      };
-      "custom/logout" = {
-        format = "<span color='#f5e0dc'>  󰈆 </span>";
-        on-click = "pkill Hyprland";
-        tooltip = true;
-        tooltip-format = "Log Out";
-      };
-      clock = {
-        format = "<span color='#f5e0dc'> 󰥔 </span><span color='#cdd6f4'>{:%I:%M %p 󰃮 %B %d, %Y}</span>";
-        format-alt = "<span color='#f5e0dc'> 󰥔 </span><span color='#cdd6f4'>{:%I:%M %p}</span>";
-        tooltip-format = "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>";
-        timezone = "America/Chicago";
-        calendar = {
-          mode = "month";
-          mode-mon-col = 3;
-          weeks-pos = "right";
-          on-scroll = 1;
-          on-click-right = "mode";
-          format = {
-            months = "<span color='#f5e0dc'><b>{}</b></span>";
-            days = "<span color='#f5e0dc'>{}</span>";
-            weeks = "<span color='#f5e0dc'><b>W{}</b></span>";
-            weekdays = "<span color='#f5e0dc'><b>{}</b></span>";
-            today = "<span color='#f5e0dc'><b><u>{}</u></b></span>";
-          };
-        };
-        actions = {
-          on-click-right = "mode";
-          on-click-forward = "tz_up";
-          on-click-backward = "tz_down";
-          on-scroll-up = "shift_up";
-          on-scroll-down = "shift_down";
-        };
-      };
-      cpu = {
-        format = ''<span color="#f5e0dc">󰘚</span> <span color="#cdd6f4">{usage}%</span>'';
-        on-click = "kitty -e btop";
-        interval = 1;
-      };
-      memory = {
-        format = ''<span color="#f5e0dc">󰍛</span> <span color="#cdd6f4">{used:0.1f}GiB</span>'';
-        interval = 1;
-        on-click = "kitty -e btop";
-      };
-      "custom/media-time" = {
-        exec = "~/.config/waybar/scripts/media-time.sh";
-        format = ''<span color="#cdd6f4">  {} </span>'';
-        interval = 1;
-        tooltip = false;
-      };
-      network = {
-        format-wifi = ''<span color="#f5e0dc">󰖩</span> <span color="#cdd6f4">{essid} ({signalStrength}%) </span>'';
-        format-ethernet = ''<span color="#f5e0dc">󰈀</span> <span color="#cdd6f4">{ifname}</span>'';
-        format-linked = ''<span color="#f5e0dc">󰈀</span> <span color="#cdd6f4">{ifname} (No IP)</span>'';
-        format-disconnected = ''<span color="#f38ba8">󰖪</span> <span color="#cdd6f4">Disconnected</span>'';
-        format-alt = "{ifname}: {ipaddr}/{cidr}";
-        tooltip-format = "{ifname}: {ipaddr}";
-        on-click-right = "kitty -e nmtui";
-      };
-      "group/media-player" = {
-        orientation = "horizontal";
-        modules = [ "custom/media" "custom/media-prev" "custom/media-next" ];
-      };
-      "custom/media" = {
-        format = '' {icon} <span color="#cdd6f4">{text} </span>'';
-        return-type = "json";
-        max-length = 25;
-        restart-interval = 1;
-        format-icons = {
-          Playing = ''<span color="#a6e3a1" font_size="large"> 󰏦 </span>'';
-          Paused = ''<span color="#f9e2af" font_size="large"> 󰐍 </span>'';
-          Stopped = ''<span color="#f38ba8" font_size="large"> 󰝛 </span>'';
-        };
-        exec = "playerctl metadata --follow --format '{\"text\": \"{{markup_escape(title)}}\", \"tooltip\": \"{{playerName}} : {{markup_escape(title)}}\", \"alt\": \"{{status}}\", \"class\": \"{{status}}\"}' 2>/dev/null || echo '{\"text\": \"Nothing playing\", \"alt\": \"Stopped\", \"class\": \"Stopped\", \"tooltip\": \"No media\"}'";
-        exec-if = "true";
-        on-click = "playerctl play-pause";
-        on-scroll-up = "playerctl next";
-        on-scroll-down = "playerctl previous";
-      };
-      "custom/media-prev" = {
-        interval = 1;
-        exec = "playerctl status 2>/dev/null | grep -q 'Playing\\|Paused' && echo '{\"text\": \"  󰼥  \", \"class\": \"active\"}' || echo '{\"text\": \"\", \"class\": \"inactive\"}'";
-        return-type = "json";
-        on-click = "playerctl previous";
-        tooltip = false;
-      };
-      "custom/media-next" = {
-        interval = 1;
-        exec = "playerctl status 2>/dev/null | grep -q 'Playing\\|Paused' && echo '{\"text\": \"  󰼦  \", \"class\": \"active\"}' || echo '{\"text\": \"\", \"class\": \"inactive\"}'";
-        return-type = "json";
-        on-click = "playerctl next";
-        tooltip = false;
-      };
-      "wireplumber#sink" = {
-        format = ''{icon} <span color="#cdd6f4">{volume}%</span>'';
-        format-muted = ''<span color="#f5e0dc">󰝟</span>'';
-        format-icons = [
-          ''<span color="#f5e0dc">󰕿</span>''
-          ''<span color="#f5e0dc">󰖀</span>''
-          ''<span color="#f5e0dc">󰕾</span>''
-        ];
-        on-click = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle";
-        on-scroll-down = "wpctl set-volume @DEFAULT_SINK@ 1%-";
-        on-scroll-up = "wpctl set-volume @DEFAULT_SINK@ 1%+ --limit 1.0";
-      };
-      disk = {
-        interval = 30;
-        format = ''<span color="#f5e0dc">󰋊</span> <span color="#cdd6f4">{percentage_used}%</span>'';
-        path = "/";
-      };
-      tray = {
-        icon-size = 16;
-        spacing = 5;
-      };
-      power-profiles-daemon = {
-        format = "{icon}";
-        tooltip-format = "Power profile: {profile}\nDriver: {driver}";
-        tooltip = true;
-        format-icons = {
-          default = ''<span color="#f5e0dc">󰾞</span>'';
-          performance = ''<span color="#f5e0dc">󱐋</span>'';
-          balanced = ''<span color="#f5e0dc">󰗑</span>'';
-          power-saver = ''<span color="#f5e0dc">󰌪</span>'';
-        };
-      };
-    };
-    };
-    # no mkForce: catppuccin prepends @import of its Mocha palette (@rosewater, @base, ...)
-    style = ''
-/* Catppuccin Mocha Colors - AptNix, by gmlgtm */
- @define-color background @base;
- @define-color background-light @surface0;
- @define-color foreground @rosewater;
- @define-color black @surface2;
- @define-color subtext @subtext0;
- @define-color white @text;
- 
- /* Module-specific colors */
- @define-color workspaces-color @foreground;
- @define-color workspaces-focused-bg @foreground;
- @define-color workspaces-focused-fg @foreground;
- @define-color workspaces-urgent-bg @foreground;
- @define-color workspaces-urgent-fg @black;
- 
- /* Text and border colors for modules */
- @define-color mode-color @foreground;
- @define-color group-hardware-color @foreground;
- @define-color group-session-color @foreground;
- @define-color clock-color @foreground;
- @define-color cpu-color @foreground;
- @define-color memory-color @foreground;
- @define-color temperature-color @foreground;
- @define-color temperature-critical-color @foreground;
- @define-color battery-color @foreground;
- @define-color battery-charging-color @foreground;
- @define-color battery-warning-color @foreground;
- @define-color battery-critical-color @foreground;
- @define-color network-color @foreground;
- @define-color network-disconnected-color @foreground;
- @define-color pulseaudio-color @foreground;
- @define-color pulseaudio-muted-color @foreground;
- @define-color wireplumber-color @foreground;
- @define-color wireplumber-muted-color @foreground;
- @define-color backlight-color @foreground;
- @define-color disk-color @foreground;
- @define-color updates-color @foreground;
- @define-color quote-color @foreground;
- @define-color idle-inhibitor-color @foreground;
- @define-color idle-inhibitor-active-color @foreground;
- @define-color power-profiles-daemon-color @foreground;
- @define-color power-profiles-daemon-performance-color @foreground;
- @define-color power-profiles-daemon-balanced-color @foreground;
- @define-color power-profiles-daemon-power-saver-color @foreground;
- 
- * {
-     /* Base styling for all modules */
-     border: none;
-     font-family: "JetBrainsMono", "Symbols Nerd Font";
-     font-size: 14px;
-     min-height: 0;
-     font-weight: 500; 
- }
- 
- /* Common module styling with uniform borders */
- #mode,
- #custom-hardware-wrap,
- #custom-session-wrap,
- #session,
- #custom-session,
- #clock,
- #cpu,
- #memory,
- #temperature,
- #battery,
- #network,
- #pulseaudio,
- #wireplumber,
- #backlight,
- #disk,
- #power-profiles-daemon,
- #idle_inhibitor,
- #tray {
-     padding: 2px 10px;
-     margin: 2px 4px;
-     border: 2px solid @foreground;
-     background-color: transparent;
- }
- 
-#workspaces {
-    background-color: transparent;
-    padding: 0 6px;
-}
+  # ── Quickshell: bar + notifications (replaces waybar and swaync) ─────────────
+  # Started from the Hyprland autostart with hl.exec_cmd("qs").
+  # Notification center from a keybind/script:  qs ipc call notifs toggle
+  programs.quickshell.enable = true;
 
-#workspaces button {
-    min-width: 22px;
-    border-radius: 0;
-    min-height: 0;
-    padding: 2px 7px;
-    margin: 0 3px;
-    border: 2px solid @foreground;
-    background-color: transparent;
-    color: @foreground;
-    font-weight: 600;
-}
+  xdg.configFile."quickshell/shell.qml".text = ''
+    import QtQuick
+    import Quickshell
 
-#workspaces button label {
-    opacity: 1;
-    color: @white;
-}
+    // Entry point: one bar per monitor, plus notification popups and the notification center.
+    ShellRoot {
+        Variants {
+            model: Quickshell.screens
 
-#workspaces button:hover {
-    background-color: alpha(@foreground, 0.25);
-}
+            Bar {}
+        }
 
-#workspaces button.active,
-#workspaces button.focused {
-    background-color: @foreground;
-    border-color: @foreground;
-    color: @crust;
-}
+        NotificationPopups {}
+        NotificationCenter {}
+    }
+  '';
 
-#workspaces button.active label,
-#workspaces button.focused label {
-    color: @crust;
-}
+  xdg.configFile."quickshell/Bar.qml".text = ''
+    import QtQuick
+    import QtQuick.Layouts
+    import Quickshell
+    import Quickshell.Wayland
 
-#workspaces button.urgent {
-    background-color: @foreground;
-    border-color: @foreground;
-    color: @crust;
-}
+    // The bar (was waybar). margin-top 8, margin-left/right 10, layer top.
+    // Outer box: background @base, 2px @subtext0 border, padding 2px 6px, square corners.
+    PanelWindow {
+        id: bar
 
- /* Module-specific text styling (borders globally set to @foreground) */
- #mode {
-     color: @mode-color;
- }
- 
- #custom-hardware-wrap {
-     color: @crust;
-     background-color: @foreground;
- }
+        required property var modelData
+        screen: modelData
 
- #window {
-     color: @foreground;
-     padding: 2px 10px;
- }
- 
- #clock {
-     color: @clock-color;
- }
+        anchors {
+            top: true
+            left: true
+            right: true
+        }
+        margins {
+            top: 8
+            left: 10
+            right: 10
+        }
+        WlrLayershell.layer: WlrLayer.Top
+        WlrLayershell.namespace: "quickshell-bar"
+        color: "transparent"
+        implicitHeight: frame.implicitHeight
 
- #cpu {
-     color: @cpu-color;
- }
+        // modules-left / -center / -right sit 1px apart (waybar "spacing = 1")
+        readonly property int rowHeight: memory.implicitHeight
 
- #memory {
-     color: @memory-color;
- }
+        Rectangle {
+            id: frame
+            anchors.fill: parent
+            implicitHeight: Math.max(left.implicitHeight, center.implicitHeight, right.implicitHeight) + (2 + Theme.border) * 2
+            color: Theme.base
+            border.width: Theme.border
+            border.color: Theme.subtext0
 
- #temperature {
-     color: @temperature-color;
- }
+            // modules-left: group/hardware, hyprland/workspaces, hyprland/window
+            RowLayout {
+                id: left
+                anchors.left: parent.left
+                anchors.leftMargin: Theme.border + 6
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 1
 
- #temperature.critical {
-     color: @crust;
-     background-color: @foreground;
- }
+                RowLayout {
+                    spacing: 0
+                    PowerProfileModule {}
+                    MemoryModule { id: memory }
+                    CpuModule {}
+                    DiskModule {}
+                }
 
- #network {
-     color: @network-color;
- }
+                Workspaces {
+                    screen: bar.screen
+                    rowHeight: bar.rowHeight
+                }
 
- #network.disconnected {
-     color: @network-disconnected-color;
- }
+                WindowTitle {}
+            }
 
- #disk {
-     color: @disk-color;
- }
+            // modules-center: group/media-player, custom/media-time, tray
+            RowLayout {
+                id: center
+                anchors.centerIn: parent
+                height: bar.rowHeight
+                spacing: 1
 
- #power-profiles-daemon {
-     color: @power-profiles-daemon-color;
- }
+                MediaModule {}
+                TrayModule {}
+            }
 
- #power-profiles-daemon.performance {
-     color: @power-profiles-daemon-performance-color;
- }
+            // modules-right: notifications (new), clock, wireplumber#sink, network, group/session
+            RowLayout {
+                id: right
+                anchors.right: parent.right
+                anchors.rightMargin: Theme.border + 6
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 1
 
- #power-profiles-daemon.balanced {
-     color: @power-profiles-daemon-balanced-color;
- }
+                NotifModule {}
+                ClockModule {}
+                VolumeModule {}
+                NetworkModule {}
+                SessionModule {}
+            }
+        }
+    }
+  '';
 
- #power-profiles-daemon.power-saver {
-     color: @power-profiles-daemon-power-saver-color;
- }
- 
- #cpu-group {
-     color: @crust;
-     background-color: @foreground;
-     border: 2px solid @foreground;
- }
- 
- #custom-gpu {
-     color: @crust;
-     background-color: @foreground; 
-     border: 2px solid @foreground;
- }
- 
- #custom-gpu-temperature {
-     color: @crust;
-     background-color: @foreground;
-     border: 2px solid @foreground;
- }
- 
- #battery {
-     color: @battery-color;
- }
- 
- #battery.charging,
- #battery.plugged {
-     color: @battery-charging-color;
- }
- 
- #battery.warning:not(.charging) {
-     color: @battery-warning-color;
- }
- 
- #battery.critical:not(.charging) {
-     color: @battery-critical-color;
- }
- 
- #pulseaudio {
-     color: @pulseaudio-color;
- }
- 
- #pulseaudio.muted {
-     color: @pulseaudio-muted-color;
- }
+  xdg.configFile."quickshell/BarModule.qml".text = ''
+    import QtQuick
+    import QtQuick.Layouts
 
- #wireplumber {
-     color: @wireplumber-color;
- }
+    // One waybar module. Defaults match your CSS for bordered modules:
+    //   padding: 2px 10px; margin: 2px 4px; border: 2px solid @rosewater;
+    // Set bordered: false (and zero paddings) for the plain custom/* style modules.
+    Item {
+        id: root
 
- #wireplumber.muted {
-     color: @wireplumber-muted-color;
- }
- 
- #backlight {
-     color: @backlight-color;
- }
+        default property alias content: row.data
+        property int hPadding: 10
+        property int vPadding: 2
+        property int hMargin: 4
+        property int vMargin: 2
+        property bool bordered: true
+        property bool fillHeight: false
+        property string tooltip: ""
+        readonly property alias hovered: mouse.containsMouse
+        readonly property alias box: box
 
- decoration {
-     background: transparent;
-     box-shadow: none;
- }
- 
- #idle_inhibitor {
-     color: @idle-inhibitor-color;
- }
- 
- #idle_inhibitor.activated {
-     color: @idle-inhibitor-active-color;
- }
- 
- tooltip {
-     background: @background;
-     border: 2px solid @foreground;
-     border-radius: 0;
- }
+        signal clicked(var mouse)
+        signal scrolled(int delta) // > 0 = scroll up
 
- #custom-media-next.active {
-     color: @foreground;
- }
+        Layout.fillHeight: fillHeight
+        implicitWidth: box.implicitWidth + hMargin * 2
+        implicitHeight: box.implicitHeight + vMargin * 2
 
- #custom-media-prev.active {
-     color: @foreground;
- }
+        // under the content, so child MouseAreas (tray icons) still get their own clicks
+        MouseArea {
+            id: mouse
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+            onClicked: m => root.clicked(m)
+            onWheel: w => root.scrolled(w.angleDelta.y)
+        }
 
- /* Tray Menu Styling */
- #tray menu {
-     background: @crust;
-     border: 1px solid @foreground;
-     padding: 6px;
- }
- 
- #tray menu menuitem {
-     color: @foreground;
-     padding: 4px 12px;
-     transition: all 0.2s ease;
- }
- 
- #tray menu menuitem:hover {
-     background: @foreground;
-     color: @crust;
- }
- 
- #tray {
-     background-color: transparent;
-     border-color: @foreground;
-     padding: 0 10px;
-     margin: 0 2px;
- }
- 
- #tray>.passive {
-     -gtk-icon-effect: dim;
- }
- 
- #tray>.needs-attention {
-     -gtk-icon-effect: highlight;
-     color: @foreground;
- }
- 
-/* Base window */
-window#waybar {
-    background-color: transparent;
-}
+        Rectangle {
+            id: box
+            readonly property int bw: root.bordered ? Theme.border : 0
+            anchors.centerIn: parent
+            implicitWidth: row.implicitWidth + root.hPadding * 2 + bw * 2
+            implicitHeight: row.implicitHeight + root.vPadding * 2 + bw * 2
+            width: implicitWidth
+            height: root.fillHeight ? root.height - root.vMargin * 2 : implicitHeight
+            color: "transparent"
+            border.width: bw
+            border.color: Theme.rosewater
 
-/* Outer Waybar Container */
-window#waybar > box {
-    background-color: @background;
-    border: 2px solid @subtext;
-    padding: 2px 6px;
-}
- 
- #modules-left > widget:first-child,
- #modules-right > widget:last-child {
-     margin: 0 4px;
-}
-    '';
-  };
+            RowLayout {
+                id: row
+                anchors.centerIn: parent
+                spacing: 0
+            }
+        }
+
+        Tooltip {
+            target: box
+            text: root.tooltip
+            show: mouse.containsMouse
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/BarText.qml".text = ''
+    import QtQuick
+
+    // Plain text in the bar font. Plain (not rich) text so the spacing inside
+    // your waybar format strings is preserved exactly.
+    Text {
+        color: Theme.text
+        font.family: Theme.font
+        font.pixelSize: Theme.fontSize
+        font.weight: Theme.fontWeight
+    }
+  '';
+
+  xdg.configFile."quickshell/CalendarPopup.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // The clock tooltip: "<big>{:%Y %B}</big>" + month grid, weeks on the right ("W{}"),
+    // everything Rosewater, today bold + underlined.
+    PopupWindow {
+        id: root
+
+        required property Item target
+        property bool show: false
+        property bool armed: false
+        property date date: new Date()
+        property int offset: 0
+
+        readonly property date shown: new Date(date.getFullYear(), date.getMonth() + offset, 1)
+        readonly property var weeks: {
+            const first = new Date(shown.getFullYear(), shown.getMonth(), 1);
+            const start = new Date(first);
+            start.setDate(1 - first.getDay()); // weeks start on Sunday
+            const rows = [];
+            for (let w = 0; w < 6; w++) {
+                const days = [];
+                for (let d = 0; d < 7; d++) {
+                    const day = new Date(start);
+                    day.setDate(start.getDate() + w * 7 + d);
+                    days.push(day);
+                }
+                if (w > 3 && days[0].getMonth() !== shown.getMonth())
+                    break;
+                rows.push(days);
+            }
+            return rows;
+        }
+
+        function isoWeek(d) {
+            const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+            const dayNum = t.getUTCDay() || 7;
+            t.setUTCDate(t.getUTCDate() + 4 - dayNum);
+            const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+            return Math.ceil(((t - yearStart) / 86400000 + 1) / 7);
+        }
+
+        anchor.item: target
+        anchor.edges: Edges.Bottom
+        anchor.gravity: Edges.Bottom
+        visible: armed && show
+        color: "transparent"
+        implicitWidth: content.implicitWidth + 24
+        implicitHeight: content.implicitHeight + 20
+
+        onShowChanged: if (!show) armed = false
+
+        Timer {
+            interval: 400
+            running: root.show && !root.armed
+            onTriggered: root.armed = true
+        }
+
+        component Cell: Text {
+            property bool bold: false
+            width: 30
+            horizontalAlignment: Text.AlignRight
+            color: Theme.rosewater
+            font.family: Theme.font
+            font.pixelSize: 12 // <small>
+            font.bold: bold
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: Theme.base
+            border.width: Theme.border
+            border.color: Theme.rosewater
+
+            Column {
+                id: content
+                anchors.centerIn: parent
+                spacing: 4
+
+                Text {
+                    text: Qt.formatDateTime(root.shown, "yyyy MMMM")
+                    color: Theme.rosewater
+                    font.family: Theme.font
+                    font.pixelSize: 17 // <big>
+                    font.bold: true
+                }
+
+                Row {
+                    Repeater {
+                        model: ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
+                        Cell {
+                            required property var modelData
+                            text: modelData
+                            bold: true
+                        }
+                    }
+                    Cell { width: 44; text: "" }
+                }
+
+                Repeater {
+                    model: root.weeks
+
+                    Row {
+                        id: week
+                        required property var modelData
+
+                        Repeater {
+                            model: week.modelData
+
+                            Cell {
+                                required property var modelData
+                                readonly property bool inMonth: modelData.getMonth() === root.shown.getMonth()
+                                readonly property bool today: modelData.toDateString() === root.date.toDateString()
+                                text: inMonth ? modelData.getDate() : ""
+                                bold: today
+                                font.underline: today
+                            }
+                        }
+
+                        Cell {
+                            width: 44
+                            text: "W" + root.isoWeek(week.modelData[1])
+                            bold: true
+                        }
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/ClockModule.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // clock: "󰥔 {:%I:%M %p 󰃮 %B %d, %Y}", click toggles format-alt "󰥔 {:%I:%M %p}",
+    // hover shows the month calendar, scroll shifts it (shift_up / shift_down).
+    BarModule {
+        id: root
+
+        property bool alt: false
+        property int monthOffset: 0
+
+        onClicked: m => {
+            if (m.button === Qt.LeftButton)
+                root.alt = !root.alt;
+        }
+        onScrolled: delta => root.monthOffset += delta > 0 ? 1 : -1
+        onHoveredChanged: if (!hovered) monthOffset = 0
+
+        SystemClock {
+            id: clock
+            precision: SystemClock.Minutes
+        }
+
+        BarText { text: " 󰥔 "; color: Theme.rosewater }
+        BarText {
+            text: root.alt
+                ? Qt.formatDateTime(clock.date, "hh:mm AP")
+                : Qt.formatDateTime(clock.date, "hh:mm AP") + " 󰃮 " + Qt.formatDateTime(clock.date, "MMMM dd, yyyy")
+        }
+
+        CalendarPopup {
+            target: root.box
+            show: root.hovered
+            date: clock.date
+            offset: root.monthOffset
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/CpuModule.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // cpu: "󰘚 {usage}%", interval 1, click opens btop
+    BarModule {
+        onClicked: m => {
+            if (m.button === Qt.LeftButton)
+                Quickshell.execDetached(["kitty", "-e", "btop"]);
+        }
+
+        BarText { text: "󰘚"; color: Theme.rosewater }
+        BarText { text: " " + SysInfo.cpuUsage + "%" }
+    }
+  '';
+
+  xdg.configFile."quickshell/DiskModule.qml".text = ''
+    import QtQuick
+
+    // disk: "󰋊 {percentage_used}%", path "/", interval 30
+    BarModule {
+        BarText { text: "󰋊"; color: Theme.rosewater }
+        BarText { text: " " + SysInfo.diskUsed + "%" }
+    }
+  '';
+
+  xdg.configFile."quickshell/MediaModule.qml".text = ''
+    import QtQuick
+    import QtQuick.Layouts
+
+    // group/media-player [custom/media, custom/media-prev, custom/media-next] + custom/media-time
+    RowLayout {
+        id: root
+        spacing: 1
+
+        readonly property bool controls: Player.status === "Playing" || Player.status === "Paused"
+        readonly property var icon: ({
+            "Playing": { glyph: " 󰏦 ", color: Theme.green },
+            "Paused": { glyph: " 󰐍 ", color: Theme.yellow },
+            "Stopped": { glyph: " 󰝛 ", color: Theme.red }
+        })
+
+        function truncate(t, n) {
+            return t.length > n ? t.slice(0, n - 1) + "…" : t;
+        }
+
+        RowLayout {
+            spacing: 0
+
+            // custom/media: ' {icon} {text} '  (max-length 25)
+            BarModule {
+                bordered: false
+                hPadding: 0
+                vPadding: 0
+                hMargin: 0
+                vMargin: 0
+                tooltip: Player.hasMedia ? Player.active.identity + " : " + Player.title : "No media"
+                onClicked: if (Player.active) Player.active.togglePlaying()
+                onScrolled: delta => {
+                    if (!Player.active)
+                        return;
+                    if (delta > 0)
+                        Player.active.next();
+                    else
+                        Player.active.previous();
+                }
+
+                BarText { text: " " }
+                BarText {
+                    text: root.icon[Player.status].glyph
+                    color: root.icon[Player.status].color
+                    font.pixelSize: Math.round(Theme.fontSize * 1.2) // pango "large"
+                }
+                BarText {
+                    text: " " + root.truncate(Player.hasMedia ? Player.title : "Nothing playing", 25) + " "
+                }
+            }
+
+            // custom/media-prev
+            BarModule {
+                visible: root.controls
+                bordered: false
+                hPadding: 0
+                vPadding: 0
+                hMargin: 0
+                vMargin: 0
+                onClicked: Player.active.previous()
+
+                BarText { text: "  󰼥  "; color: Theme.rosewater }
+            }
+
+            // custom/media-next
+            BarModule {
+                visible: root.controls
+                bordered: false
+                hPadding: 0
+                vPadding: 0
+                hMargin: 0
+                vMargin: 0
+                onClicked: Player.active.next()
+
+                BarText { text: "  󰼦  "; color: Theme.rosewater }
+            }
+        }
+
+        // custom/media-time: '  {} '  (hidden when empty, like waybar)
+        BarText {
+            visible: Player.timeText !== ""
+            text: "  " + Player.timeText + " "
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/MemoryModule.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // memory: "󰍛 {used:0.1f}GiB", interval 1, click opens btop
+    BarModule {
+        onClicked: m => {
+            if (m.button === Qt.LeftButton)
+                Quickshell.execDetached(["kitty", "-e", "btop"]);
+        }
+
+        BarText { text: "󰍛"; color: Theme.rosewater }
+        BarText { text: " " + SysInfo.memUsedGiB.toFixed(1) + "GiB" }
+    }
+  '';
+
+  xdg.configFile."quickshell/NetInfo.qml".text = ''
+    pragma Singleton
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+
+    // NetworkManager state via nmcli. `nmcli monitor` pushes changes, so this only
+    // re-queries when something actually changes (plus a slow refresh for wifi signal).
+    Singleton {
+        id: root
+
+        property string type: ""      // "ethernet", "wifi" or "" (disconnected)
+        property string ifname: ""
+        property bool linked: false   // link up but no IP yet
+        property string ssid: ""
+        property int signal: 0
+        property string ip: ""        // "192.168.1.5/24"
+        readonly property string ipOnly: ip.split("/")[0]
+
+        // nmcli -t escapes ':' inside fields as '\:'
+        function splitTerse(line) {
+            const out = [];
+            let cur = "";
+            for (let i = 0; i < line.length; i++) {
+                const c = line[i];
+                if (c === "\\" && i + 1 < line.length) {
+                    cur += line[i + 1];
+                    i++;
+                } else if (c === ":") {
+                    out.push(cur);
+                    cur = "";
+                } else {
+                    cur += c;
+                }
+            }
+            out.push(cur);
+            return out;
+        }
+
+        function refresh() {
+            devices.running = true;
+        }
+
+        Process {
+            id: devices
+            command: ["nmcli", "-t", "-f", "TYPE,STATE,DEVICE", "device"]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const rows = this.text.trim().split("\n").map(l => root.splitTerse(l));
+                    const up = s => s.indexOf("connected") === 0 && s.indexOf("disconnected") !== 0;
+                    const pick = rows.find(r => r[0] === "ethernet" && (up(r[1]) || r[1].indexOf("connecting") === 0))
+                              || rows.find(r => r[0] === "wifi" && (up(r[1]) || r[1].indexOf("connecting") === 0));
+                    if (!pick) {
+                        root.type = "";
+                        root.ifname = "";
+                        root.ip = "";
+                        return;
+                    }
+                    root.type = pick[0];
+                    root.ifname = pick[2];
+                    root.linked = pick[1].indexOf("connecting") === 0;
+                    address.running = true;
+                    if (root.type === "wifi")
+                        wifi.running = true;
+                }
+            }
+        }
+
+        Process {
+            id: wifi
+            command: ["nmcli", "-t", "-f", "ACTIVE,SIGNAL,SSID", "device", "wifi"]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const row = this.text.trim().split("\n").map(l => root.splitTerse(l)).find(r => r[0] === "yes");
+                    root.signal = row ? Number(row[1]) : 0;
+                    root.ssid = row ? row[2] : "";
+                }
+            }
+        }
+
+        Process {
+            id: address
+            command: ["ip", "-4", "-o", "addr", "show", "dev", root.ifname]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const m = this.text.match(/inet (\S+)/);
+                    root.ip = m ? m[1] : "";
+                }
+            }
+        }
+
+        Process {
+            running: true
+            command: ["nmcli", "monitor"]
+            stdout: SplitParser {
+                onRead: _ => debounce.restart()
+            }
+        }
+
+        Timer {
+            id: debounce
+            interval: 300
+            onTriggered: root.refresh()
+        }
+
+        Timer {
+            interval: 30000
+            running: true
+            repeat: true
+            triggeredOnStart: true
+            onTriggered: root.refresh()
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/NetworkModule.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // network: ethernet "󰈀 {ifname}", wifi "󰖩 {essid} ({signalStrength}%) ",
+    // linked "(No IP)", disconnected red "󰖪 Disconnected".
+    // click toggles format-alt "{ifname}: {ipaddr}/{cidr}", right-click opens nmtui.
+    BarModule {
+        id: root
+
+        property bool alt: false
+
+        tooltip: NetInfo.type === "" ? "" : NetInfo.ifname + ": " + NetInfo.ipOnly
+
+        onClicked: m => {
+            if (m.button === Qt.RightButton)
+                Quickshell.execDetached(["kitty", "-e", "nmtui"]);
+            else if (m.button === Qt.LeftButton)
+                root.alt = !root.alt;
+        }
+
+        // format-alt has no color spans, so it renders in the module color (Rosewater)
+        BarText {
+            visible: root.alt && NetInfo.type !== ""
+            text: NetInfo.ifname + ": " + NetInfo.ip
+            color: Theme.rosewater
+        }
+
+        BarText {
+            visible: !root.alt || NetInfo.type === ""
+            text: NetInfo.type === "wifi" ? "󰖩" : (NetInfo.type === "ethernet" ? "󰈀" : "󰖪")
+            color: NetInfo.type === "" ? Theme.red : Theme.rosewater
+        }
+        BarText {
+            visible: !root.alt || NetInfo.type === ""
+            text: {
+                if (NetInfo.type === "")
+                    return " Disconnected";
+                if (NetInfo.type === "wifi")
+                    return " " + NetInfo.ssid + " (" + NetInfo.signal + "%) ";
+                return " " + NetInfo.ifname + (NetInfo.linked ? " (No IP)" : "");
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/NotifModule.qml".text = ''
+    import QtQuick
+
+    // NEW: notification module. Left-click opens the notification center,
+    // right-click toggles Do Not Disturb. Same bordered style as the other modules.
+    BarModule {
+        id: root
+
+        tooltip: Notifs.dnd ? "Do Not Disturb" : "Notifications"
+
+        onClicked: m => {
+            if (m.button === Qt.RightButton)
+                Notifs.dnd = !Notifs.dnd;
+            else if (m.button === Qt.LeftButton)
+                Notifs.toggleCenter();
+        }
+
+        BarText {
+            text: Notifs.dnd ? "󰂛" : (Notifs.count > 0 ? "󰂚" : "󰂜")
+            color: Theme.rosewater
+        }
+        BarText {
+            text: " " + Notifs.count
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/NotificationCard.qml".text = ''
+    import QtQuick
+    import QtQuick.Layouts
+    import Quickshell
+    import Quickshell.Services.Notifications
+
+    // One notification, styled from your swaync CSS:
+    //   background rgba(base, 0.8); border 1px rgba(rosewater, 0.15); hover @surface0
+    //   summary 16px bold, body 15px, text Rosewater; image 64px; 24px close button (@surface1)
+    Rectangle {
+        id: card
+
+        required property var notif
+        readonly property bool hovered: hover.hovered
+        readonly property var actions: Theme.toArray(notif.actions)
+        readonly property var defaultAction: actions.find(a => a.identifier === "default") || null
+        readonly property var extraActions: actions.filter(a => a.identifier !== "default")
+        readonly property string iconSource: {
+            const img = notif.image;
+            if (img !== "")
+                return img;
+            const ic = notif.appIcon;
+            if (ic === "")
+                return "";
+            if (ic.startsWith("/"))
+                return "file://" + ic;
+            if (ic.startsWith("file://") || ic.startsWith("image://"))
+                return ic;
+            return Quickshell.iconPath(ic, true);
+        }
+
+        implicitHeight: layout.implicitHeight
+        color: Theme.alpha(Theme.base, 0.8)
+        border.width: 1
+        border.color: Theme.alpha(Theme.rosewater, 0.15)
+
+        HoverHandler {
+            id: hover
+        }
+
+        ColumnLayout {
+            id: layout
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: 1
+            spacing: 0
+
+            // the default action: summary + body (whole area clickable)
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: content.implicitHeight + 8
+                color: bodyArea.containsMouse ? Theme.surface0 : "transparent"
+
+                Behavior on color {
+                    ColorAnimation { duration: 150 }
+                }
+
+                MouseArea {
+                    id: bodyArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: {
+                        if (card.defaultAction)
+                            card.defaultAction.invoke();
+                        else
+                            card.notif.dismiss();
+                    }
+                }
+
+                RowLayout {
+                    id: content
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: 4
+                    spacing: 4
+
+                    Image {
+                        visible: card.iconSource !== "" && status !== Image.Error
+                        source: card.iconSource
+                        Layout.preferredWidth: 64
+                        Layout.preferredHeight: 64
+                        Layout.margins: 4
+                        Layout.alignment: Qt.AlignTop
+                        sourceSize.width: 64
+                        sourceSize.height: 64
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignTop
+                        Layout.topMargin: 4
+                        spacing: 2
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: card.notif.summary
+                                elide: Text.ElideRight
+                                color: Theme.rosewater
+                                font.family: Theme.uiFont
+                                font.pixelSize: 16
+                                font.bold: true
+                            }
+
+                            Text {
+                                Layout.rightMargin: 30 // leaves room for the close button
+                                text: Notifs.ago(card.notif)
+                                color: Theme.rosewater
+                                font.family: Theme.uiFont
+                                font.pixelSize: 16
+                                font.bold: true
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: text !== ""
+                            text: card.notif.body
+                            textFormat: Text.StyledText
+                            wrapMode: Text.Wrap
+                            maximumLineCount: 5
+                            elide: Text.ElideRight
+                            color: Theme.rosewater
+                            font.family: Theme.uiFont
+                            font.pixelSize: 15
+                        }
+                    }
+                }
+            }
+
+            // alternative actions
+            Flow {
+                Layout.fillWidth: true
+                Layout.margins: 4
+                visible: card.extraActions.length > 0
+                spacing: 8
+
+                Repeater {
+                    model: card.extraActions
+
+                    Rectangle {
+                        id: action
+                        required property var modelData
+                        width: actionLabel.implicitWidth + 24
+                        height: actionLabel.implicitHeight + 12
+                        color: actionArea.containsMouse ? Theme.surface1 : Theme.surface0
+
+                        Text {
+                            id: actionLabel
+                            anchors.centerIn: parent
+                            text: action.modelData.text
+                            color: Theme.rosewater
+                            font.family: Theme.uiFont
+                            font.pixelSize: 14
+                        }
+
+                        MouseArea {
+                            id: actionArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: action.modelData.invoke()
+                        }
+                    }
+                }
+            }
+        }
+
+        // close button
+        Rectangle {
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.topMargin: 8
+            anchors.rightMargin: 8
+            width: 24
+            height: 24
+            color: closeArea.containsMouse ? Theme.surface2 : Theme.surface1
+
+            Behavior on color {
+                ColorAnimation { duration: 150 }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                text: "󰅖"
+                color: Theme.rosewater
+                font.family: Theme.font
+                font.pixelSize: 14
+            }
+
+            MouseArea {
+                id: closeArea
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: card.notif.dismiss()
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/NotificationCenter.qml".text = ''
+    import QtQuick
+    import QtQuick.Layouts
+    import Quickshell
+    import Quickshell.Wayland
+
+    // Notification center (was swaync's control center): 500x600 at the top-right,
+    // background rgba(base, 0.7), widgets: title + Clear All, Do Not Disturb, the list.
+    // Click outside or press Escape to close.
+    PanelWindow {
+        id: root
+
+        visible: Notifs.centerOpen
+        anchors {
+            top: true
+            bottom: true
+            left: true
+            right: true
+        }
+        exclusionMode: ExclusionMode.Normal
+        exclusiveZone: 0
+        WlrLayershell.layer: WlrLayer.Top
+        WlrLayershell.namespace: "quickshell-notification-center"
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
+        color: "transparent"
+
+        // click-away
+        MouseArea {
+            anchors.fill: parent
+            onClicked: Notifs.centerOpen = false
+        }
+
+        Rectangle {
+            id: panel
+            anchors.top: parent.top
+            anchors.right: parent.right
+            width: 500
+            height: Math.min(600, parent.height)
+            color: Theme.alpha(Theme.base, 0.7)
+            focus: true
+            Keys.onEscapePressed: Notifs.centerOpen = false
+
+            // keep clicks inside the panel from closing it
+            MouseArea {
+                anchors.fill: parent
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 0
+
+                // widget-title: "Notifications" + Clear All
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.margins: 16 // .widget { margin: 8px; padding: 8px }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Notifications"
+                        color: Theme.rosewater
+                        font.family: Theme.uiFont
+                        font.pixelSize: 22 // 1.5rem
+                    }
+
+                    Rectangle {
+                        implicitWidth: clearLabel.implicitWidth + 24
+                        implicitHeight: clearLabel.implicitHeight + 12
+                        color: clearArea.containsMouse ? Theme.surface1 : Theme.surface0
+
+                        Text {
+                            id: clearLabel
+                            anchors.centerIn: parent
+                            text: "Clear All"
+                            color: Theme.rosewater
+                            font.family: Theme.uiFont
+                            font.pixelSize: 14
+                        }
+
+                        MouseArea {
+                            id: clearArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: Notifs.clearAll()
+                        }
+                    }
+                }
+
+                // widget-dnd: "Do Not Disturb" + switch
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 16
+                    Layout.rightMargin: 16
+                    Layout.bottomMargin: 16
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Do Not Disturb"
+                        color: Theme.rosewater
+                        font.family: Theme.uiFont
+                        font.pixelSize: 16 // 1.1rem
+                    }
+
+                    Rectangle {
+                        implicitWidth: 46
+                        implicitHeight: 24
+                        radius: 12
+                        color: Notifs.dnd ? Theme.rosewater : Theme.surface1
+
+                        Behavior on color {
+                            ColorAnimation { duration: 150 }
+                        }
+
+                        Rectangle {
+                            width: 18
+                            height: 18
+                            radius: 9
+                            y: 3
+                            x: Notifs.dnd ? parent.width - width - 3 : 3
+                            color: Notifs.dnd ? Theme.crust : Theme.text
+
+                            Behavior on x {
+                                NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: Notifs.dnd = !Notifs.dnd
+                        }
+                    }
+                }
+
+                // the list (newest first)
+                ListView {
+                    id: list
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    spacing: 0
+                    model: ScriptModel {
+                        values: Notifs.list.slice().reverse()
+                    }
+
+                    delegate: Item {
+                        id: row
+                        required property var modelData
+                        width: list.width
+                        height: card.implicitHeight + 12
+
+                        NotificationCard {
+                            id: card
+                            x: 12
+                            y: 6
+                            width: parent.width - 24
+                            notif: row.modelData
+                        }
+                    }
+
+                    remove: Transition {
+                        NumberAnimation { property: "opacity"; to: 0; duration: 200 }
+                    }
+                    displaced: Transition {
+                        NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic }
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: Notifs.count === 0
+                        text: "No Notifications"
+                        opacity: 0.5
+                        color: Theme.rosewater
+                        font.family: Theme.uiFont
+                        font.pixelSize: 16
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/NotificationPopups.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Wayland
+
+    // Floating notifications, top-right below the bar (swaync: positionX right, positionY top,
+    // layer overlay, width 500, transition-time 200). Hovering a popup pauses its timeout.
+    PanelWindow {
+        id: root
+
+        visible: Notifs.popups.length > 0
+        anchors {
+            top: true
+            right: true
+        }
+        exclusionMode: ExclusionMode.Normal
+        exclusiveZone: 0
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.namespace: "quickshell-notifications"
+        color: "transparent"
+        implicitWidth: 500
+        implicitHeight: Math.max(1, list.contentHeight)
+
+        ListView {
+            id: list
+            anchors.fill: parent
+            interactive: false
+            model: ScriptModel {
+                values: Notifs.popups
+            }
+
+            delegate: Item {
+                id: row
+                required property var modelData
+                width: 500
+                height: card.implicitHeight + 12 // .notification-row padding: 6px 12px
+
+                NotificationCard {
+                    id: card
+                    x: 12
+                    y: 6
+                    width: 476
+                    notif: row.modelData
+                }
+
+                Timer {
+                    interval: Notifs.timeoutFor(row.modelData)
+                    running: interval > 0 && !card.hovered
+                    onTriggered: Notifs.removePopup(row.modelData)
+                }
+            }
+
+            add: Transition {
+                NumberAnimation { property: "x"; from: 500; to: 0; duration: 200; easing.type: Easing.OutCubic }
+                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 200 }
+            }
+            remove: Transition {
+                NumberAnimation { property: "opacity"; to: 0; duration: 200 }
+            }
+            displaced: Transition {
+                NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Notifs.qml".text = ''
+    pragma Singleton
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+    import Quickshell.Services.Notifications
+
+    // Notification daemon (replaces swaync). Quickshell owns org.freedesktop.Notifications;
+    // the popups, the center and the bar module all read from here.
+    Singleton {
+        id: root
+
+        property bool dnd: false
+        property bool centerOpen: false
+        property var popups: []
+        property var times: ({})
+        property real now: Date.now()
+
+        readonly property var list: Theme.toArray(server.trackedNotifications.values)
+        readonly property int count: list.length
+
+        // swaync: timeout = 10, timeout-low = 5, timeout-critical = 0 (never)
+        function timeoutFor(n) {
+            if (n.urgency === NotificationUrgency.Critical)
+                return 0;
+            if (n.expireTimeout > 0)
+                return n.expireTimeout * 1000;
+            return n.urgency === NotificationUrgency.Low ? 5000 : 10000;
+        }
+
+        // swaync: relative-timestamps = true
+        function ago(n) {
+            const t = root.times[n.id];
+            if (t === undefined)
+                return "";
+            const mins = Math.floor((root.now - t) / 60000);
+            if (mins < 1)
+                return "now";
+            if (mins < 60)
+                return mins + " min ago";
+            const hours = Math.floor(mins / 60);
+            return hours + (hours === 1 ? " hour ago" : " hours ago");
+        }
+
+        function removePopup(n) {
+            root.popups = root.popups.filter(p => p !== n);
+        }
+
+        function clearAll() {
+            const all = root.list.slice();
+            for (const n of all)
+                n.dismiss();
+            root.popups = [];
+        }
+
+        function toggleCenter() {
+            root.centerOpen = !root.centerOpen;
+            if (root.centerOpen)
+                root.popups = [];
+        }
+
+        NotificationServer {
+            id: server
+            bodySupported: true
+            bodyMarkupSupported: true
+            actionsSupported: true
+            imageSupported: true
+            persistenceSupported: true
+
+            onNotification: n => {
+                n.tracked = true;
+                const t = Object.assign({}, root.times);
+                t[n.id] = Date.now();
+                root.times = t;
+                n.closed.connect(function () {
+                    root.removePopup(n);
+                });
+                if (!root.dnd && !root.centerOpen)
+                    root.popups = root.popups.concat([n]);
+            }
+        }
+
+        Timer {
+            interval: 30000
+            running: true
+            repeat: true
+            onTriggered: root.now = Date.now()
+        }
+
+        // Keybinds / scripts:  qs ipc call notifs toggle | toggleDnd | clear
+        IpcHandler {
+            target: "notifs"
+
+            function toggle(): void {
+                root.toggleCenter();
+            }
+            function toggleDnd(): void {
+                root.dnd = !root.dnd;
+            }
+            function clear(): void {
+                root.clearAll();
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Player.qml".text = ''
+    pragma Singleton
+    import QtQuick
+    import Quickshell
+    import Quickshell.Services.Mpris
+
+    // The media player the bar follows. You run playerctld, so prefer its proxy:
+    // that's the same player `playerctl` (your old waybar scripts) talked to.
+    Singleton {
+        id: root
+
+        readonly property var players: Theme.toArray(Mpris.players.values)
+        readonly property var active: {
+            const ps = root.players;
+            const ctl = ps.find(p => p.dbusName.indexOf("playerctld") !== -1);
+            if (ctl && ctl.trackTitle !== "")
+                return ctl;
+            const playing = ps.find(p => p.isPlaying);
+            if (playing)
+                return playing;
+            const named = ps.find(p => p.trackTitle !== "");
+            return named ? named : null;
+        }
+        readonly property bool hasMedia: active !== null && active.trackTitle !== ""
+        readonly property string status: {
+            if (!hasMedia)
+                return "Stopped";
+            if (active.playbackState === MprisPlaybackState.Playing)
+                return "Playing";
+            if (active.playbackState === MprisPlaybackState.Paused)
+                return "Paused";
+            return "Stopped";
+        }
+        readonly property string title: hasMedia ? active.trackTitle : ""
+
+        // position isn't reactive on its own; refresh it once a second while playing
+        Timer {
+            interval: 1000
+            repeat: true
+            running: root.status === "Playing"
+            onTriggered: root.active.positionChanged()
+        }
+
+        function fmt(s) {
+            const t = Math.floor(s);
+            const sec = t % 60;
+            return Math.floor(t / 60) + ":" + (sec < 10 ? "0" : "") + sec;
+        }
+
+        // was media-time.sh: "m:ss / m:ss", empty when there's no length
+        readonly property string timeText: {
+            if (!hasMedia || !active.lengthSupported || active.length <= 0)
+                return "";
+            return fmt(active.position) + " / " + fmt(active.length);
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/PowerProfileModule.qml".text = ''
+    import QtQuick
+    import Quickshell.Services.UPower
+
+    // power-profiles-daemon: icon only, click cycles to the next profile (waybar's default).
+    BarModule {
+        id: root
+
+        readonly property var names: ["power-saver", "balanced", "performance"]
+        readonly property var icons: ["󰌪", "󰗑", "󱐋"]
+        readonly property int current: PowerProfiles.profile
+
+        tooltip: "Power profile: " + (names[current] !== undefined ? names[current] : "unknown")
+
+        onClicked: m => {
+            if (m.button !== Qt.LeftButton)
+                return;
+            const order = PowerProfiles.hasPerformanceProfile
+                ? [PowerProfile.PowerSaver, PowerProfile.Balanced, PowerProfile.Performance]
+                : [PowerProfile.PowerSaver, PowerProfile.Balanced];
+            const i = order.indexOf(PowerProfiles.profile);
+            PowerProfiles.profile = order[(i + 1) % order.length];
+        }
+
+        BarText {
+            text: root.icons[root.current] !== undefined ? root.icons[root.current] : "󰾞"
+            color: Theme.rosewater
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SessionModule.qml".text = ''
+    import QtQuick
+    import QtQuick.Layouts
+    import Quickshell
+
+    // group/session: lock, reboot, sleep, power, logout (plain icons, no border)
+    RowLayout {
+        spacing: 0
+
+        component SessionButton: BarModule {
+            id: btn
+            property string glyph
+            property var command
+            bordered: false
+            hPadding: 0
+            vPadding: 0
+            hMargin: 0
+            vMargin: 0
+            onClicked: m => {
+                if (m.button === Qt.LeftButton)
+                    Quickshell.execDetached(btn.command);
+            }
+
+            BarText {
+                text: btn.glyph
+                color: Theme.rosewater
+            }
+        }
+
+        SessionButton {
+            glyph: " 󰌾  "
+            tooltip: "Lock screen"
+            command: ["env", "TZ=America/Chicago", "hyprlock"]
+        }
+        SessionButton {
+            glyph: "  󰜉  "
+            tooltip: "Reboot"
+            command: ["systemctl", "reboot"]
+        }
+        SessionButton {
+            glyph: "  󰤄  "
+            tooltip: "Sleep"
+            command: ["systemctl", "suspend"]
+        }
+        SessionButton {
+            glyph: "  󰐥  "
+            tooltip: "Power Off"
+            command: ["systemctl", "poweroff"]
+        }
+        SessionButton {
+            glyph: "  󰈆 "
+            tooltip: "Log Out"
+            command: ["pkill", "Hyprland"]
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SysInfo.qml".text = ''
+    pragma Singleton
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+
+    // CPU / memory / disk, shared by every bar (replaces waybar's cpu, memory and disk modules).
+    Singleton {
+        id: root
+
+        property int cpuUsage: 0
+        property real memUsedGiB: 0
+        property int diskUsed: 0
+        property var lastCpu: null
+
+        // cpu + memory: interval = 1 (like your waybar config); reads /proc directly, no processes
+        FileView {
+            id: stat
+            path: "/proc/stat"
+            onLoaded: {
+                const f = stat.text().split("\n")[0].trim().split(/\s+/).slice(1).map(Number);
+                const idle = f[3] + (f[4] || 0);
+                const total = f.reduce((a, b) => a + b, 0);
+                if (root.lastCpu !== null) {
+                    const dt = total - root.lastCpu.total;
+                    const di = idle - root.lastCpu.idle;
+                    if (dt > 0)
+                        root.cpuUsage = Math.round((1 - di / dt) * 100);
+                }
+                root.lastCpu = { total: total, idle: idle };
+            }
+        }
+
+        FileView {
+            id: meminfo
+            path: "/proc/meminfo"
+            onLoaded: {
+                const t = meminfo.text();
+                const total = t.match(/MemTotal:\s+(\d+)/);
+                const avail = t.match(/MemAvailable:\s+(\d+)/);
+                if (total && avail)
+                    root.memUsedGiB = (Number(total[1]) - Number(avail[1])) / 1048576;
+            }
+        }
+
+        Timer {
+            interval: 1000
+            running: true
+            repeat: true
+            onTriggered: {
+                stat.reload();
+                meminfo.reload();
+            }
+        }
+
+        // disk: interval = 30, path = "/"  (same math as waybar: 100 - available/total)
+        Process {
+            id: df
+            command: ["stat", "-f", "-c", "%b %a", "/"]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const p = this.text.trim().split(" ").map(Number);
+                    if (p[0] > 0)
+                        root.diskUsed = Math.round(100 - p[1] / p[0] * 100);
+                }
+            }
+        }
+
+        Timer {
+            interval: 30000
+            running: true
+            repeat: true
+            triggeredOnStart: true
+            onTriggered: df.running = true
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Theme.qml".text = ''
+    pragma Singleton
+    import QtQuick
+    import Quickshell
+
+    // Catppuccin Mocha palette + shared sizing. Every other file reads colors from here.
+    Singleton {
+        readonly property color rosewater: "#f5e0dc"
+        readonly property color flamingo: "#f2cdcd"
+        readonly property color pink: "#f5c2e7"
+        readonly property color mauve: "#cba6f7"
+        readonly property color red: "#f38ba8"
+        readonly property color maroon: "#eba0ac"
+        readonly property color peach: "#fab387"
+        readonly property color yellow: "#f9e2af"
+        readonly property color green: "#a6e3a1"
+        readonly property color teal: "#94e2d5"
+        readonly property color sky: "#89dceb"
+        readonly property color sapphire: "#74c7ec"
+        readonly property color blue: "#89b4fa"
+        readonly property color lavender: "#b4befe"
+        readonly property color text: "#cdd6f4"
+        readonly property color subtext1: "#bac2de"
+        readonly property color subtext0: "#a6adc8"
+        readonly property color overlay2: "#9399b2"
+        readonly property color overlay1: "#7f849c"
+        readonly property color overlay0: "#6c7086"
+        readonly property color surface2: "#585b70"
+        readonly property color surface1: "#45475a"
+        readonly property color surface0: "#313244"
+        readonly property color base: "#1e1e2e"
+        readonly property color mantle: "#181825"
+        readonly property color crust: "#11111b"
+
+        // Bar (was waybar's "* { font-family; font-size; font-weight }")
+        readonly property string font: "JetBrainsMono Nerd Font"
+        readonly property int fontSize: 14
+        readonly property int fontWeight: Font.Medium   // 500
+        readonly property int border: 2
+
+        // Notifications (swaync used your GTK font: Noto Sans 11pt)
+        readonly property string uiFont: "Noto Sans"
+
+        function alpha(c, a) {
+            return Qt.rgba(c.r, c.g, c.b, a);
+        }
+
+        // copy a Quickshell object list (e.g. ObjectModel.values) into a plain JS array
+        function toArray(l) {
+            const out = [];
+            if (!l)
+                return out;
+            for (let i = 0; i < l.length; i++)
+                out.push(l[i]);
+            return out;
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Tooltip.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // waybar tooltip: background @base, 2px rosewater border, square corners.
+    PopupWindow {
+        id: root
+
+        required property Item target
+        property string text: ""
+        property bool show: false
+        property bool armed: false
+
+        anchor.item: target
+        anchor.edges: Edges.Bottom
+        anchor.gravity: Edges.Bottom
+        visible: armed && show && text !== ""
+        color: "transparent"
+        implicitWidth: label.implicitWidth + 20
+        implicitHeight: label.implicitHeight + 12
+
+        onShowChanged: if (!show) armed = false
+
+        Timer {
+            interval: 400
+            running: root.show && !root.armed
+            onTriggered: root.armed = true
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: Theme.base
+            border.width: Theme.border
+            border.color: Theme.rosewater
+
+            Text {
+                id: label
+                anchors.centerIn: parent
+                text: root.text
+                color: Theme.text
+                font.family: Theme.font
+                font.pixelSize: 13
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/TrayMenu.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // Tray context menu, styled like your waybar CSS:
+    //   menu { background: @crust; border: 1px solid @rosewater; padding: 6px }
+    //   menuitem { color: @rosewater; padding: 4px 12px }  :hover { background: @rosewater; color: @crust }
+    PopupWindow {
+        id: root
+
+        required property Item target
+        property var handle: null
+        property var stack: []   // submenus entered so far
+
+        visible: false
+        anchor.item: target
+        anchor.edges: Edges.Bottom
+        anchor.gravity: Edges.Bottom
+        grabFocus: true
+        color: "transparent"
+        implicitWidth: Math.max(180, list.implicitWidth) + 14
+        implicitHeight: list.implicitHeight + 14
+
+        onVisibleChanged: if (!visible) stack = []
+
+        QsMenuOpener {
+            id: opener
+            menu: root.stack.length > 0 ? root.stack[root.stack.length - 1] : root.handle
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: Theme.crust
+            border.width: 1
+            border.color: Theme.rosewater
+
+            Column {
+                id: list
+                x: 7
+                y: 7
+                width: root.width - 14
+
+                // back row while inside a submenu
+                MenuRow {
+                    visible: root.stack.length > 0
+                    label: "󰅁  Back"
+                    onActivated: root.stack = root.stack.slice(0, -1)
+                }
+
+                Repeater {
+                    model: opener.children ? opener.children.values : []
+
+                    delegate: Item {
+                        id: row
+                        required property var modelData
+                        width: list.width
+                        implicitWidth: entryRow.implicitWidth
+                        height: modelData.isSeparator ? 9 : entryRow.height
+
+                        Rectangle {
+                            visible: row.modelData.isSeparator
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width
+                            height: 1
+                            color: Theme.alpha(Theme.rosewater, 0.3)
+                        }
+
+                        MenuRow {
+                            id: entryRow
+                            visible: !row.modelData.isSeparator
+                            width: parent.width
+                            enabled: row.modelData.enabled
+                            hasChildren: row.modelData.hasChildren
+                            label: {
+                                let prefix = "";
+                                if (row.modelData.buttonType === QsMenuButtonType.CheckBox)
+                                    prefix = row.modelData.checkState === Qt.Checked ? "󰄲  " : "󰄱  ";
+                                else if (row.modelData.buttonType === QsMenuButtonType.RadioButton)
+                                    prefix = row.modelData.checkState === Qt.Checked ? "󰐾  " : "󰄯  ";
+                                return prefix + row.modelData.text.replace(/_([^_])/g, "$1");
+                            }
+                            onActivated: {
+                                if (row.modelData.hasChildren) {
+                                    root.stack = root.stack.concat([row.modelData]);
+                                } else {
+                                    row.modelData.triggered();
+                                    root.visible = false;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        component MenuRow: Rectangle {
+            id: mrow
+            property string label: ""
+            property bool hasChildren: false
+            signal activated
+
+            implicitWidth: lbl.implicitWidth + 24 + (hasChildren ? 20 : 0)
+            height: lbl.implicitHeight + 8
+            width: parent ? parent.width : implicitWidth
+            color: area.containsMouse && enabled ? Theme.rosewater : "transparent"
+            opacity: enabled ? 1 : 0.5
+
+            Behavior on color {
+                ColorAnimation { duration: 200 }
+            }
+
+            Text {
+                id: lbl
+                x: 12
+                anchors.verticalCenter: parent.verticalCenter
+                text: mrow.label
+                color: area.containsMouse && mrow.enabled ? Theme.crust : Theme.rosewater
+                font.family: Theme.font
+                font.pixelSize: Theme.fontSize
+            }
+
+            Text {
+                visible: mrow.hasChildren
+                anchors.right: parent.right
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                text: "󰅂"
+                color: lbl.color
+                font.family: Theme.font
+                font.pixelSize: Theme.fontSize
+            }
+
+            MouseArea {
+                id: area
+                anchors.fill: parent
+                hoverEnabled: true
+                enabled: mrow.enabled
+                onClicked: mrow.activated()
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/TrayModule.qml".text = ''
+    import QtQuick
+    import QtQuick.Layouts
+    import Quickshell
+    import Quickshell.Services.SystemTray
+
+    // tray: icon-size 16, spacing 5; #tray { padding: 0 10px; margin: 0 2px } + the 2px border
+    BarModule {
+        id: root
+
+        visible: SystemTray.items.values.length > 0
+        hPadding: 10
+        vPadding: 0
+        hMargin: 2
+        vMargin: 0
+        fillHeight: true
+
+        Row {
+            spacing: 5
+
+            Repeater {
+                model: SystemTray.items.values
+
+                delegate: Item {
+                    id: entry
+                    required property var modelData
+                    width: 16
+                    height: 16
+
+                    Image {
+                        anchors.fill: parent
+                        source: entry.modelData.icon
+                        sourceSize.width: 16
+                        sourceSize.height: 16
+                        smooth: true
+                    }
+
+                    MouseArea {
+                        id: area
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                        onClicked: m => {
+                            if (m.button === Qt.MiddleButton)
+                                entry.modelData.secondaryActivate();
+                            else if (m.button === Qt.RightButton || entry.modelData.onlyMenu)
+                                menu.visible = entry.modelData.hasMenu;
+                            else
+                                entry.modelData.activate();
+                        }
+                        onWheel: w => entry.modelData.scroll(w.angleDelta.y, false)
+                    }
+
+                    Tooltip {
+                        target: entry
+                        text: entry.modelData.tooltipTitle !== "" ? entry.modelData.tooltipTitle : entry.modelData.title
+                        show: area.containsMouse && !menu.visible
+                    }
+
+                    TrayMenu {
+                        id: menu
+                        target: entry
+                        handle: entry.modelData.menu
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/VolumeModule.qml".text = ''
+    import QtQuick
+    import Quickshell.Services.Pipewire
+
+    // wireplumber#sink: "{icon} {volume}%" (󰕿 󰖀 󰕾), muted: "󰝟",
+    // click toggles mute, scroll ±1% (capped at 100%).
+    BarModule {
+        id: root
+
+        readonly property var sink: Pipewire.defaultAudioSink
+        readonly property bool ready: sink !== null && sink.audio !== null
+        readonly property bool muted: ready && sink.audio.muted
+        readonly property int percent: ready ? Math.round(sink.audio.volume * 100) : 0
+        readonly property string icon: percent < 34 ? "󰕿" : (percent < 67 ? "󰖀" : "󰕾")
+
+        onClicked: m => {
+            if (m.button === Qt.LeftButton && ready)
+                sink.audio.muted = !sink.audio.muted;
+        }
+        onScrolled: delta => {
+            if (!ready)
+                return;
+            const v = sink.audio.volume + (delta > 0 ? 0.01 : -0.01);
+            sink.audio.volume = Math.max(0, Math.min(1, v));
+        }
+
+        PwObjectTracker {
+            objects: [Pipewire.defaultAudioSink]
+        }
+
+        BarText {
+            text: root.muted ? "󰝟" : root.icon
+            color: Theme.rosewater
+        }
+        BarText {
+            visible: !root.muted
+            text: " " + root.percent + "%"
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/WindowTitle.qml".text = ''
+    import QtQuick
+    import Quickshell.Hyprland
+
+    // hyprland/window: "  {title}  " in Text color, max-length 35, with your two rewrites.
+    BarText {
+        id: root
+
+        readonly property string raw: Hyprland.activeToplevel ? Hyprland.activeToplevel.title : ""
+
+        function rewrite(t) {
+            let m = t.match(/^(.*) - Mozilla Firefox$/);
+            if (m)
+                return "🌎 " + m[1];
+            m = t.match(/^(.*) - zsh$/);
+            if (m)
+                return "> [" + m[1] + "]";
+            return t;
+        }
+
+        function truncate(t, n) {
+            return t.length > n ? t.slice(0, n - 1) + "…" : t;
+        }
+
+        visible: raw !== ""
+        text: "  " + truncate(rewrite(raw), 35) + "  "
+        color: Theme.text
+        leftPadding: 10
+        rightPadding: 10
+        topPadding: 2
+        bottomPadding: 2
+    }
+  '';
+
+  xdg.configFile."quickshell/Workspaces.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Hyprland
+
+    // hyprland/workspaces: format "{id}", on-click "activate".
+    // Buttons: 2px rosewater border, padding 2px 7px, margin 0 3px, min-width 22px,
+    // active/urgent = rosewater fill with crust label, hover = 25% rosewater.
+    Row {
+        id: root
+
+        property var screen: null
+        property int rowHeight: 30
+        readonly property var monitor: screen ? Hyprland.monitorFor(screen) : null
+
+        leftPadding: 6
+        rightPadding: 6
+        height: rowHeight
+
+        Repeater {
+            model: Theme.toArray(Hyprland.workspaces.values).filter(w => w.id > 0 && (root.monitor === null || w.monitor === root.monitor))
+
+            delegate: Item {
+                id: ws
+                required property var modelData
+                readonly property bool lit: modelData.active || modelData.urgent
+
+                width: btn.width + 6
+                height: root.rowHeight
+
+                Rectangle {
+                    id: btn
+                    anchors.centerIn: parent
+                    width: Math.max(22, label.implicitWidth) + 14 + Theme.border * 2
+                    height: parent.height
+                    color: ws.lit ? Theme.rosewater : (area.containsMouse ? Theme.alpha(Theme.rosewater, 0.25) : "transparent")
+                    border.width: Theme.border
+                    border.color: Theme.rosewater
+
+                    Text {
+                        id: label
+                        anchors.centerIn: parent
+                        text: ws.modelData.id
+                        color: ws.lit ? Theme.crust : Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.fontSize
+                        font.weight: Font.DemiBold
+                    }
+
+                    MouseArea {
+                        id: area
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: ws.modelData.activate()
+                    }
+                }
+            }
+        }
+    }
+  '';
+
 
   wayland.windowManager.hyprland = {
     enable = true;
@@ -573,8 +1978,8 @@ hl.env("QT_QPA_PLATFORM", "wayland")
 
 hl.config({
     layerrule = {
-        "blur, waybar",
-        "ignorealpha 0.4, waybar", -- lets blur render through semi-transparent areas; tune threshold to your CSS alpha
+        "blur, quickshell-bar",
+        "ignorealpha 0.4, quickshell-bar", -- lets blur render through semi-transparent areas; tune threshold to your CSS alpha
     }
 })
 
@@ -691,7 +2096,7 @@ hl.bind("SUPER + mouse:273", hl.dsp.window.resize(), { mouse = true })
 
 -- Autostart
 hl.on("hyprland.start", function()
-   hl.exec_cmd("waybar &")
+   hl.exec_cmd("qs")
    hl.exec_cmd("awww-daemon")
    hl.exec_cmd("awww img ~/Pictures/Wallpapers/hk.png")
    hl.exec_cmd("/usr/lib/polkit-kde-authentication-agent-1")
@@ -930,625 +2335,7 @@ hl.plugin.hyprbars.add_button({
       });
   };
 
-xdg.configFile."waybar/scripts/media-time.sh" = {
-    executable = true;
-    force = true;
-    text = ''
-#!/usr/bin/env bash
-pos=$(playerctl position 2>/dev/null | cut -d. -f1)
-dur=$(playerctl metadata mpris:length 2>/dev/null | awk '{printf "%.0f", $1/1000000}')
 
-if [[ -z "$pos" || -z "$dur" || "$dur" -eq 0 ]]; then
-    echo ""
-    exit 0
-fi
-
-printf '%d:%02d / %d:%02d\n' $((pos/60)) $((pos%60)) $((dur/60)) $((dur%60))
-'';
-};
-
-  services.swaync = {
-    enable = true;
-    settings = {
-      "$schema" = "/etc/xdg/swaync/configSchema.json";
-      ignore-gtk-theme = true;
-      positionX = "right";
-      positionY = "top";
-      layer = "overlay";
-      control-center-layer = "top";
-      layer-shell = true;
-      layer-shell-cover-screen = true;
-      cssPriority = "user";
-      control-center-margin-top = 0;
-      control-center-margin-bottom = 0;
-      control-center-margin-right = 0;
-      control-center-margin-left = 0;
-      notification-2fa-action = true;
-      notification-inline-replies = false;
-      notification-body-image-height = 100;
-      notification-body-image-width = 200;
-      timeout = 10;
-      timeout-low = 5;
-      timeout-critical = 0;
-      fit-to-screen = true;
-      relative-timestamps = true;
-      control-center-width = 500;
-      control-center-height = 600;
-      notification-window-width = 500;
-      keyboard-shortcuts = true;
-      notification-grouping = true;
-      image-visibility = "when-available";
-      transition-time = 200;
-      hide-on-clear = false;
-      hide-on-action = true;
-      text-empty = "No Notifications";
-      script-fail-notify = true;
-      scripts = {
-        example-script = {
-          app-name = "example.app.id";
-          exec = "echo 'Do something...'";
-          urgency = "Normal";
-        };
-        example-action-script = {
-          app-name = "example.app.id";
-          exec = "echo 'Do something actionable!'";
-          urgency = "Normal";
-          run-on = "action";
-        };
-      };
-      notification-visibility = {
-        example-name = {
-          state = "muted";
-          urgency = "Normal";
-          app-name = "example.app.id";
-        };
-      };
-      widgets = [ "inhibitors" "title" "dnd" "notifications" ];
-      widget-config = {
-        notifications = {
-          vexpand = true;
-        };
-        inhibitors = {
-          text = "Inhibitors";
-          button-text = "Clear All";
-          clear-all-button = true;
-        };
-        title = {
-          text = "Notifications";
-          clear-all-button = true;
-          button-text = "Clear All";
-        };
-        dnd = {
-          text = "Do Not Disturb";
-        };
-        label = {
-          max-lines = 5;
-          text = "Label Text";
-        };
-        mpris = {
-          blacklist = [ ];
-          autohide = false;
-          show-album-art = "always";
-          loop-carousel = false;
-        };
-        buttons-grid = {
-          buttons-per-row = 7;
-          actions = [
-            {
-              label = "直";
-              type = "toggle";
-              active = true;
-              command = "sh -c '[[ $SWAYNC_TOGGLE_STATE == true ]] && nmcli radio wifi on || nmcli radio wifi off'";
-              update-command = "sh -c '[[ $(nmcli radio wifi) == \"enabled\" ]] && echo true || echo false'";
-            }
-          ];
-        };
-      };
-    };
-    style = lib.mkForce ''
-:root {
-  --cc-bg: rgba(30, 30, 46, 0.7);
-  --noti-border-color: rgba(245, 224, 220, 0.15);
-  --noti-bg: 30, 30, 46;
-  --noti-bg-alpha: 0.8;
-  --noti-bg-darker: rgb(24, 24, 37);
-  --noti-bg-hover: rgb(49, 50, 68);
-  --noti-bg-focus: rgba(69, 71, 90, 0.6);
-  --noti-close-bg: rgb(69, 71, 90);
-  --noti-close-bg-hover: rgb(88, 91, 112);
-  --text-color: rgb(245, 224, 220);
-  --text-color-disabled: rgb(108, 112, 134);
-  --notification-icon-size: 64px;
-  --notification-app-icon-size: calc(var(--notification-icon-size) / 3);
-  --notification-group-icon-size: 32px;
-  --border: 1px solid var(--noti-border-color);
-  --notification-shadow: 0 0 0 1px rgba(17, 17, 27, 0.3),
-    0 1px 3px 1px rgba(17, 17, 27, 0.7), 0 2px 6px 2px rgba(17, 17, 27, 0.3);
-  --font-size-body: 15px;
-  --font-size-summary: 16px;
-  /* Deprecated variables (because of their typos). Keeeping them around for backwards compatibility. */
-  --hover-tranistion: background 0.15s ease-in-out;
-  --group-collapse-tranistion: opacity 400ms ease-in-out;
-  --hover-transition: var(--hover-tranistion);
-  --group-collapse-transition: var(--group-collapse-tranistion);
-}
-
-notificationwindow, blankwindow {
-  background: transparent;
-}
-
-.close-button {
-  /* The notification Close Button */
-  background: var(--noti-close-bg);
-  color: var(--text-color);
-  text-shadow: none;
-  padding: 0;
-  margin-top: 8px;
-  margin-right: 8px;
-  box-shadow: none;
-  border: none;
-  min-width: 24px;
-  min-height: 24px;
-}
-
-.close-button:hover {
-  box-shadow: none;
-  background: var(--noti-close-bg-hover);
-  transition: var(--hover-tranistion);
-  border: none;
-}
-
-.notification-row {
-  background: none;
-  outline: none;
-}
-
-.notification-row:focus {
-  background: var(--noti-bg-focus);
-}
-
-.notification-row .notification-background {
-  padding: 6px 12px;
-}
-
-.notification-row .notification-background .notification {
-  /* The actual notification */
-  border: var(--border);
-  padding: 0;
-  transition: var(--hover-tranistion);
-  background: rgba(var(--noti-bg), var(--noti-bg-alpha));
-}
-
-.notification-row .notification-background .notification.low {
-  /* Low Priority Notification */
-}
-
-.notification-row .notification-background .notification.normal {
-  /* Normal Priority Notification */
-}
-
-.notification-row .notification-background .notification.critical {
-  /* Critical Priority Notification */
-}
-
-.notification-row .notification-background .notification .notification-default-action {
-  /* The large action that also displays the notification summary and body */
-  padding: 4px;
-  margin: 0;
-  box-shadow: none;
-  background: transparent;
-  border: none;
-  color: var(--text-color);
-  transition: var(--hover-tranistion);
-}
-
-.notification-row .notification-background .notification .notification-default-action:hover {
-  -gtk-icon-filter: none;
-  background: var(--noti-bg-hover);
-}
-
-.notification-row .notification-background .notification .notification-default-action:not(:only-child) {
-  /* When alternative actions are visible */
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content {
-  background: transparent;
-  padding: 0;
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content .image {
-  /* Notification Primary Image */
-  -gtk-icon-filter: none;
-  -gtk-icon-size: var(--notification-icon-size);
-  /* Size in px */
-  margin: 4px;
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content .app-icon {
-  /* Notification app icon (only visible when the primary image is set) */
-  -gtk-icon-filter: none;
-  -gtk-icon-size: var(--notification-app-icon-size);
-  -gtk-icon-shadow: 0 1px 4px rgba(17, 17, 27, 0.8);
-  margin: 6px;
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content .text-box label {
-  /* Fixes base GTK 4 CSS setting a filter of opacity 50% for some odd reason */
-  filter: none;
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content .text-box .summary {
-  /* Notification summary/title */
-  font-size: var(--font-size-summary);
-  font-weight: bold;
-  background: transparent;
-  color: var(--text-color);
-  text-shadow: none;
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content .text-box .time {
-  /* Notification time-ago */
-  font-size: var(--font-size-summary);
-  font-weight: bold;
-  background: transparent;
-  color: var(--text-color);
-  text-shadow: none;
-  margin-right: 30px;
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content .text-box .body {
-  /* Notification body */
-  font-size: var(--font-size-body);
-  font-weight: normal;
-  background: transparent;
-  color: var(--text-color);
-  text-shadow: none;
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content progressbar {
-  /* The optional notification progress bar */
-  margin-top: 4px;
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content .body-image {
-  /* The "extra" optional bottom notification image */
-  margin-top: 4px;
-  background-color: rgb(245, 224, 220);
-  -gtk-icon-filter: none;
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content .inline-reply {
-  /* The inline reply section */
-  margin-top: 4px;
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content .inline-reply .inline-reply-entry {
-  background: var(--noti-bg-darker);
-  color: var(--text-color);
-  caret-color: var(--text-color);
-  border: var(--border);
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content .inline-reply .inline-reply-button {
-  margin-left: 4px;
-  background: rgba(var(--noti-bg), var(--noti-bg-alpha));
-  border: var(--border);
-  color: var(--text-color);
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content .inline-reply .inline-reply-button:disabled {
-  background: initial;
-  color: var(--text-color-disabled);
-  border: var(--border);
-  border-color: transparent;
-}
-
-.notification-row .notification-background .notification .notification-default-action .notification-content .inline-reply .inline-reply-button:hover {
-  background: var(--noti-bg-hover);
-}
-
-.notification-row .notification-background .notification .notification-alt-actions {
-  background: none;
-  padding: 4px;
-}
-
-.notification-row .notification-background .notification .notification-action {
-  /* The alternative actions below the default action */
-  margin: 4px;
-  padding: 0;
-}
-
-.notification-row .notification-background .notification .notification-action > button {
-  color: var(--text-color);
-}
-
-.notification-group {
-  /* Styling only for Grouped Notifications */
-  transition: opacity 200ms ease-in-out;
-  /* The groups close button */
-}
-
-.notification-group:focus {
-  background: var(--noti-bg-focus);
-}
-
-.notification-group.low {
-  /* Low Priority Group */
-}
-
-.notification-group.normal {
-  /* Low Priority Group */
-}
-
-.notification-group.critical {
-  /* Low Priority Group */
-}
-
-.notification-group .notification-group-close-button .close-button {
-  margin: 12px 20px;
-}
-
-.notification-group .notification-group-buttons, .notification-group .notification-group-headers {
-  margin: 0 16px;
-  color: var(--text-color);
-}
-
-.notification-group .notification-group-headers {
-  /* Notification Group Headers */
-}
-
-.notification-group .notification-group-headers .notification-group-icon {
-  color: var(--text-color);
-  -gtk-icon-size: var(--notification-group-icon-size);
-}
-
-.notification-group .notification-group-headers .notification-group-header {
-  color: var(--text-color);
-}
-
-.notification-group .notification-group-buttons {
-  /* Notification Group Buttons */
-}
-
-.notification-group.collapsed {
-  /* When another group is expanded, lower the opacity of the collapsed ones */
-}
-
-.notification-group.collapsed.not-expanded {
-  opacity: 0.4;
-}
-
-.notification-group.collapsed .notification-row .notification {
-  background-color: rgba(var(--noti-bg), 1);
-}
-
-.notification-group.collapsed .notification-row:not(:last-child) {
-  /* Top notification in stack */
-  /* Set lower stacked notifications opacity to 0 */
-}
-
-.notification-group.collapsed .notification-row:not(:last-child) .notification-action,
-.notification-group.collapsed .notification-row:not(:last-child) .notification-default-action {
-  opacity: 0;
-}
-
-.notification-group.collapsed:hover .notification-row:not(:only-child) .notification {
-  background-color: var(--noti-bg-hover);
-}
-
-.control-center {
-  /* The Control Center which contains the old notifications + widgets */
-  background: var(--cc-bg);
-  color: var(--text-color);
-}
-
-.control-center .control-center-list-placeholder {
-  /* The placeholder when there are no notifications */
-  opacity: 0.5;
-}
-
-.control-center .control-center-list {
-  /* List of notifications */
-  background: transparent;
-}
-
-.control-center .control-center-list .notification {
-  box-shadow: var(--notification-shadow);
-}
-
-.control-center .control-center-list .notification .notification-default-action,
-.control-center .control-center-list .notification .notification-action {
-  transition: var(--group-collapse-tranistion), var(--hover-tranistion);
-}
-
-.control-center .control-center-list .notification .notification-default-action:hover,
-.control-center .control-center-list .notification .notification-action:hover {
-  background-color: var(--noti-bg-hover);
-}
-
-.blank-window {
-  /* Window behind control center and on all other monitors */
-  background: transparent;
-}
-
-.floating-notifications {
-  background: transparent;
-}
-
-.floating-notifications .notification {
-  box-shadow: none;
-}
-
-/*** Widgets ***/
-.widget {
-  margin: 8px;
-  padding: 8px;
-}
-
-/* Title widget */
-.widget-title > label {
-  margin-right: 8px;
-  font-size: 1.5rem;
-}
-
-.widget-title > button {
-  margin-left: 8px;
-}
-
-/* DND widget */
-.widget-dnd label {
-  color: var(--text-color);
-  margin-right: 8px;
-  font-size: 1.1rem;
-}
-
-.widget-dnd switch {
-  margin-left: 8px;
-}
-
-/* Label widget */
-.widget-label > label {
-  font-size: 1.1rem;
-}
-
-/* Mpris widget */
-:root {
-  --mpris-album-art-overlay: rgba(17, 17, 27, 0.55);
-  --mpris-button-hover: rgba(17, 17, 27, 0.5);
-  --mpris-album-art-icon-size: 96px;
-  --mpris-album-art-shadow: 0px 0px 10px rgba(17, 17, 27, 0.75);
-}
-
-.widget-mpris {
-  padding: 0;
-  /* The parent to all players */
-}
-
-.widget-mpris .widget-mpris-player {
-  margin: 16px 20px;
-  box-shadow: var(--mpris-album-art-shadow);
-}
-
-.widget-mpris .widget-mpris-player .mpris-background {
-  filter: blur(10px);
-}
-
-.widget-mpris .widget-mpris-player .mpris-overlay {
-  padding: 16px;
-  background-color: var(--mpris-album-art-overlay);
-}
-
-.widget-mpris .widget-mpris-player .mpris-overlay button:hover {
-  /* The media player buttons (play, pause, next, etc...) */
-  background: var(--noti-bg-hover);
-}
-
-.widget-mpris .widget-mpris-player .mpris-overlay .widget-mpris-album-art {
-  box-shadow: var(--mpris-album-art-shadow);
-  -gtk-icon-size: var(--mpris-album-art-icon-size);
-}
-
-.widget-mpris .widget-mpris-player .mpris-overlay .widget-mpris-title {
-  font-weight: bold;
-  font-size: 1.25rem;
-}
-
-.widget-mpris .widget-mpris-player .mpris-overlay .widget-mpris-subtitle {
-  font-size: 1.1rem;
-}
-
-.widget-mpris .widget-mpris-player .mpris-overlay > box > button {
-  /* Change player control buttons */
-}
-
-.widget-mpris .widget-mpris-player .mpris-overlay > box > button:hover {
-  background-color: var(--mpris-button-hover);
-}
-
-.widget-mpris > box > button {
-  /* Change player side buttons */
-}
-
-.widget-mpris > box > button:disabled {
-  /* Change player side buttons insensitive */
-}
-
-/* Buttons widget */
-.widget-buttons-grid flowboxchild > button.toggle:checked {
-  /* style given to the active toggle button */
-  background-color: rgb(245, 224, 220);
-  color: rgb(17, 17, 27);
-}
-
-/* Menubar widget */
-.widget-menubar {
-  /* The revealer buttons */
-}
-
-.widget-menubar > .menu-button-bar {
-  /* The left button container */
-  /* The right button container */
-  /* The left and right button container */
-}
-
-.widget-menubar > .menu-button-bar > .start {
-  margin-left: 8px;
-}
-
-.widget-menubar > .menu-button-bar > .end {
-  margin-right: 8px;
-}
-
-.widget-menubar > .menu-button-bar > .widget-menubar-container button {
-  margin: 0 4px;
-}
-
-.widget-menubar > revealer * {
-  margin-top: 8px;
-}
-
-.widget-menubar > revealer * button {
-  margin: 8px;
-  margin-top: 0;
-}
-
-.widget-menubar > revealer * button:last-child {
-  margin-bottom: 0;
-}
-
-/* Volume widget */
-:root {
-  --widget-volume-row-icon-size: 24px;
-}
-
-/* Each row app icon */
-.widget-volume row image {
-  -gtk-icon-size: var(--widget-volume-row-icon-size);
-}
-
-.per-app-volume {
-  background-color: rgb(49, 50, 68);
-  margin: 8px;
-  margin-bottom: 0;
-}
-
-/* Slider widget */
-.widget-slider label {
-  font-size: inherit;
-}
-
-/* Backlight widget */
-/* Inhibitors widget */
-.widget-inhibitors > label {
-  margin-right: 8px;
-  font-size: 1.5rem;
-}
-
-.widget-inhibitors > button {
-  margin-left: 8px;
-}
-    '';
-  };
 
   programs.fastfetch = {
     enable = true;
