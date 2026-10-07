@@ -245,7 +245,6 @@ programs.git.enable = true;
      tty-clock
      lunar-client
      unzip
-     cloudflared
      yt-dlp_git # chaotic
      xdg-utils
      pkgs.kdePackages.qtmultimedia
