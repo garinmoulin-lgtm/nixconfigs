@@ -272,6 +272,7 @@ programs.git.enable = true;
      efibootmgr
      util-linux
      awww
+     quickshell
      hyprshot
      gnome-themes-extra
      bibata-cursors
