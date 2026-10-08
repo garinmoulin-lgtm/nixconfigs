@@ -255,6 +255,7 @@ programs.git.enable = true;
      sbctl
      ffmpeg
      micro
+     vscodium
      hyprlock
      vlc
      fastfetch

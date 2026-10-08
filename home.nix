@@ -15,8 +15,8 @@
   # Live reload: ~/.config/quickshell points straight at /etc/nixos/quickshell
   # (not a store copy), so saving a .qml file there updates the running bar instantly.
   # No rebuild needed for QML edits.
-  xdg.configFile."quickshell".source =
-    config.lib.file.mkOutOfStoreSymlink "/etc/nixos/quickshell";
+  #xdg.configFile."quickshell".source =
+  #  config.lib.file.mkOutOfStoreSymlink "/etc/nixos/quickshell";
 
   wayland.windowManager.hyprland = {
     enable = true;
@@ -626,7 +626,7 @@ gtk = {
 
 
   font = {
-    name = "SF Pro";
+    name = "SFProText Nerd Font";
     size = 11;
   };
 
