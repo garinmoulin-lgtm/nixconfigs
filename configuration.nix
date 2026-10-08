@@ -249,9 +249,7 @@ programs.git.enable = true;
      xdg-utils
      pkgs.kdePackages.qtmultimedia
      pkgs.qt6.qtmultimedia
-     swaynotificationcenter
      lavat
-     waybar
      sbctl
      ffmpeg
      micro
