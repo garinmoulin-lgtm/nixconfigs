@@ -256,6 +256,7 @@ programs.git.enable = true;
      ffmpeg
      micro
      vscodium
+     kdePackages.qtdeclarative 
      hyprlock
      vlc
      fastfetch
