@@ -2,31 +2,43 @@
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
 
-{ config, pkgs, lib, inputs, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  inputs,
+  ...
+}:
 
 {
-  imports =
-    [ # Include the results of the hardware scan.
-      ./hardware-configuration.nix
-      #./kernel.nix
-    ];
+  imports = [
+    # Include the results of the hardware scan.
+    ./hardware-configuration.nix
+    #./kernel.nix
+  ];
 
-  boot.blacklistedKernelModules = [ "acpi_pad" "nouveau" ];
+  boot.blacklistedKernelModules = [
+    "acpi_pad"
+    "nouveau"
+  ];
   # Bootloader.
   #boot.loader.systemd-boot.enable = true;
-boot.loader.grub.enable = false;
-boot.loader.systemd-boot.enable = lib.mkForce false;
-boot.lanzaboote = {
+  boot.loader.grub.enable = false;
+  boot.loader.systemd-boot.enable = lib.mkForce false;
+  boot.lanzaboote = {
     enable = true;
     pkiBundle = "/var/lib/sbctl";
     settings.default = "@saved";
-};
+  };
 
   boot.loader.efi.canTouchEfiVariables = true;
   # Use latest kernel. You can switch to cachy (using chaotic flake) by appending _cachyos rather than _latest.
   boot.kernelPackages = pkgs.linuxPackages_cachyos;
-  
-  nix.settings.trusted-users = [ "root" "garinh" ];
+
+  nix.settings.trusted-users = [
+    "root"
+    "garinh"
+  ];
   networking.hostName = "nixos"; # Define your hostname.
   # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
 
@@ -44,14 +56,14 @@ boot.lanzaboote = {
   i18n.defaultLocale = "en_US.UTF-8";
   # Bash line editor
   programs.bash.blesh.enable = true;
-    #nix helper
-programs.nh = {
-  enable = true;
-  clean = {
+  #nix helper
+  programs.nh = {
     enable = true;
-    extraArgs = "--keep-since 7d --keep 5"; # Wipes old boot configs but keeps the last 5 generations
+    clean = {
+      enable = true;
+      extraArgs = "--keep-since 7d --keep 5"; # Wipes old boot configs but keeps the last 5 generations
+    };
   };
-};
 
   i18n.extraLocaleSettings = {
     LC_ADDRESS = "en_US.UTF-8";
@@ -64,74 +76,80 @@ programs.nh = {
     LC_TELEPHONE = "en_US.UTF-8";
     LC_TIME = "en_US.UTF-8";
   };
-  nix.settings.experimental-features = [ "nix-command" "flakes" ];
+  nix.settings.experimental-features = [
+    "nix-command"
+    "flakes"
+  ];
   # Enable the X11 windowing system.
   services.xserver.enable = true;
 
   # Enable the GNOME Desktop Environment.
-#  services.xserver.displayManager.gdm.enable = true;
-#  services.xserver.desktopManager.gnome.enable = true;
-# =========================================================================
-# 1. DISPLAY MANAGER & HYPRLAND COMPOSITOR CONFIGURATION
-# =========================================================================
+  #  services.xserver.displayManager.gdm.enable = true;
+  #  services.xserver.desktopManager.gnome.enable = true;
+  # =========================================================================
+  # 1. DISPLAY MANAGER & HYPRLAND COMPOSITOR CONFIGURATION
+  # =========================================================================
 
-# Enable the Hyprland Compositor via its dedicated module
-# This configures polkit, xdg portals, and session files seamlessly
+  # Enable the Hyprland Compositor via its dedicated module
+  # This configures polkit, xdg portals, and session files seamlessly
 
-
-programs.hyprland.enable = true;
-xdg.portal = {
-  enable = true;
-  extraPortals = [ pkgs.xdg-desktop-portal-hyprland ];
-};
- 
-# Enable and configure LY
-services.displayManager = {
-  ly.enable = true;
-  # Optional: Customize Ly visual elements
-  ly.settings = {
-    animation = "matrix"; # TUI matrix background effect
-    bigclock = true;
+  programs.hyprland.enable = true;
+  xdg.portal = {
+    enable = true;
+    extraPortals = [ pkgs.xdg-desktop-portal-hyprland ];
   };
-};
 
-environment.sessionVariables = {
-  # Tells GTK and XWayland apps what cursor theme to use
-  # Forces Nvidia to render the mouse cursor manually
-  WLR_NO_HARDWARE_CURSORS = "1";
-  # Fixes standard electron/chromium apps on Wayland too
-  NIXOS_OZONE_WL = "1"; 
-
-};
-# =========================================================================
-# 2. SYSTEM-WIDE FONTS SETTINGS (Nerd Fonts, Ioskeley Mono, Hanken Grotesk)
-# =========================================================================
-fonts = {
-  enableDefaultPackages = true;
-  packages = with pkgs; [
-    # Modern granular Nerd Font packages (instead of the huge legacy package)
-    nerd-fonts.jetbrains-mono
-    nerd-fonts.symbols-only       # Acts as a universal fallback for system icons
-
-    # Ioskeley Mono - the exact Berkeley Mono mimic configuration built over Iosevka
-    # Options include: .normal, .normal-NF (Nerd Font patched), .condensed, etc.
-    # Clean, modern sans-serif typeface
-    inputs.apple-fonts.packages.${pkgs.stdenv.hostPlatform.system}.sf-pro-nerd
-  ];
-
-
-  # Inform your desktop environment how to prioritize these fonts
-  fontconfig.defaultFonts = {
-    monospace = [ "Ioskeley Mono" "JetBrainsMono Nerd Font" ];
-    sansSerif = [ "SF Pro Nerd" ];
+  # Enable and configure LY
+  services.displayManager = {
+    ly.enable = true;
+    # Optional: Customize Ly visual elements
+    ly.settings = {
+      animation = "matrix"; # TUI matrix background effect
+      bigclock = true;
+    };
   };
-};
-#zram and such (oh yes)
-zramSwap = {
-  enable = true;
-  algorithm = "lz4";
-  memoryPercent = 100;  # 1x RAM as compressed swap
-};
+
+  environment.sessionVariables = {
+    # Tells GTK and XWayland apps what cursor theme to use
+    # Forces Nvidia to render the mouse cursor manually
+    WLR_NO_HARDWARE_CURSORS = "1";
+    # Fixes standard electron/chromium apps on Wayland too
+    NIXOS_OZONE_WL = "1";
+
+  };
+  # =========================================================================
+  # 2. SYSTEM-WIDE FONTS SETTINGS (Nerd Fonts, Ioskeley Mono, Hanken Grotesk)
+  # =========================================================================
+  fonts = {
+    enableDefaultPackages = true;
+    packages = with pkgs; [
+      # Modern granular Nerd Font packages (instead of the huge legacy package)
+      nerd-fonts.jetbrains-mono
+      nerd-fonts.symbols-only # Acts as a universal fallback for system icons
+      material-symbols
+
+      # Ioskeley Mono - the exact Berkeley Mono mimic configuration built over Iosevka
+      # Options include: .normal, .normal-NF (Nerd Font patched), .condensed, etc.
+      # Clean, modern sans-serif typeface
+      inputs.apple-fonts.packages.${pkgs.stdenv.hostPlatform.system}.sf-pro-nerd
+      inputs.apple-fonts.packages.${pkgs.stdenv.hostPlatform.system}.sf-mono-nerd
+    ];
+
+    # Inform your desktop environment how to prioritize these fonts
+    fontconfig.defaultFonts = {
+      monospace = [
+        "Ioskeley Mono"
+        "JetBrainsMono Nerd Font"
+      ];
+      sansSerif = [ "SF Pro Nerd" ];
+    };
+  };
+  #zram and such (oh yes)
+  zramSwap = {
+    enable = true;
+    algorithm = "lz4";
+    memoryPercent = 100; # 1x RAM as compressed swap
+  };
   # Configure keymap in X11
   services.xserver.xkb = {
     layout = "us";
@@ -140,29 +158,29 @@ zramSwap = {
 
   # Enable CUPS to print documents.
   services.printing.enable = true;
-services.xserver.videoDrivers = [ "nvidia" ];
-#nvidia
-hardware.nvidia = {
-  package = pkgs.nvidia_cachyos; # chaotic: prebuilt for linuxPackages_cachyos (was config.boot.kernelPackages.nvidiaPackages.latest)
-  open = true;
-  modesetting.enable = true;
-  powerManagement.enable = true;
-};
-#LE STEAM
-programs.steam = {
-  enable = true; # Master switch, already covered in installation
-  remotePlay.openFirewall = true;  # Open ports in the firewall for Steam Remote Play
-  dedicatedServer.openFirewall = true; # Open ports for Source Dedicated Server hosting
-  # Other general flags if available can be set here.
-};
-# Improves Performance With games (temporary and in game, dont worry)
-programs.gamemode.enable = true;
-boot.extraModprobeConfig = ''
-  options nvidia NVreg_PreserveVideoMemoryAllocations=1
-  options nvidia NVreg_TemporaryFilePath=/var/tmp
-'';
+  services.xserver.videoDrivers = [ "nvidia" ];
+  #nvidia
+  hardware.nvidia = {
+    package = pkgs.nvidia_cachyos; # chaotic: prebuilt for linuxPackages_cachyos (was config.boot.kernelPackages.nvidiaPackages.latest)
+    open = true;
+    modesetting.enable = true;
+    powerManagement.enable = true;
+  };
+  #LE STEAM
+  programs.steam = {
+    enable = true; # Master switch, already covered in installation
+    remotePlay.openFirewall = true; # Open ports in the firewall for Steam Remote Play
+    dedicatedServer.openFirewall = true; # Open ports for Source Dedicated Server hosting
+    # Other general flags if available can be set here.
+  };
+  # Improves Performance With games (temporary and in game, dont worry)
+  programs.gamemode.enable = true;
+  boot.extraModprobeConfig = ''
+    options nvidia NVreg_PreserveVideoMemoryAllocations=1
+    options nvidia NVreg_TemporaryFilePath=/var/tmp
+  '';
 
-boot.kernelParams = [ "nvidia-drm.modeset=1" ];
+  boot.kernelParams = [ "nvidia-drm.modeset=1" ];
   # Enable sound with pipewire.
   services.pulseaudio.enable = false;
   security.rtkit.enable = true;
@@ -179,44 +197,49 @@ boot.kernelParams = [ "nvidia-drm.modeset=1" ];
     #media-session.enable = true;
   };
   #screen recorder
-programs.gpu-screen-recorder.enable = true;
+  programs.gpu-screen-recorder.enable = true;
   # Enable touchpad support (enabled default in most desktopManager).
   # services.libinput.enable = true;
   #helps bins work
-programs.nix-ld.enable = true;
+  programs.nix-ld.enable = true;
   # Define a user account. Don't forget to set a password with ‘passwd’.
   users.users."garinh" = {
     isNormalUser = true;
     description = "garinh";
-    extraGroups = [ "networkmanager" "wheel" "input" "libvirtd" "docker" ];
+    extraGroups = [
+      "networkmanager"
+      "wheel"
+      "input"
+      "libvirtd"
+      "docker"
+    ];
     packages = with pkgs; [
     ];
   };
-# avahi
-services.avahi = {
-  enable = true;
-  nssmdns4 = true;
-  openFirewall = true;
-};
- 
+  # avahi
+  services.avahi = {
+    enable = true;
+    nssmdns4 = true;
+    openFirewall = true;
+  };
 
-hardware.new-lg4ff.enable = true;
-services.udev.extraRules = ''
-  SUBSYSTEM=="input", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
-  KERNEL=="js*", SUBSYSTEM=="input", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
-  SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
-'';
-# make sure you're in the input group
+  hardware.new-lg4ff.enable = true;
+  services.udev.extraRules = ''
+    SUBSYSTEM=="input", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
+    KERNEL=="js*", SUBSYSTEM=="input", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
+    SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
+  '';
+  # make sure you're in the input group
   # 2. Tell NixOS to use the CachyOS kernel package
   # Options include: linuxPackages-cachyos-latest, linuxPackages-cachyos-lts, etc.
   # boot.kernelPackages = pkgs.cachyosKernels.linuxPackages-cachyos-latest;
   services.flatpak.enable = true;
   # 3. (Optional) Enable Sched-ext (scx) framework support if you want to use its modern schedulers
   services.scx = {
-      enable = true;
-      scheduler = "scx_bpfland";  # or scx_rusty, scx_lavd, etc — pick per workload
+    enable = true;
+    scheduler = "scx_bpfland"; # or scx_rusty, scx_lavd, etc — pick per workload
   };
-services.udisks2.enable = true;
+  services.udisks2.enable = true;
   # Install firefox.
   programs.firefox.enable = true;
   programs.firefox.package = pkgs.firefox_nightly; # chaotic: Firefox Nightly instead of stable
@@ -224,70 +247,71 @@ services.udisks2.enable = true;
   services.power-profiles-daemon.enable = true;
   # Allow unfree packages
   nixpkgs.config.allowUnfree = true;
-programs.starship.enable = true;
-programs.git.enable = true;
+  programs.starship.enable = true;
+  programs.git.enable = true;
   # List packages installed in system profile. To search, run:
   # $ nix search wget
   environment.systemPackages = with pkgs; [
-  #  vim # Do not forget to add an editor to edit configuration.nix! The Nano editor is also installed by default.
-  #  wget
- 	 catppuccin-gtk
- 	 papirus-icon-theme
-  # The Fresh Terminal Text Editor/IDE
- 	 udisks2
- 	 fresh-editor
-     wget
-     cmake
-     protontricks
-     winetricks
-     wineWow64Packages.stable
-     gpu-screen-recorder-gtk
-     tty-clock
-     lunar-client
-     unzip
-     yt-dlp_git # chaotic
-     xdg-utils
-     pkgs.kdePackages.qtmultimedia
-     pkgs.qt6.qtmultimedia
-     lavat
-     sbctl
-     ffmpeg
-     micro
-     vscodium
-     kdePackages.qtdeclarative 
-     hyprlock
-     vlc
-     fastfetch
-     psmisc
-     jq
-     kitty
-     rofi
-     btop
-     lsd
-     cmus
-     pavucontrol
-     flatpak
-     mdadm
-     efibootmgr
-     util-linux
-     awww
-     quickshell
-     hyprshot
-     gnome-themes-extra
-     bibata-cursors
-     catppuccin-cursors.mochaMauve
-     nwg-look
-     adwaita-qt
-     adwaita-qt6
-     pipes
-     libreoffice
-     adwaita-icon-theme
-     nautilus
-     wl-clipboard
-     playerctl
-     telegram-desktop_git # chaotic
-     nodejs
-     gnome-boxes
+    #  vim # Do not forget to add an editor to edit configuration.nix! The Nano editor is also installed by default.
+    #  wget
+    catppuccin-gtk
+    papirus-icon-theme
+    # The Fresh Terminal Text Editor/IDE
+    udisks2
+    fresh-editor
+    wget
+    cmake
+    protontricks
+    winetricks
+    wineWow64Packages.stable
+    gpu-screen-recorder-gtk
+    tty-clock
+    lunar-client
+    unzip
+    yt-dlp_git # chaotic
+    xdg-utils
+    pkgs.kdePackages.qtmultimedia
+    pkgs.qt6.qtmultimedia
+    lavat
+    sbctl
+    ffmpeg
+    micro
+    vscodium
+    nixfmt
+    kdePackages.qtdeclarative
+    hyprlock
+    vlc
+    fastfetch
+    psmisc
+    jq
+    kitty
+    rofi
+    btop
+    lsd
+    cmus
+    pavucontrol
+    flatpak
+    mdadm
+    efibootmgr
+    util-linux
+    awww
+    quickshell
+    hyprshot
+    gnome-themes-extra
+    bibata-cursors
+    catppuccin-cursors.mochaMauve
+    nwg-look
+    adwaita-qt
+    adwaita-qt6
+    pipes
+    libreoffice
+    adwaita-icon-theme
+    nautilus
+    wl-clipboard
+    playerctl
+    telegram-desktop_git # chaotic
+    nodejs
+    gnome-boxes
   ];
   # Some programs need SUID wrappers, can be configured further or are
   # started in user sessions.
@@ -296,31 +320,35 @@ programs.git.enable = true;
   #   enable = true;
   #   enableSSHSupport = true;
   # };
-  
-# Virtualization
-# Use this. It does use a daemon.
-virtualisation.libvirtd = {
-  enable = true;
-  qemu.package = pkgs.qemu_kvm;  # host arch only, far fewer binaries to probe
-  onBoot = "ignore";             # don't restart VMs that were running at shutdown
-  onShutdown = "shutdown";       # default is "suspend", which leads to resuming on next boot
-};
-virtualisation.docker.enable = true;
-# programs.virt-manager.enable = true;
+
+  # Virtualization
+  # Use this. It does use a daemon.
+  virtualisation.libvirtd = {
+    enable = true;
+    qemu.package = pkgs.qemu_kvm; # host arch only, far fewer binaries to probe
+    onBoot = "ignore"; # don't restart VMs that were running at shutdown
+    onShutdown = "shutdown"; # default is "suspend", which leads to resuming on next boot
+  };
+  virtualisation.docker.enable = true;
+  # programs.virt-manager.enable = true;
   # List services that you want to enable:
 
   # Enable the OpenSSH daemon.
-services.openssh = {
-  enable = true;
-  ports = [ 22 ];
-  settings = {
-    PasswordAuthentication = true; # Set to false if using SSH keys exclusively
-    PermitRootLogin = "no";        # "yes", "no", or "prohibit-password"
+  services.openssh = {
+    enable = true;
+    ports = [ 22 ];
+    settings = {
+      PasswordAuthentication = true; # Set to false if using SSH keys exclusively
+      PermitRootLogin = "no"; # "yes", "no", or "prohibit-password"
+    };
   };
-};
 
   # Open ports in the firewall.
-  networking.firewall.allowedTCPPorts = [ 22 80 443 ];
+  networking.firewall.allowedTCPPorts = [
+    22
+    80
+    443
+  ];
   # networking.firewall.allowedUDPPorts = [ ... ];
   # Or disable the firewall altogether.
   networking.nftables.enable = true;

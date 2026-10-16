@@ -1,245 +1,624 @@
-{ config, pkgs, lib, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  inputs,
+  ...
+}:
 
 {
   home.username = "garinh";
   home.homeDirectory = "/home/garinh";
-
 
   programs.home-manager.enable = true;
 
   # ── Quickshell: bar + notifications (replaces waybar and swaync) ─────────────
   # Started from the Hyprland autostart with hl.exec_cmd("qs").
   # Notification center from a keybind/script:  qs ipc call notifs toggle
-  programs.quickshell.enable = true;
+  programs.quickshell = {
+    enable = true;
+    package = inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
+    systemd.enable = true;
+  };
 
-  # Live reload: ~/.config/quickshell points straight at /etc/nixos/quickshell
-  # (not a store copy), so saving a .qml file there updates the running bar instantly.
-  # No rebuild needed for QML edits.
-  #xdg.configFile."quickshell".source =
-  #  config.lib.file.mkOutOfStoreSymlink "/etc/nixos/quickshell";
+  # Quickshell config files, written to ~/.config/quickshell/ on rebuild.
+  # They're read-only links into the Nix store: edit them here, then rebuild.
+  xdg.configFile."quickshell/shell.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Services.Mpris
+
+    ShellRoot {
+        Variants {
+            model: Quickshell.screens
+
+            PanelWindow {
+                id: bar
+
+                required property var modelData
+                screen: modelData
+
+                anchors {
+                    top: true
+                    left: true
+                    right: true
+                }
+                implicitHeight: Theme.barHeight
+                color: Theme.bg
+
+                SystemClock {
+                    id: clock
+                    precision: SystemClock.Minutes
+                }
+                Poll {
+                    id: volume
+                    cmd: "wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100+0.5) \"%\"}'"
+                    every: 1000
+                }
+                /*
+                Poll {
+                    id: bluetooth
+                    cmd: "bluetoothctl show | grep -q 'Powered: yes' && echo on || echo off"
+                }
+                */
+                // Battery would go here but I'm lazy
+                Poll {
+                    id: net
+                    cmd: "nmcli -t -f TYPE,STATE,CONNECTION device | grep -E '^(ethernet|wifi):connected:' | head -n1"
+                    every: 1000
+                }
+                Row {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Theme.spacing
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Theme.spacing
+
+                    Workspaces {
+                        screen: bar.screen
+                    }
+                    Rectangle {
+                        id: media
+                        property var player: Mpris.players.values[0]
+
+                        width: mediaButtons.width + 12
+                        height: Theme.moduleHeight
+                        radius: Theme.radius
+                        color: Theme.pill
+                        visible: media.player != undefined
+
+                        Row {
+                            id: mediaButtons
+                            anchors.centerIn: parent
+
+                            IconButton {
+                                icon: "skip_previous"
+                                implicitWidth: 16
+                                onClicked: media.player.previous()
+                            }
+                            IconButton {
+                                icon: media.player && media.player.isPlaying ? "pause" : "play_arrow"
+                                implicitWidth: 16
+                                onClicked: media.player.togglePlaying()
+                            }
+                            IconButton {
+                                icon: "skip_next"
+                                implicitWidth: 16
+                                onClicked: media.player.next()
+                            }
+                        }
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: media.player != undefined
+                        text: media.player ? media.player.trackArtist + " — " + media.player.trackTitle : " "
+                        color: Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize
+                        font.weight: 600
+                        font.letterSpacing: Theme.letterSpacing
+                    }
+                }
+                Row {
+                    anchors.right: parent.right
+                    anchors.rightMargin: Theme.spacing
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Theme.spacing
+                    Pill {
+                        icon: "volume_up"
+                        iconColor: Theme.cyan
+                        text: volume.text
+                    }
+                    Pill {
+                        readonly property string kind: net.text.split(":")[0]
+
+                        icon: kind === "ethernet" ? "lan" : kind === "wifi" ? "wifi" : "wifi_off"
+                        iconColor: Theme.green
+                        text: net.text.split(":").slice(2).join(":") || "offline"
+                    }
+                    Pill {
+                        icon: "schedule"
+                        iconColor: Theme.red
+                        text: Qt.formatDateTime(clock.date, "hh:mm AP")
+                    }
+                }
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 3
+                    color: Theme.pill
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Theme.qml".text = ''
+    pragma Singleton
+
+    import QtQuick
+    import Quickshell
+
+    Singleton {
+        property color bg: "#1e1e2e"
+        property color pill: "#313244"
+        property color pillIcon: "#585b70"
+        // Theme colors
+        property color text: "#cdd6f4"
+        property color red: "#f38ba8"
+        property color green: "#a6e3a1"
+        property color blue: "#89b4fa"
+        property color yellow: "#f9e2af"
+        property color magenta: "#cba6f7"
+        property color cyan: "#94e2d5"
+        property color accent: blue
+
+        property int barHeight: 38
+        property int moduleHeight: 26
+        property int spacing: 8
+        property int radius: 8
+
+        property string font: "SFMono Nerd Font"
+        property real textSize: 12.5
+        property real letterSpacing: -0.5
+
+        property string iconFont: "Material Symbols Rounded"
+        property int iconSize: 16
+        property var iconAxes: ({
+                "FILL": 0,
+                "wght": 700,
+                "opsz": 20,
+                "GRAD": 0
+            })
+    }
+  '';
+
+  xdg.configFile."quickshell/Workspaces.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Hyprland
+
+    Rectangle {
+        id: root
+
+        required property var screen
+
+        property int cellWidth: 24
+        property int padding: 3
+        property int slideTime: 300
+
+        property var monitor: Hyprland.monitorFor(root.screen)
+        property var list: !root.monitor ? [] : Hyprland.workspaces.values.filter(w => w.id > 0 && w.monitor === root.monitor)
+        property int activeIndex: root.list.findIndex(w => w.active)
+
+        implicitWidth: root.list.length * root.cellWidth + root.padding * 2
+        implicitHeight: Theme.moduleHeight
+        radius: Theme.radius
+        color: Theme.pill
+        visible: root.list.length > 0
+
+        Rectangle {
+            x: root.padding + root.activeIndex * root.cellWidth
+            width: root.cellWidth
+            height: parent.height - 6
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.activeIndex >= 0
+            radius: Theme.radius - 2
+            color: Qt.darker(Theme.accent, 3)
+            opacity: 0.75
+
+            Behavior on x {
+                NumberAnimation {
+                    duration: root.slideTime
+                    easing.type: Easing.OutCubic
+                }
+            }
+        }
+        Row {
+            x: root.padding
+            height: parent.height
+
+            Repeater {
+                model: root.list
+
+                Text {
+                    required property var modelData
+
+                    width: root.cellWidth
+                    height: parent.height
+                    text: modelData.name
+                    color: modelData.active ? Theme.accent : Theme.text
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize
+                    font.weight: 600
+
+                    Behavior on color {
+                        ColorAnimation {
+                            duration: root.slideTime
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: modelData.activate()
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Pill.qml".text = ''
+    import QtQuick
+
+    Rectangle {
+        id: root
+
+        property string icon: ""
+        property color iconColor: Theme.text
+        property string text: ""
+
+        implicitWidth: row.width
+        implicitHeight: Theme.moduleHeight
+        radius: Theme.radius
+        color: Theme.pill
+
+        Row {
+            id: row
+            height: parent.height
+            Rectangle {
+                width: iconLabel.implicitWidth + 10
+                height: parent.height
+                color: Theme.pillIcon
+                topLeftRadius: root.radius
+                bottomLeftRadius: root.radius
+
+                Text {
+                    id: iconLabel
+                    anchors.centerIn: parent
+                    text: root.icon
+                    color: root.iconColor
+                    font.family: Theme.iconFont
+                    font.pixelSize: Theme.iconSize
+                    font.variableAxes: Theme.iconAxes
+                }
+            }
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                leftPadding: 6
+                rightPadding: 6
+                text: root.text
+                color: Theme.text
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize
+                font.weight: 600
+                font.letterSpacing: Theme.letterSpacing
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/IconButton.qml".text = ''
+    import QtQuick
+
+    Rectangle {
+        id: root
+
+        property string icon: ""
+        property color iconColor: Theme.text
+        property int iconSize: Theme.iconSize
+
+        signal clicked
+
+        implicitWidth: Theme.moduleHeight
+        implicitHeight: Theme.moduleHeight
+        radius: Theme.radius
+        color: "transparent"
+
+        Text {
+            anchors.centerIn: parent
+            text: root.icon
+            color: root.iconColor
+            font.family: Theme.iconFont
+            font.pixelSize: root.iconSize
+            font.variableAxes: Theme.iconAxes
+        }
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.clicked()
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Poll.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+
+    Scope {
+        id: root
+
+        property string cmd: ""
+        property int every: 5000
+        property string text: ""
+
+        Process {
+            id: process
+
+            command: ["sh", "-c", root.cmd]
+            running: true
+
+            stdout: StdioCollector {
+                id: output
+                onStreamFinished: root.text = output.text.trim()
+            }
+        }
+
+        Timer {
+            interval: root.every
+            running: true
+            repeat: true
+            onTriggered: process.running = true
+        }
+    }
+  '';
+  services.hyprpolkitagent.enable = true;
+  programs.hyprtoolkit.settings = {
+    background = "0xFF1E1E2E"; # your Theme.bg
+    base = "0xFF313244"; # your Theme.pill
+    accent = "0xFF89B4FA"; # your Theme.accent (blue)
+    font_family = "SFProText Nerd Font";
+    font_family_monospace = "SFMono Nerd Font";
+  };
 
   wayland.windowManager.hyprland = {
     enable = true;
-    package = null;        # use programs.hyprland from configuration.nix
-    portalPackage = null;  # portal already set in configuration.nix
+    package = null; # use programs.hyprland from configuration.nix
+    portalPackage = null; # portal already set in configuration.nix
     configType = "lua";
     settings = lib.mkForce { };
     systemd.enable = true; # your Lua already runs dbus-update-activation-environment
     extraConfig = ''
--- Generated by hyprconf2lua v1.3.2
--- https://github.com/Prateek-squadron/hyprconf2lua
--- Manual review may be needed for complex directives
--- Fixed: env vars now actually applied via hl.env(); blur config consolidated into one block
+      -- Generated by hyprconf2lua v1.3.2
+      -- https://github.com/Prateek-squadron/hyprconf2lua
+      -- Manual review may be needed for complex directives
+      -- Fixed: env vars now actually applied via hl.env(); blur config consolidated into one block
 
----@module 'hl'
+      ---@module 'hl'
 
--- Catppuccin palette (written to ~/.config/hypr/themes/catppuccin.lua by catppuccin/nix)
-local colors = require('themes.catppuccin')
+      -- Catppuccin palette (written to ~/.config/hypr/themes/catppuccin.lua by catppuccin/nix)
+      local colors = require('themes.catppuccin')
 
-hl.monitor({
-    output   = "DP-1", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
-    mode     = "1920x1080@240",
-    position = "0x0",
-    scale    = 1,
-})
+      hl.monitor({
+          output   = "DP-1", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
+          mode     = "1920x1080@240",
+          position = "0x0",
+          scale    = 1,
+      })
 
-hl.env("XDG_CURRENT_DESKTOP", "Hyprland")
-hl.env("XDG_SESSION_TYPE", "wayland")
-hl.env("XDG_SESSION_DESKTOP", "Hyprland")
---hyprmod settings
-hl.unbind("SUPER + SHIFT + Left")
-hl.bind("SUPER + SHIFT + Left", hl.dsp.focus({ workspace = -1 }))
-hl.unbind("SUPER + SHIFT + Right")
-hl.bind("SUPER + SHIFT + Right", hl.dsp.focus({ workspace = "+1" }))
-hl.bind("Print", hl.dsp.exec_cmd("hyprshot -m region --output-folder ~/Pictures/Screenshots"))
-hl.bind("SUPER + CTRL + Right", hl.dsp.window.move({ workspace = "+1" }))
-hl.bind("SUPER + CTRL + Left", hl.dsp.window.move({ workspace = -1 }))
--- Env vars (Variance by graphics drivers)
-hl.env("LIBVA_DRIVER_NAME", "nvidia")
-hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")
-hl.env("NVD_BACKEND", "direct")
-hl.env("GBM_BACKEND", "nvidia-drm")
-hl.env("__GL_GSYNC_ALLOWED", "0")
-hl.env("__GL_VRR_ALLOWED", "0")
-hl.env("WLR_NO_HARDWARE_CURSORS", "1")
--- Force Qt apps to use qt5ct/qt6ct for styling layouts
-hl.env("QT_QPA_PLATFORMTHEME", "qt5ct")
+      hl.env("XDG_CURRENT_DESKTOP", "Hyprland")
+      hl.env("XDG_SESSION_TYPE", "wayland")
+      hl.env("XDG_SESSION_DESKTOP", "Hyprland")
+      --hyprmod settings
+      hl.unbind("SUPER + SHIFT + Left")
+      hl.bind("SUPER + SHIFT + Left", hl.dsp.focus({ workspace = -1 }))
+      hl.unbind("SUPER + SHIFT + Right")
+      hl.bind("SUPER + SHIFT + Right", hl.dsp.focus({ workspace = "+1" }))
+      hl.bind("Print", hl.dsp.exec_cmd("hyprshot -m region --output-folder ~/Pictures/Screenshots"))
+      hl.bind("SUPER + CTRL + Right", hl.dsp.window.move({ workspace = "+1" }))
+      hl.bind("SUPER + CTRL + Left", hl.dsp.window.move({ workspace = -1 }))
+      -- Env vars (Variance by graphics drivers)
+      hl.env("LIBVA_DRIVER_NAME", "nvidia")
+      hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")
+      hl.env("NVD_BACKEND", "direct")
+      hl.env("GBM_BACKEND", "nvidia-drm")
+      hl.env("__GL_GSYNC_ALLOWED", "0")
+      hl.env("__GL_VRR_ALLOWED", "0")
+      hl.env("WLR_NO_HARDWARE_CURSORS", "1")
+      -- Force Qt apps to use qt5ct/qt6ct for styling layouts
+      hl.env("QT_QPA_PLATFORMTHEME", "qt5ct")
 
--- Ensure Qt apps pick up Wayland instead of fallback X11 layouts
-hl.env("QT_QPA_PLATFORM", "wayland")
+      -- Ensure Qt apps pick up Wayland instead of fallback X11 layouts
+      hl.env("QT_QPA_PLATFORM", "wayland")
 
-hl.config({
-    layerrule = {
-        "blur, quickshell-bar",
-        "ignorealpha 0.4, quickshell-bar", -- lets blur render through semi-transparent areas; tune threshold to your CSS alpha
-    }
-})
-
-
--- Consolidated decoration/blur block (previously split across 3 hl.config calls
--- that overwrote each other; only the last one was ever actually in effect)
-hl.config({
-    decoration = {
-        rounding = 8,
-        blur = {
-            enabled = true,
-            size = 8,
-            passes = 3,
-            new_optimizations = true,
-            xray = true,
-        },
-        shadow = {
-            enabled = false,
-        },
-    },
-})
-
-hl.config({
-    animations = {
-        enabled = true,
-    },
-})
-
-hl.config({
-    input = {
-        kb_layout = "us",
-        follow_mouse = 1,
-        accel_profile = "flat",
-        sensitivity = 0.0,
-    },
-})
-hl.config({
-    general = {
-        gaps_in = 4,
-        gaps_out = 8,
-        border_size = 0,
-        ["col.active_border"]   = "rgba(" .. colors.overlay1Alpha .. "ee)",    
-        ["col.inactive_border"] = "rgba(" .. colors.surface1Alpha .. "99)",  
-        resize_on_border = true,
-        extend_border_grab_area = 20,  -- pixels of grab area beyond the visible border
-        hover_icon_on_border = true,
-    },
-})
-hl.config({
-    cursor = {
-        inactive_timeout = 0,
-        no_hardware_cursors = true,
-    },
-})
--- anims here
--- Define curves first
-hl.curve("sharp", { type = "bezier", points = { {0.16, 1}, {0.3, 1} } })
-hl.curve("snappy", { type = "bezier", points = { {0.05, 0.9}, {0.1, 1} } })
-hl.curve("linear", { type = "bezier", points = { {0, 0}, {1, 1} } })
-
--- Then reference them by leaf
-hl.animation({ leaf = "windows", enabled = true, speed = 2, bezier = "snappy", style = "popin 90%" })
-hl.animation({ leaf = "windowsOut", enabled = true, speed = 1.6, bezier = "sharp", style = "popin 90%" })
-hl.animation({ leaf = "border", enabled = true, speed = 3, bezier = "linear" })
-hl.animation({ leaf = "fade", enabled = true, speed = 2, bezier = "sharp" })
-hl.animation({ leaf = "workspaces", enabled = true, speed = 2.2, bezier = "snappy", style = "slide" })
-hl.animation({ leaf = "layers", enabled = true, speed = 1.6, bezier = "sharp" })
-hl.bind("Caps_Lock", hl.dsp.exec_cmd("sleep 0.1 && ~/.config/hypr/scripts/capslock.sh"))
-
--- Try using the shorthand variant if the full word is being ignored
-
-hl.bind("SUPER + J", hl.dsp.focus({ workspace = "-1" }))
-hl.bind("SUPER + K", hl.dsp.focus({ workspace = "+1" }))
-
-hl.bind("SUPER + left", hl.dsp.focus({ direction = "left" }))
-hl.bind("SUPER + right", hl.dsp.focus({ direction = "right" }))
-hl.bind("SUPER + up", hl.dsp.focus({ direction = "up" }))
-hl.bind("SUPER + down", hl.dsp.focus({ direction = "down" }))
+      hl.config({
+          layerrule = {
+              "blur, quickshell-bar",
+              "ignorealpha 0.4, quickshell-bar", -- lets blur render through semi-transparent areas; tune threshold to your CSS alpha
+          }
+      })
 
 
--- Trigger the rofi power menu
+      -- Consolidated decoration/blur block (previously split across 3 hl.config calls
+      -- that overwrote each other; only the last one was ever actually in effect)
+      hl.config({
+          decoration = {
+              rounding = 8,
+              blur = {
+                  enabled = true,
+                  size = 8,
+                  passes = 3,
+                  new_optimizations = true,
+                  xray = true,
+              },
+              shadow = {
+                  enabled = false,
+              },
+          },
+      })
 
-hl.bind("SUPER + Return", hl.dsp.exec_cmd("kitty"))
+      hl.config({
+          animations = {
+              enabled = true,
+          },
+      })
 
-hl.bind("SUPER + Q", hl.dsp.window.close())
+      hl.config({
+          input = {
+              kb_layout = "us",
+              follow_mouse = 1,
+              accel_profile = "flat",
+              sensitivity = 0.0,
+          },
+      })
+      hl.config({
+          general = {
+              gaps_in = 4,
+              gaps_out = 8,
+              border_size = 0,
+              ["col.active_border"]   = "rgba(" .. colors.overlay1Alpha .. "ee)",    
+              ["col.inactive_border"] = "rgba(" .. colors.surface1Alpha .. "99)",  
+              resize_on_border = true,
+              extend_border_grab_area = 20,  -- pixels of grab area beyond the visible border
+              hover_icon_on_border = true,
+          },
+      })
+      hl.config({
+          cursor = {
+              inactive_timeout = 0,
+              no_hardware_cursors = true,
+          },
+      })
+      -- anims here
+      -- Define curves first
+      hl.curve("sharp", { type = "bezier", points = { {0.16, 1}, {0.3, 1} } })
+      hl.curve("snappy", { type = "bezier", points = { {0.05, 0.9}, {0.1, 1} } })
+      hl.curve("linear", { type = "bezier", points = { {0, 0}, {1, 1} } })
 
-hl.bind("SUPER + SHIFT + E", hl.dsp.exit())
+      -- Then reference them by leaf
+      hl.animation({ leaf = "windows", enabled = true, speed = 2, bezier = "snappy", style = "popin 90%" })
+      hl.animation({ leaf = "windowsOut", enabled = true, speed = 1.6, bezier = "sharp", style = "popin 90%" })
+      hl.animation({ leaf = "border", enabled = true, speed = 3, bezier = "linear" })
+      hl.animation({ leaf = "fade", enabled = true, speed = 2, bezier = "sharp" })
+      hl.animation({ leaf = "workspaces", enabled = true, speed = 2.2, bezier = "snappy", style = "slide" })
+      hl.animation({ leaf = "layers", enabled = true, speed = 1.6, bezier = "sharp" })
+      hl.bind("Caps_Lock", hl.dsp.exec_cmd("sleep 0.1 && ~/.config/hypr/scripts/capslock.sh"))
+
+      -- Try using the shorthand variant if the full word is being ignored
+
+      hl.bind("SUPER + J", hl.dsp.focus({ workspace = "-1" }))
+      hl.bind("SUPER + K", hl.dsp.focus({ workspace = "+1" }))
+
+      hl.bind("SUPER + left", hl.dsp.focus({ direction = "left" }))
+      hl.bind("SUPER + right", hl.dsp.focus({ direction = "right" }))
+      hl.bind("SUPER + up", hl.dsp.focus({ direction = "up" }))
+      hl.bind("SUPER + down", hl.dsp.focus({ direction = "down" }))
 
 
--- Captures the entire screen and copies it directly to your clipboard
--- Pressing Print captures the entire screen straight to your clipboard
+      -- Trigger the rofi power menu
+
+      hl.bind("SUPER + Return", hl.dsp.exec_cmd("kitty"))
+
+      hl.bind("SUPER + Q", hl.dsp.window.close())
+
+      hl.bind("SUPER + SHIFT + E", hl.dsp.exit())
 
 
--- True fullscreen (Hides waybar and gaps)
+      -- Captures the entire screen and copies it directly to your clipboard
+      -- Pressing Print captures the entire screen straight to your clipboard
 
-hl.bind("SUPER + F", hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" }))
-hl.bind("SUPER + SHIFT + F", hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" }))
-hl.bind("SUPER + V", hl.dsp.window.float())
 
--- Forces every window on the workspace into floating mode
+      -- True fullscreen (Hides waybar and gaps)
 
-hl.bind("SUPER + SHIFT + V", hl.dsp.exec_cmd("hyprctl clients -j| jq -r '.[]| select(.workspace.id=='$(hyprctl activeworkspace -j| jq '.id')')| . address'| xargs -I { } hyprctl dispatch togglefloating address:{ }"))
+      hl.bind("SUPER + F", hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" }))
+      hl.bind("SUPER + SHIFT + F", hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" }))
+      hl.bind("SUPER + V", hl.dsp.window.float())
 
--- Toggle Rofi App Launcher using Super and Tab
+      -- Forces every window on the workspace into floating mode
 
-hl.bind("SUPER + TAB", hl.dsp.exec_cmd("pkill rofi || rofi -show drun -theme-str 'window { close-on-click:true; } '"))
+      hl.bind("SUPER + SHIFT + V", hl.dsp.exec_cmd("hyprctl clients -j| jq -r '.[]| select(.workspace.id=='$(hyprctl activeworkspace -j| jq '.id')')| . address'| xargs -I { } hyprctl dispatch togglefloating address:{ }"))
 
--- Delete or replace the bottom section with ONLY this line:
+      -- Toggle Rofi App Launcher using Super and Tab
 
-hl.bind("SUPER + mouse:272", hl.dsp.window.drag(), { mouse = true })
+      hl.bind("SUPER + TAB", hl.dsp.exec_cmd("pkill rofi || rofi -show drun -theme-str 'window { close-on-click:true; } '"))
 
-hl.bind("SUPER + mouse:273", hl.dsp.window.resize(), { mouse = true })
+      -- Delete or replace the bottom section with ONLY this line:
 
--- TODO: manual review: blurls = "waybar"
+      hl.bind("SUPER + mouse:272", hl.dsp.window.drag(), { mouse = true })
 
--- Autostart
-hl.on("hyprland.start", function()
-   hl.exec_cmd("qs")
-   hl.exec_cmd("awww-daemon")
-   hl.exec_cmd("awww img ~/Pictures/Wallpapers/hk.png")
-   hl.exec_cmd("/usr/lib/polkit-kde-authentication-agent-1")
-   hl.exec_cmd("/usr/lib/hyprpolkitagent/hyprpolkitagent")
-   hl.exec_cmd("eww daemon")
-   hl.exec_cmd("playerctld daemon")
-end)
+      hl.bind("SUPER + mouse:273", hl.dsp.window.resize(), { mouse = true })
 
--- HyprMod managed settings
---require("hyprland-gui")
--- hyprbars settings go inside hl.config under plugin
---[[hl.config({
-    plugin = {
-        hyprbars = {
-            bar_height = 20,
-            bar_color = colors.base,
-            ["col.text"] = colors.text,
-            bar_text_size = 14,
-            bar_text_font = "SF Pro Text",
-            bar_button_padding = 10,
-            bar_padding = 10,
-            bar_precedence_over_border = true,
-            bar_part_of_window = true,
-        }
-    }
-})
+      -- TODO: manual review: blurls = "waybar"
 
--- buttons are added separately
-hl.plugin.hyprbars.add_button({
-    bg_color = colors.red,
-    fg_color = colors.base,
-    size = 15,
-    icon = "󱎘",
-    action = "hyprctl dispatch 'hl.dsp.window.close()'",
-})
-hl.plugin.hyprbars.add_button({
-    bg_color = colors.green,
-    fg_color = colors.base,
-    size = 15,
-    icon = "",
-    action = "hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"toggle\" })'",
-})
-hl.plugin.hyprbars.add_button({
-    bg_color = colors.mauve,
-    fg_color = colors.base,
-    size = 15,
-    icon = "",
-    action = "hyprctl dispatch 'hl.dsp.window.float({action=\"toggle\"})'",
-})
-]]
+      -- Autostart
+      hl.on("hyprland.start", function()
+         hl.exec_cmd("qs")
+         hl.exec_cmd("awww-daemon")
+         hl.exec_cmd("awww img ~/Pictures/Wallpapers/hk.png")
+         hl.exec_cmd("/usr/lib/polkit-kde-authentication-agent-1")
+         hl.exec_cmd("/usr/lib/hyprpolkitagent/hyprpolkitagent")
+         hl.exec_cmd("eww daemon")
+         hl.exec_cmd("playerctld daemon")
+      end)
+
+      -- HyprMod managed settings
+      --require("hyprland-gui")
+      -- hyprbars settings go inside hl.config under plugin
+      --[[hl.config({
+          plugin = {
+              hyprbars = {
+                  bar_height = 20,
+                  bar_color = colors.base,
+                  ["col.text"] = colors.text,
+                  bar_text_size = 14,
+                  bar_text_font = "SF Pro Text",
+                  bar_button_padding = 10,
+                  bar_padding = 10,
+                  bar_precedence_over_border = true,
+                  bar_part_of_window = true,
+              }
+          }
+      })
+
+      -- buttons are added separately
+      hl.plugin.hyprbars.add_button({
+          bg_color = colors.red,
+          fg_color = colors.base,
+          size = 15,
+          icon = "󱎘",
+          action = "hyprctl dispatch 'hl.dsp.window.close()'",
+      })
+      hl.plugin.hyprbars.add_button({
+          bg_color = colors.green,
+          fg_color = colors.base,
+          size = 15,
+          icon = "",
+          action = "hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"toggle\" })'",
+      })
+      hl.plugin.hyprbars.add_button({
+          bg_color = colors.mauve,
+          fg_color = colors.base,
+          size = 15,
+          icon = "",
+          action = "hyprctl dispatch 'hl.dsp.window.float({action=\"toggle\"})'",
+      })
+      ]]
     '';
   };
 
@@ -267,7 +646,7 @@ hl.plugin.hyprbars.add_button({
           selected = mkLiteral "@lavender";
           active = mkLiteral "@green";
           urgent = mkLiteral "@red";
-          font = "JetBrainsMono Nerd Font 11";
+          font = "SFMono Nerd Font 11";
         };
         "window" = {
           transparency = "real";
@@ -292,7 +671,12 @@ hl.plugin.hyprbars.add_button({
           margin = mkLiteral "0px";
           padding = mkLiteral "20px";
           background-color = mkLiteral "transparent";
-          children = [ "inputbar" "message" "listview" "mode-switcher" ];
+          children = [
+            "inputbar"
+            "message"
+            "listview"
+            "mode-switcher"
+          ];
         };
         "inputbar" = {
           enabled = true;
@@ -301,7 +685,10 @@ hl.plugin.hyprbars.add_button({
           padding = mkLiteral "10px";
           background-color = mkLiteral "@background-alt";
           text-color = mkLiteral "@foreground";
-          children = [ "textbox-prompt-colon" "entry" ];
+          children = [
+            "textbox-prompt-colon"
+            "entry"
+          ];
         };
         "prompt" = {
           enabled = true;
@@ -425,10 +812,9 @@ hl.plugin.hyprbars.add_button({
           background-color = mkLiteral "@background";
           text-color = mkLiteral "@foreground";
         };
-      });
+      }
+    );
   };
-
-
 
   programs.fastfetch = {
     enable = true;
@@ -549,7 +935,7 @@ hl.plugin.hyprbars.add_button({
   programs.kitty = {
     enable = true;
     themeFile = lib.mkForce null;
-    font.name = "JetBrainsMono Nerd Font Mono";
+    font.name = "SFMono Nerd Font";
     shellIntegration = {
       mode = null; # set via settings below, so HM does not force "no-rc"
       enableBashIntegration = false;
@@ -612,67 +998,65 @@ hl.plugin.hyprbars.add_button({
   # symlink into a regular file; force lets HM replace it
   xdg.configFile."kitty/kitty.conf".force = true;
 
-gtk = {
-  enable = true;
-  theme = {
-    name = "catppuccin-mocha-blue-standard"; # whatever GTK theme you have installed
-    package = pkgs.catppuccin-gtk.override {
-      accents = [ "blue" ];
-      size = "standard";
-      variant = "mocha";
+  gtk = {
+    enable = true;
+    theme = {
+      name = "catppuccin-mocha-blue-standard"; # whatever GTK theme you have installed
+      package = pkgs.catppuccin-gtk.override {
+        accents = [ "blue" ];
+        size = "standard";
+        variant = "mocha";
+      };
     };
-  };
     gtk4.theme = config.gtk.theme;
 
+    font = {
+      name = "SFProText Nerd Font";
+      size = 11;
+    };
 
-  font = {
-    name = "SFProText Nerd Font";
-    size = 11;
+    gtk3.extraConfig = {
+      gtk-application-prefer-dark-theme = true;
+    };
+
+    gtk4.extraConfig = {
+      gtk-application-prefer-dark-theme = true;
+    };
   };
 
-  gtk3.extraConfig = {
-    gtk-application-prefer-dark-theme = true;
+  home.pointerCursor = {
+    enable = true;
+    gtk.enable = true;
+    x11.enable = true;
+    name = "catppuccin-mocha-mauve-cursors";
+    package = pkgs.catppuccin-cursors.mochaMauve;
   };
 
-  gtk4.extraConfig = {
-    gtk-application-prefer-dark-theme = true;
+  gtk.cursorTheme = {
+    name = "catppuccin-mocha-mauve-cursors";
+    package = pkgs.catppuccin-cursors.mochaMauve;
   };
-};
 
-
-home.pointerCursor = {
-  enable = true;
-  gtk.enable = true;
-  x11.enable = true;
-  name = "catppuccin-mocha-mauve-cursors";
-  package = pkgs.catppuccin-cursors.mochaMauve;
-};
-
-gtk.cursorTheme = {
-  name = "catppuccin-mocha-mauve-cursors";
-  package = pkgs.catppuccin-cursors.mochaMauve;
-};
-
-programs.bash = {
-  enable = true;
-  shellAliases = {
-    ll = "lsd -la";
-    ls = "lsd";
-    gs = "git status";
-    update = "cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake /etc/nixos#nixos && cd && flatpak update -y";
-    viconfig = "sudo fresh /etc/nixos/configuration.nix";
-    clean = "nh clean all";
-    reload = "source ~/.bashrc";
+  programs.bash = {
+    enable = true;
+    shellAliases = {
+      ll = "lsd -la";
+      ls = "lsd";
+      gs = "git status";
+      update = "cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake /etc/nixos#nixos && cd && flatpak update -y";
+      viconfig = "sudo fresh /etc/nixos/configuration.nix";
+      clean = "nh clean all";
+      reload = "source ~/.bashrc";
+    };
+    bashrcExtra = ''
+      source -- "${pkgs.blesh}/share/blesh/ble.sh" --noattach
+      eval "$(starship init bash)"
+      export PATH=~/bin:$PATH
+      export PATH="$HOME/.npm-global/bin:$PATH"
+      fastfetch
+      [[ ! ''${BLE_VERSION-} ]] || ble-attach
+    '';
   };
-  bashrcExtra = ''
-    source -- "${pkgs.blesh}/share/blesh/ble.sh" --noattach
-    eval "$(starship init bash)"
-    export PATH=~/bin:$PATH
-    export PATH="$HOME/.npm-global/bin:$PATH"
-    fastfetch
-    [[ ! ''${BLE_VERSION-} ]] || ble-attach
-  '';
-};
 
   # Lock screen (launched from the waybar lock button)
   # Measured from the reference screenshot and scaled to 1920x1080
@@ -727,7 +1111,7 @@ programs.bash = {
           dots_center = true;
           check_color = "$yellow";
           fail_color = "$red";
-          dots_size = 0.33;    # 0.2–0.8, fraction of the field height
+          dots_size = 0.33; # 0.2–0.8, fraction of the field height
           dots_spacing = 0.15; # 0.0–1.0, gap between dots, relative to dot size
         }
       ];
