@@ -2344,6 +2344,12 @@
         property var list: !root.monitor ? [] : Hyprland.workspaces.values.filter(w => w.id > 0 && w.monitor === root.monitor)
         property int activeIndex: root.list.findIndex(w => w.active)
 
+        // Which number the mouse is over: -1 = none.
+        property int hoveredIndex: -1
+        property real hoverGrow: 1.35     // size of the hovered number
+        property real hoverShrink: 0.8    // size of the others while one is hovered
+        property int hoverTime: 150
+
         implicitWidth: root.list.length * root.cellWidth + root.padding * 2
         implicitHeight: Theme.moduleHeight
         radius: Theme.radius
@@ -2375,7 +2381,9 @@
                 model: root.list
 
                 Text {
+                    id: wsNumber
                     required property var modelData
+                    required property int index        // 0, 1, 2... this number's place in the row
 
                     width: root.cellWidth
                     height: parent.height
@@ -2388,16 +2396,31 @@
                     font.pixelSize: Theme.textSize
                     font.weight: 600
 
+                    // nothing hovered: normal size. Otherwise: big if it's this one, small if not.
+                    scale: root.hoveredIndex === -1 ? 1 : root.hoveredIndex === wsNumber.index ? root.hoverGrow : root.hoverShrink
+
                     Behavior on color {
                         ColorAnimation {
                             duration: root.slideTime
                             easing.type: Easing.OutCubic
                         }
                     }
+                    Behavior on scale {
+                        NumberAnimation {
+                            duration: root.hoverTime
+                            easing.type: Easing.OutCubic
+                        }
+                    }
                     MouseArea {
                         anchors.fill: parent
+                        hoverEnabled: true             // needed for onEntered/onExited without clicking
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: modelData.activate()
+                        onEntered: root.hoveredIndex = wsNumber.index
+                        // only clear it if it's still ours: moving to the next number can
+                        // run that one's onEntered before this onExited
+                        onExited: if (root.hoveredIndex === wsNumber.index)
+                            root.hoveredIndex = -1
+                        onClicked: wsNumber.modelData.activate()
                     }
                 }
             }
