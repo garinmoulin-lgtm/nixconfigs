@@ -1992,6 +1992,11 @@
                                         cmd: ["systemctl", "poweroff"]
                                     },
                                     {
+                                        icon: "lock",
+                                        name: "Lock",
+                                        cmd: ["hyprlock"]
+                                    },
+                                    {
                                         icon: "logout",
                                         name: "Log out",
                                         cmd: ["pkill", "Hyprland"]
@@ -3222,7 +3227,7 @@
           text = "$TIME";
           color = "rgb(ebdbb2)"; # light1
           font_size = 64;
-          font_family = "JetBrainsMono Nerd Font";
+          font_family = "SFMono Nerd Font";
           position = "0, 74";
           halign = "center";
           valign = "center";
@@ -3242,7 +3247,7 @@
           outer_color = "rgb(fe8019)"; # orange
           inner_color = "rgb(3c3836)"; # dark1
           font_color = "rgb(ebdbb2)"; # light1
-          font_family = "JetBrainsMono Nerd Font";
+          font_family = "SFMono Nerd Font";
           placeholder_text = "<i>Input Password...</i>";
           fade_on_empty = false;
           dots_center = true;

@@ -287,7 +287,6 @@
     rofi
     btop
     lsd
-    kew
     pavucontrol
     flatpak
     mdadm
