@@ -254,7 +254,6 @@
   environment.systemPackages = with pkgs; [
     #  vim # Do not forget to add an editor to edit configuration.nix! The Nano editor is also installed by default.
     #  wget
-    catppuccin-gtk
     papirus-icon-theme
     # The Fresh Terminal Text Editor/IDE
     udisks2
@@ -299,7 +298,6 @@
     hyprshot
     gnome-themes-extra
     bibata-cursors
-    catppuccin-cursors.mochaMauve
     nwg-look
     adwaita-qt
     adwaita-qt6

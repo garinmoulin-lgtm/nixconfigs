@@ -2076,19 +2076,21 @@
     import QtQuick
     import Quickshell
 
+    // Gruvbox dark (medium), from morhetz/gruvbox
     Singleton {
-        property color bg: "#1e1e2e"
-        property color pill: "#313244"
-        property color pillIcon: "#585b70"
-        // Theme colors
-        property color text: "#cdd6f4"
-        property color red: "#f38ba8"
-        property color green: "#a6e3a1"
-        property color blue: "#89b4fa"
-        property color yellow: "#f9e2af"
-        property color magenta: "#cba6f7"
-        property color cyan: "#94e2d5"
-        property color accent: blue
+        property color bg: "#282828"        // dark0
+        property color pill: "#3c3836"      // dark1
+        property color pillIcon: "#665c54"  // dark3
+        // Theme colors (the "bright" set)
+        property color text: "#ebdbb2"      // light1
+        property color red: "#fb4934"
+        property color green: "#b8bb26"
+        property color blue: "#83a598"
+        property color yellow: "#fabd2f"
+        property color magenta: "#d3869b"   // gruvbox calls it purple
+        property color cyan: "#8ec07c"      // gruvbox calls it aqua
+        property color orange: "#fe8019"
+        property color accent: orange
 
         property int barHeight: 38
         property int moduleHeight: 26
@@ -2524,9 +2526,9 @@
   '';
   services.hyprpolkitagent.enable = true;
   programs.hyprtoolkit.settings = {
-    background = "0xFF1E1E2E"; # your Theme.bg
-    base = "0xFF313244"; # your Theme.pill
-    accent = "0xFF89B4FA"; # your Theme.accent (blue)
+    background = "0xFF282828"; # your Theme.bg (gruvbox dark0)
+    base = "0xFF3C3836"; # your Theme.pill (dark1)
+    accent = "0xFFFE8019"; # your Theme.accent (orange)
     font_family = "SFProText Nerd Font";
     font_family_monospace = "SFMono Nerd Font";
   };
@@ -2545,9 +2547,6 @@
       -- Fixed: env vars now actually applied via hl.env(); blur config consolidated into one block
 
       ---@module 'hl'
-
-      -- Catppuccin palette (written to ~/.config/hypr/themes/catppuccin.lua by catppuccin/nix)
-      local colors = require('themes.catppuccin')
 
       hl.monitor({
           output   = "DP-1", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
@@ -2626,8 +2625,8 @@
               gaps_in = 4,
               gaps_out = 8,
               border_size = 0,
-              ["col.active_border"]   = "rgba(" .. colors.overlay1Alpha .. "ee)",    
-              ["col.inactive_border"] = "rgba(" .. colors.surface1Alpha .. "99)",  
+              ["col.active_border"]   = "rgba(fe8019ee)", -- gruvbox orange
+              ["col.inactive_border"] = "rgba(665c5499)", -- gruvbox dark3
               resize_on_border = true,
               extend_border_grab_area = 20,  -- pixels of grab area beyond the visible border
               hover_icon_on_border = true,
@@ -2717,8 +2716,8 @@
           plugin = {
               hyprbars = {
                   bar_height = 20,
-                  bar_color = colors.base,
-                  ["col.text"] = colors.text,
+                  bar_color = "rgb(282828)",
+                  ["col.text"] = "rgb(ebdbb2)",
                   bar_text_size = 14,
                   bar_text_font = "SF Pro Text",
                   bar_button_padding = 10,
@@ -2731,22 +2730,22 @@
 
       -- buttons are added separately
       hl.plugin.hyprbars.add_button({
-          bg_color = colors.red,
-          fg_color = colors.base,
+          bg_color = "rgb(fb4934)",
+          fg_color = "rgb(282828)",
           size = 15,
           icon = "󱎘",
           action = "hyprctl dispatch 'hl.dsp.window.close()'",
       })
       hl.plugin.hyprbars.add_button({
-          bg_color = colors.green,
-          fg_color = colors.base,
+          bg_color = "rgb(b8bb26)",
+          fg_color = "rgb(282828)",
           size = 15,
           icon = "",
           action = "hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"toggle\" })'",
       })
       hl.plugin.hyprbars.add_button({
-          bg_color = colors.mauve,
-          fg_color = colors.base,
+          bg_color = "rgb(d3869b)",
+          fg_color = "rgb(282828)",
           size = 15,
           icon = "",
           action = "hyprctl dispatch 'hl.dsp.window.float({action=\"toggle\"})'",
@@ -2770,15 +2769,14 @@
         inherit (config.lib.formats.rasi) mkLiteral;
       in
       {
-        # Mocha palette file written to ~/.local/share/rofi/themes by catppuccin/nix
-        "@import" = "catppuccin-mocha";
+        # Gruvbox dark
         "*" = {
-          background = mkLiteral "@base";
-          background-alt = mkLiteral "@surface0";
-          foreground = mkLiteral "@text";
-          selected = mkLiteral "@lavender";
-          active = mkLiteral "@green";
-          urgent = mkLiteral "@red";
+          background = mkLiteral "#282828";
+          background-alt = mkLiteral "#3c3836";
+          foreground = mkLiteral "#ebdbb2";
+          selected = mkLiteral "#fe8019";
+          active = mkLiteral "#b8bb26";
+          urgent = mkLiteral "#fb4934";
           font = "SFMono Nerd Font 11";
         };
         "window" = {
@@ -3087,44 +3085,46 @@
       sync_to_monitor = "no";
       confirm_os_window_close = 0;
       cursor_trail_start_threshold = 0;
-      foreground = "#CDD6F4";
-      background = "#1E1E2E";
-      selection_foreground = "#1E1E2E";
-      selection_background = "#F5E0DC";
-      cursor = "#F5E0DC";
-      cursor_text_color = "#1E1E2E";
-      url_color = "#F5E0DC";
-      active_border_color = "#B4BEFE";
-      inactive_border_color = "#6C7086";
-      bell_border_color = "#F9E2AF";
+      # Gruvbox dark
+      foreground = "#ebdbb2";
+      background = "#282828";
+      selection_foreground = "#ebdbb2";
+      selection_background = "#504945";
+      cursor = "#ebdbb2";
+      cursor_text_color = "#282828";
+      url_color = "#83a598";
+      active_border_color = "#fe8019";
+      inactive_border_color = "#665c54";
+      bell_border_color = "#fabd2f";
       wayland_titlebar_color = "system";
-      active_tab_foreground = "#11111B";
-      active_tab_background = "#CBA6F7";
-      inactive_tab_foreground = "#CDD6F4";
-      inactive_tab_background = "#181825";
-      tab_bar_background = "#11111B";
-      mark1_foreground = "#1E1E2E";
-      mark1_background = "#B4BEFE";
-      mark2_foreground = "#1E1E2E";
-      mark2_background = "#CBA6F7";
-      mark3_foreground = "#1E1E2E";
-      mark3_background = "#74C7EC";
-      color0 = "#45475A";
-      color8 = "#585B70";
-      color1 = "#F38BA8";
-      color9 = "#F38BA8";
-      color2 = "#A6E3A1";
-      color10 = "#A6E3A1";
-      color3 = "#F9E2AF";
-      color11 = "#F9E2AF";
-      color4 = "#89B4FA";
-      color12 = "#89B4FA";
-      color5 = "#F5C2E7";
-      color13 = "#F5C2E7";
-      color6 = "#94E2D5";
-      color14 = "#94E2D5";
-      color7 = "#BAC2DE";
-      color15 = "#A6ADC8";
+      active_tab_foreground = "#282828";
+      active_tab_background = "#fe8019";
+      inactive_tab_foreground = "#a89984";
+      inactive_tab_background = "#3c3836";
+      tab_bar_background = "#1d2021";
+      mark1_foreground = "#282828";
+      mark1_background = "#83a598";
+      mark2_foreground = "#282828";
+      mark2_background = "#d3869b";
+      mark3_foreground = "#282828";
+      mark3_background = "#8ec07c";
+      # normal / bright pairs
+      color0 = "#282828";
+      color8 = "#928374";
+      color1 = "#cc241d";
+      color9 = "#fb4934";
+      color2 = "#98971a";
+      color10 = "#b8bb26";
+      color3 = "#d79921";
+      color11 = "#fabd2f";
+      color4 = "#458588";
+      color12 = "#83a598";
+      color5 = "#b16286";
+      color13 = "#d3869b";
+      color6 = "#689d6a";
+      color14 = "#8ec07c";
+      color7 = "#a89984";
+      color15 = "#ebdbb2";
     };
   };
   # kitty rewrites kitty.conf itself (e.g. the font/theme kittens), turning HM's
@@ -3134,12 +3134,17 @@
   gtk = {
     enable = true;
     theme = {
-      name = "catppuccin-mocha-blue-standard"; # whatever GTK theme you have installed
-      package = pkgs.catppuccin-gtk.override {
-        accents = [ "blue" ];
-        size = "standard";
-        variant = "mocha";
+      # folder name = Gruvbox + accent + color + contrast (from the theme's install.sh)
+      name = "Gruvbox-Orange-Dark-Medium";
+      package = pkgs.gruvbox-gtk-theme.override {
+        colorVariants = [ "dark" ];
+        themeVariants = [ "orange" ]; # accent, to match Theme.qml
+        tweakVariants = [ "medium" ]; # medium contrast (#282828)
       };
+    };
+    iconTheme = {
+      name = "Gruvbox-Plus-Dark";
+      package = pkgs.gruvbox-plus-icons;
     };
     gtk4.theme = config.gtk.theme;
 
@@ -3161,13 +3166,13 @@
     enable = true;
     gtk.enable = true;
     x11.enable = true;
-    name = "catppuccin-mocha-mauve-cursors";
-    package = pkgs.catppuccin-cursors.mochaMauve;
+    name = "Capitaine Cursors (Gruvbox)";
+    package = pkgs.capitaine-cursors-themed;
   };
 
   gtk.cursorTheme = {
-    name = "catppuccin-mocha-mauve-cursors";
-    package = pkgs.catppuccin-cursors.mochaMauve;
+    name = "Capitaine Cursors (Gruvbox)";
+    package = pkgs.capitaine-cursors-themed;
   };
 
   programs.bash = {
@@ -3196,8 +3201,7 @@
   programs.hyprlock = {
     enable = true;
     package = null; # hyprlock is installed system-wide in configuration.nix (needed for PAM)
-    # no mkForce: catppuccin sources its Mocha palette ($rosewater, $surface0, ...);
-    # its default layout is turned off with useDefaultConfig = false below
+    # Gruvbox colors, written as rgb(hex)
     settings = {
       general = {
         hide_cursor = false; # cursor is visible in the reference
@@ -3216,7 +3220,7 @@
         {
           monitor = "";
           text = "$TIME";
-          color = "$rosewater";
+          color = "rgb(ebdbb2)"; # light1
           font_size = 64;
           font_family = "JetBrainsMono Nerd Font";
           position = "0, 74";
@@ -3235,23 +3239,21 @@
           valign = "center";
           rounding = -1; # full pill
           outline_thickness = 3;
-          outer_color = "$rosewater";
-          inner_color = "$surface0";
-          font_color = "$rosewater";
+          outer_color = "rgb(fe8019)"; # orange
+          inner_color = "rgb(3c3836)"; # dark1
+          font_color = "rgb(ebdbb2)"; # light1
           font_family = "JetBrainsMono Nerd Font";
           placeholder_text = "<i>Input Password...</i>";
           fade_on_empty = false;
           dots_center = true;
-          check_color = "$yellow";
-          fail_color = "$red";
+          check_color = "rgb(fabd2f)"; # yellow
+          fail_color = "rgb(fb4934)"; # red
           dots_size = 0.33; # 0.2–0.8, fraction of the field height
           dots_spacing = 0.15; # 0.0–1.0, gap between dots, relative to dot size
         }
       ];
     };
   };
-  # keep catppuccin's palette for hyprlock, but not its corner clock / layout / mauve field
-  catppuccin.hyprlock.useDefaultConfig = false;
   # replaces any hand-written ~/.config/hypr/hyprlock.conf instead of failing activation
   xdg.configFile."hypr/hyprlock.conf".force = true;
 }

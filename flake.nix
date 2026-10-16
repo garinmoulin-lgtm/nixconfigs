@@ -6,7 +6,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    catppuccin.url = "github:catppuccin/nix";
     chaotic.url = "github:chaotic-cx/nyx/nyxpkgs-unstable";
     quickshell = {
       url = "git+https://git.outfoxxed.me/outfoxxed/quickshell";
@@ -26,7 +25,6 @@
     {
       self,
       nixpkgs,
-      catppuccin,
       home-manager,
       chaotic,
       lanzaboote,
@@ -52,11 +50,8 @@
             home-manager.extraSpecialArgs = { inherit inputs; };
             home-manager.users.garinh = {
               imports = [
-                inputs.catppuccin.homeModules.catppuccin
                 ./home.nix
               ];
-              catppuccin.enable = true;
-              catppuccin.autoEnable = true;
               home.stateVersion = "26.05";
             };
           }
