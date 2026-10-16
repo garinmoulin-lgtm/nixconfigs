@@ -2081,21 +2081,21 @@
     import QtQuick
     import Quickshell
 
-    // Gruvbox dark (medium), from morhetz/gruvbox
+    // Everforest dark (medium), from sainnhe/everforest
     Singleton {
-        property color bg: "#282828"        // dark0
-        property color pill: "#3c3836"      // dark1
-        property color pillIcon: "#665c54"  // dark3
-        // Theme colors (the "bright" set)
-        property color text: "#ebdbb2"      // light1
-        property color red: "#fb4934"
-        property color green: "#b8bb26"
-        property color blue: "#83a598"
-        property color yellow: "#fabd2f"
-        property color magenta: "#d3869b"   // gruvbox calls it purple
-        property color cyan: "#8ec07c"      // gruvbox calls it aqua
-        property color orange: "#fe8019"
-        property color accent: orange
+        property color bg: "#2d353b"        // bg0
+        property color pill: "#3d484d"      // bg2
+        property color pillIcon: "#56635f"  // bg5
+        // Theme colors
+        property color text: "#d3c6aa"      // fg
+        property color red: "#e67e80"
+        property color green: "#a7c080"
+        property color blue: "#7fbbb3"
+        property color yellow: "#dbbc7f"
+        property color magenta: "#d699b6"   // everforest calls it purple
+        property color cyan: "#83c092"      // everforest calls it aqua
+        property color orange: "#e69875"
+        property color accent: green
 
         property int barHeight: 38
         property int moduleHeight: 26
@@ -2554,9 +2554,9 @@
   '';
   services.hyprpolkitagent.enable = true;
   programs.hyprtoolkit.settings = {
-    background = "0xFF282828"; # your Theme.bg (gruvbox dark0)
-    base = "0xFF3C3836"; # your Theme.pill (dark1)
-    accent = "0xFFFE8019"; # your Theme.accent (orange)
+    background = "0xFF2D353B"; # your Theme.bg (everforest bg0)
+    base = "0xFF3D484D"; # your Theme.pill (bg2)
+    accent = "0xFFA7C080"; # your Theme.accent (green)
     font_family = "SFProText Nerd Font";
     font_family_monospace = "SFMono Nerd Font";
   };
@@ -2653,8 +2653,8 @@
               gaps_in = 4,
               gaps_out = 8,
               border_size = 0,
-              ["col.active_border"]   = "rgba(fe8019ee)", -- gruvbox orange
-              ["col.inactive_border"] = "rgba(665c5499)", -- gruvbox dark3
+              ["col.active_border"]   = "rgba(a7c080ee)", -- everforest green
+              ["col.inactive_border"] = "rgba(56635f99)", -- everforest bg5
               resize_on_border = true,
               extend_border_grab_area = 20,  -- pixels of grab area beyond the visible border
               hover_icon_on_border = true,
@@ -2744,8 +2744,8 @@
           plugin = {
               hyprbars = {
                   bar_height = 20,
-                  bar_color = "rgb(282828)",
-                  ["col.text"] = "rgb(ebdbb2)",
+                  bar_color = "rgb(2d353b)",
+                  ["col.text"] = "rgb(d3c6aa)",
                   bar_text_size = 14,
                   bar_text_font = "SF Pro Text",
                   bar_button_padding = 10,
@@ -2758,22 +2758,22 @@
 
       -- buttons are added separately
       hl.plugin.hyprbars.add_button({
-          bg_color = "rgb(fb4934)",
-          fg_color = "rgb(282828)",
+          bg_color = "rgb(e67e80)",
+          fg_color = "rgb(2d353b)",
           size = 15,
           icon = "󱎘",
           action = "hyprctl dispatch 'hl.dsp.window.close()'",
       })
       hl.plugin.hyprbars.add_button({
-          bg_color = "rgb(b8bb26)",
-          fg_color = "rgb(282828)",
+          bg_color = "rgb(a7c080)",
+          fg_color = "rgb(2d353b)",
           size = 15,
           icon = "",
           action = "hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"toggle\" })'",
       })
       hl.plugin.hyprbars.add_button({
-          bg_color = "rgb(d3869b)",
-          fg_color = "rgb(282828)",
+          bg_color = "rgb(d699b6)",
+          fg_color = "rgb(2d353b)",
           size = 15,
           icon = "",
           action = "hyprctl dispatch 'hl.dsp.window.float({action=\"toggle\"})'",
@@ -2797,14 +2797,14 @@
         inherit (config.lib.formats.rasi) mkLiteral;
       in
       {
-        # Gruvbox dark
+        # Everforest dark (medium)
         "*" = {
-          background = mkLiteral "#282828";
-          background-alt = mkLiteral "#3c3836";
-          foreground = mkLiteral "#ebdbb2";
-          selected = mkLiteral "#fe8019";
-          active = mkLiteral "#b8bb26";
-          urgent = mkLiteral "#fb4934";
+          background = mkLiteral "#2d353b";
+          background-alt = mkLiteral "#3d484d";
+          foreground = mkLiteral "#d3c6aa";
+          selected = mkLiteral "#a7c080";
+          active = mkLiteral "#83c092";
+          urgent = mkLiteral "#e67e80";
           font = "SFMono Nerd Font 11";
         };
         "window" = {
@@ -3113,46 +3113,45 @@
       sync_to_monitor = "no";
       confirm_os_window_close = 0;
       cursor_trail_start_threshold = 0;
-      # Gruvbox dark
-      foreground = "#ebdbb2";
-      background = "#282828";
-      selection_foreground = "#ebdbb2";
-      selection_background = "#504945";
-      cursor = "#ebdbb2";
-      cursor_text_color = "#282828";
-      url_color = "#83a598";
-      active_border_color = "#fe8019";
-      inactive_border_color = "#665c54";
-      bell_border_color = "#fabd2f";
+      # Everforest dark (medium), same values as kitty-themes' everforest_dark_medium
+      foreground = "#d3c6aa";
+      background = "#2d353b";
+      selection_foreground = "#9da9a0";
+      selection_background = "#505a60";
+      cursor = "#d3c6aa";
+      cursor_text_color = "#343f44";
+      url_color = "#7fbbb3";
+      active_border_color = "#a7c080";
+      inactive_border_color = "#56635f";
+      bell_border_color = "#e69875";
       wayland_titlebar_color = "system";
-      active_tab_foreground = "#282828";
-      active_tab_background = "#fe8019";
-      inactive_tab_foreground = "#a89984";
-      inactive_tab_background = "#3c3836";
-      tab_bar_background = "#1d2021";
-      mark1_foreground = "#282828";
-      mark1_background = "#83a598";
-      mark2_foreground = "#282828";
-      mark2_background = "#d3869b";
-      mark3_foreground = "#282828";
-      mark3_background = "#8ec07c";
-      # normal / bright pairs
-      color0 = "#282828";
-      color8 = "#928374";
-      color1 = "#cc241d";
-      color9 = "#fb4934";
-      color2 = "#98971a";
-      color10 = "#b8bb26";
-      color3 = "#d79921";
-      color11 = "#fabd2f";
-      color4 = "#458588";
-      color12 = "#83a598";
-      color5 = "#b16286";
-      color13 = "#d3869b";
-      color6 = "#689d6a";
-      color14 = "#8ec07c";
-      color7 = "#a89984";
-      color15 = "#ebdbb2";
+      active_tab_foreground = "#d3c6aa";
+      active_tab_background = "#2d353b";
+      inactive_tab_foreground = "#9da9a0";
+      inactive_tab_background = "#3d484d";
+      tab_bar_background = "#343f44";
+      mark1_foreground = "#2d353b";
+      mark1_background = "#7fbbb3";
+      mark2_foreground = "#2d353b";
+      mark2_background = "#d3c6aa";
+      mark3_foreground = "#2d353b";
+      mark3_background = "#d699b6";
+      color0 = "#343f44";
+      color8 = "#868d80";
+      color1 = "#e67e80";
+      color9 = "#e67e80";
+      color2 = "#a7c080";
+      color10 = "#a7c080";
+      color3 = "#dbbc7f";
+      color11 = "#dbbc7f";
+      color4 = "#7fbbb3";
+      color12 = "#7fbbb3";
+      color5 = "#d699b6";
+      color13 = "#d699b6";
+      color6 = "#83c092";
+      color14 = "#83c092";
+      color7 = "#859289";
+      color15 = "#9da9a0";
     };
   };
   # kitty rewrites kitty.conf itself (e.g. the font/theme kittens), turning HM's
@@ -3162,17 +3161,13 @@
   gtk = {
     enable = true;
     theme = {
-      # folder name = Gruvbox + accent + color + contrast (from the theme's install.sh)
-      name = "Gruvbox-Orange-Dark-Medium";
-      package = pkgs.gruvbox-gtk-theme.override {
-        colorVariants = [ "dark" ];
-        themeVariants = [ "orange" ]; # accent, to match Theme.qml
-        tweakVariants = [ "medium" ]; # medium contrast (#282828)
-      };
+      # the package builds every accent; Green matches Theme.qml's accent
+      name = "Everforest-Green-Dark";
+      package = pkgs.everforest-gtk-theme;
     };
     iconTheme = {
-      name = "Gruvbox-Plus-Dark";
-      package = pkgs.gruvbox-plus-icons;
+      name = "Everforest-Dark"; # icons ship in the same package
+      package = pkgs.everforest-gtk-theme;
     };
     gtk4.theme = config.gtk.theme;
 
@@ -3194,13 +3189,13 @@
     enable = true;
     gtk.enable = true;
     x11.enable = true;
-    name = "Capitaine Cursors (Gruvbox)";
-    package = pkgs.capitaine-cursors-themed;
+    name = "everforest-cursors";
+    package = pkgs.everforest-cursors;
   };
 
   gtk.cursorTheme = {
-    name = "Capitaine Cursors (Gruvbox)";
-    package = pkgs.capitaine-cursors-themed;
+    name = "everforest-cursors";
+    package = pkgs.everforest-cursors;
   };
 
   programs.bash = {
@@ -3229,7 +3224,7 @@
   programs.hyprlock = {
     enable = true;
     package = null; # hyprlock is installed system-wide in configuration.nix (needed for PAM)
-    # Gruvbox colors, written as rgb(hex)
+    # Everforest colors, written as rgb(hex)
     settings = {
       general = {
         hide_cursor = false; # cursor is visible in the reference
@@ -3248,7 +3243,7 @@
         {
           monitor = "";
           text = "$TIME";
-          color = "rgb(ebdbb2)"; # light1
+          color = "rgb(d3c6aa)"; # fg
           font_size = 64;
           font_family = "SFMono Nerd Font";
           position = "0, 74";
@@ -3267,15 +3262,15 @@
           valign = "center";
           rounding = -1; # full pill
           outline_thickness = 3;
-          outer_color = "rgb(fe8019)"; # orange
-          inner_color = "rgb(3c3836)"; # dark1
-          font_color = "rgb(ebdbb2)"; # light1
+          outer_color = "rgb(a7c080)"; # green
+          inner_color = "rgb(343f44)"; # bg1
+          font_color = "rgb(d3c6aa)"; # fg
           font_family = "SFMono Nerd Font";
           placeholder_text = "<i>Input Password...</i>";
           fade_on_empty = false;
           dots_center = true;
-          check_color = "rgb(fabd2f)"; # yellow
-          fail_color = "rgb(fb4934)"; # red
+          check_color = "rgb(dbbc7f)"; # yellow
+          fail_color = "rgb(e67e80)"; # red
           dots_size = 0.33; # 0.2–0.8, fraction of the field height
           dots_spacing = 0.15; # 0.0–1.0, gap between dots, relative to dot size
         }
