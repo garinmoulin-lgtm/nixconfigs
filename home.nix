@@ -138,6 +138,7 @@
     import Quickshell.Services.Notifications
     import Quickshell.Io
     import Quickshell.Widgets
+    import Quickshell.Bluetooth
 
     ShellRoot {
         // ── Music player ──
@@ -232,6 +233,13 @@
             }
             function remove(index) {
                 send(["playlist-remove", index]);
+            }
+            // Move a queue entry so it ends up at position `to`. mpv's playlist-move puts the
+            // entry *in front of* its second index, so moving down needs one more.
+            function move(from, to) {
+                if (from === to)
+                    return;
+                send(["playlist-move", from, to > from ? to + 1 : to]);
             }
             // empties the queue except the song that's playing
             function clearQueue() {
@@ -364,11 +372,6 @@
                 SystemClock {
                     id: clock
                     precision: SystemClock.Minutes
-                }
-                Poll {
-                    id: volume
-                    cmd: "wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100+0.5) \"%\"}'"
-                    every: 1000
                 }
                 /*
                 Poll {
@@ -954,6 +957,17 @@
                                     spacing: 2
                                     model: music.queue
                                     boundsBehavior: Flickable.StopAtBounds
+                                    // no scrolling the list while a row is being dragged
+                                    interactive: dragFrom < 0
+
+                                    // ── drag to reorder ──
+                                    // Kept here, not in the rows, so every row can see the drag.
+                                    property int dragFrom: -1      // row being dragged, -1 = none
+                                    property int dragTo: -1        // where it would land if dropped now
+                                    property real dragOffset: 0    // how far it has moved from its spot
+                                    property bool settling: false  // just dropped: skip the slide-back animation
+                                    readonly property real rowStep: 46 + spacing   // row height + gap
+
                                     ScrollBar.vertical: ScrollBar {
                                         id: queueBar
                                         contentItem: Rectangle {
@@ -977,13 +991,41 @@
                                         // the library's info for this file (title, cover...), if it's in the library
                                         readonly property var info: music.byPath[modelData.filename] ?? null
 
+                                        // Where this row should sit while something is dragged:
+                                        // the dragged row follows the mouse, the rows it passes
+                                        // step aside by one row to make room for it.
+                                        readonly property bool dragged: queueList.dragFrom === index
+                                        readonly property real shift: {
+                                            const f = queueList.dragFrom, t = queueList.dragTo;
+                                            if (f < 0 || dragged)
+                                                return 0;
+                                            if (f < t && index > f && index <= t)
+                                                return -queueList.rowStep;   // dragged one is moving down past me
+                                            if (f > t && index >= t && index < f)
+                                                return queueList.rowStep;    // dragged one is moving up past me
+                                            return 0;
+                                        }
+
                                         width: ListView.view.width - 8
                                         height: 46
                                         radius: Theme.radius
-                                        color: entryMouse.containsMouse ? Theme.pill : "transparent"
+                                        color: entryMouse.containsMouse || dragged ? Theme.pill : "transparent"
                                         border.width: 1
                                         border.color: entry.modelData.current ? Theme.accent : "transparent"
-                                        scale: entryMouse.pressed ? 0.95 : 1
+                                        scale: dragged ? 1.03 : entryMouse.pressed ? 0.95 : 1
+                                        z: dragged ? 10 : 0                   // drawn above the others
+                                        opacity: dragged ? 0.9 : 1
+
+                                        transform: Translate {
+                                            y: entry.dragged ? queueList.dragOffset : entry.shift
+                                            Behavior on y {
+                                                enabled: !entry.dragged && !queueList.settling
+                                                NumberAnimation {
+                                                    duration: 150
+                                                    easing.type: Easing.OutCubic
+                                                }
+                                            }
+                                        }
 
                                         Behavior on color {
                                             ColorAnimation {
@@ -1005,9 +1047,62 @@
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: music.jumpTo(entry.index)
 
+                                            // grab here and drag up or down to move the song
+                                            Text {
+                                                id: dragHandle
+                                                x: 4
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: "drag_indicator"
+                                                color: Theme.text
+                                                opacity: entryMouse.containsMouse || entry.dragged ? 0.8 : 0.3
+                                                font.family: Theme.iconFont
+                                                font.pixelSize: Theme.iconSize
+                                                font.variableAxes: Theme.iconAxes
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    anchors.margins: -6               // a bit easier to grab
+                                                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                                                    preventStealing: true             // keep the list from scrolling instead
+                                                    property real startY: 0
+
+                                                    onPressed: mouse => {
+                                                        startY = mapToItem(queueList, 0, mouse.y).y;
+                                                        queueList.settling = false;
+                                                        queueList.dragOffset = 0;
+                                                        queueList.dragTo = entry.index;
+                                                        queueList.dragFrom = entry.index;
+                                                    }
+                                                    onPositionChanged: mouse => {
+                                                        if (queueList.dragFrom < 0)
+                                                            return;
+                                                        queueList.dragOffset = mapToItem(queueList, 0, mouse.y).y - startY;
+                                                        // the slot under the middle of the dragged row
+                                                        const slot = Math.round(entry.index + queueList.dragOffset / queueList.rowStep);
+                                                        queueList.dragTo = Math.max(0, Math.min(queueList.count - 1, slot));
+                                                    }
+                                                    onReleased: {
+                                                        const from = queueList.dragFrom, to = queueList.dragTo;
+                                                        // snap everything back without animating; mpv's new
+                                                        // order arrives a moment later and redraws the list
+                                                        queueList.settling = true;
+                                                        queueList.dragFrom = -1;
+                                                        queueList.dragTo = -1;
+                                                        queueList.dragOffset = 0;
+                                                        music.move(from, to);
+                                                    }
+                                                    onCanceled: {
+                                                        queueList.settling = true;
+                                                        queueList.dragFrom = -1;
+                                                        queueList.dragTo = -1;
+                                                        queueList.dragOffset = 0;
+                                                    }
+                                                }
+                                            }
+
                                             ClippingRectangle {
                                                 id: entryCover
-                                                x: 5
+                                                x: 28
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 width: 36
                                                 height: 36
@@ -1139,6 +1234,391 @@
                     anchors.rightMargin: Theme.spacing
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Theme.spacing
+
+                    // ── Bluetooth ──
+                    // In the bar: just the icon, no pill. Click it for the device list.
+                    Widget {
+                        anchors.verticalCenter: parent.verticalCenter
+                        icon: !btList.powered ? "bluetooth_disabled" : btList.anyConnected ? "bluetooth_connected" : "bluetooth"
+
+                        Column {
+                            id: btList
+                            spacing: 4
+
+                            readonly property var adapter: Bluetooth.defaultAdapter
+                            readonly property bool powered: !!adapter && adapter.enabled
+                            readonly property bool anyConnected: Bluetooth.devices.values.some(d => d.connected)
+
+                            // Devices that have a name (or that you've paired): connected first, then
+                            // paired, then A to Z. Nameless ones are usually random nearby gadgets.
+                            readonly property var devices: Bluetooth.devices.values.filter(d => d.paired || d.deviceName !== "").sort((a, b) => (b.connected - a.connected) || (b.paired - a.paired) || a.name.localeCompare(b.name))
+
+                            // Like the network list, the open drop-down is remembered here, not in the
+                            // rows: the list re-sorts when a device connects, and rows can be rebuilt.
+                            property var active: null       // the device whose drop-down is open
+                            property var pairingDevice: null // a new device we're pairing, to connect once paired
+                            property var failedDevice: null  // shows "Pairing failed" for a few seconds
+
+                            function toggle(device) {
+                                active = active === device ? null : device;
+                            }
+                            // Status shown next to each device.
+                            function stateText(device) {
+                                if (device.state === BluetoothDeviceState.Connected)
+                                    return "Connected";
+                                if (device.state === BluetoothDeviceState.Connecting)
+                                    return "Connecting...";
+                                if (device.state === BluetoothDeviceState.Disconnecting)
+                                    return "Disconnecting...";
+                                if (device.pairing)
+                                    return "Pairing...";
+                                if (device === failedDevice)
+                                    return "Pairing failed";
+                                return device.paired ? "Not connected" : "New";
+                            }
+                            function busy(device) {
+                                return device.pairing || device.state === BluetoothDeviceState.Connecting || device.state === BluetoothDeviceState.Disconnecting;
+                            }
+                            function connectOrDisconnect(device) {
+                                if (busy(device))
+                                    return;
+                                if (device.connected) {
+                                    device.disconnect();
+                                } else if (!device.paired) {
+                                    // never paired: pair first; the Connections below connects afterwards
+                                    device.trusted = true;      // lets it reconnect by itself next time
+                                    failedDevice = null;
+                                    pairingDevice = device;
+                                    device.pair();
+                                } else {
+                                    device.connect();
+                                }
+                            }
+                            // Material Symbols icon for the kind of device (BlueZ gives freedesktop icon names).
+                            function glyph(device) {
+                                const i = device.icon;
+                                if (i.startsWith("audio-head"))
+                                    return "headphones";
+                                if (i.startsWith("audio"))
+                                    return "speaker";
+                                if (i === "input-mouse")
+                                    return "mouse";
+                                if (i === "input-keyboard")
+                                    return "keyboard";
+                                if (i === "input-gaming")
+                                    return "sports_esports";
+                                if (i === "phone")
+                                    return "smartphone";
+                                if (i === "computer")
+                                    return "computer";
+                                return "bluetooth";
+                            }
+
+                            Connections {
+                                target: btList.pairingDevice
+                                function onPairedChanged() {
+                                    const device = btList.pairingDevice;
+                                    btList.pairingDevice = null;
+                                    pairCheck.stop();
+                                    if (device.paired && !device.connected)
+                                        device.connect();
+                                }
+                                // The pairing attempt ended. If it isn't paired a moment later
+                                // (BlueZ can report "paired" just after), it failed.
+                                function onPairingChanged() {
+                                    if (!btList.pairingDevice.pairing && !btList.pairingDevice.paired)
+                                        pairCheck.restart();
+                                }
+                            }
+                            Timer {
+                                id: pairCheck
+                                interval: 1500
+                                onTriggered: {
+                                    const device = btList.pairingDevice;
+                                    if (!device || device.paired)
+                                        return;
+                                    btList.pairingDevice = null;
+                                    btList.failedDevice = device;
+                                    failedReset.restart();
+                                }
+                            }
+                            // "Pairing failed" goes back to "New" after 4 s
+                            Timer {
+                                id: failedReset
+                                interval: 4000
+                                onTriggered: btList.failedDevice = null
+                            }
+
+                            // Look for nearby devices only while this popup is open (and Bluetooth is on).
+                            Binding {
+                                when: btList.powered
+                                target: btList.adapter
+                                property: "discovering"
+                                value: !!QsWindow.window && QsWindow.window.visible
+                            }
+
+                            // header: title on the left, on/off switch on the right
+                            Item {
+                                width: 280
+                                height: 26
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Bluetooth"
+                                    color: Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 1.2
+                                    font.weight: 700
+                                    font.letterSpacing: Theme.letterSpacing
+                                }
+                                Rectangle {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: !!btList.adapter
+                                    width: btPowerLabel.implicitWidth + 24
+                                    height: 24
+                                    radius: height / 2
+                                    color: btList.powered ? Theme.accent : btPowerMouse.containsMouse ? Theme.pill : "transparent"
+                                    border.width: 1
+                                    border.color: btList.powered ? Theme.accent : Theme.pill
+                                    scale: btPowerMouse.pressed ? 0.85 : 1
+
+                                    Behavior on color {
+                                        ColorAnimation {
+                                            duration: 120
+                                        }
+                                    }
+                                    Behavior on scale {
+                                        NumberAnimation {
+                                            duration: 120
+                                            easing.type: Easing.OutCubic
+                                        }
+                                    }
+
+                                    Text {
+                                        id: btPowerLabel
+                                        anchors.centerIn: parent
+                                        text: btList.powered ? "On" : "Off"
+                                        color: btList.powered ? Theme.bg : Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.9
+                                        font.weight: 700
+                                    }
+                                    MouseArea {
+                                        id: btPowerMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: btList.adapter.enabled = !btList.adapter.enabled
+                                    }
+                                }
+                            }
+
+                            // what to show when there's no list
+                            Text {
+                                width: 280
+                                wrapMode: Text.Wrap
+                                visible: text !== ""
+                                text: {
+                                    if (!btList.adapter)
+                                        return "No Bluetooth adapter found.";
+                                    if (!btList.powered)
+                                        return "Bluetooth is off.";
+                                    if (btList.devices.length === 0)
+                                        return btList.adapter.discovering ? "Searching for devices..." : "No devices found.";
+                                    return "";
+                                }
+                                color: Theme.text
+                                opacity: 0.6
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize
+                            }
+
+                            // "Devices", with "Searching..." on the right while it scans
+                            Item {
+                                width: 280
+                                height: devicesLabel.implicitHeight
+                                visible: btList.powered && btList.devices.length > 0
+
+                                Text {
+                                    id: devicesLabel
+                                    text: "Devices"
+                                    color: Theme.text
+                                    opacity: 0.6
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                    font.weight: 600
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    visible: !!btList.adapter && btList.adapter.discovering
+                                    text: "Searching..."
+                                    color: Theme.accent
+                                    opacity: 0.8
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                }
+                            }
+
+                            Repeater {
+                                // ScriptModel only builds rows for new devices instead of rebuilding them all.
+                                model: ScriptModel {
+                                    values: btList.powered ? btList.devices : []
+                                }
+
+                                Rectangle {
+                                    id: btRow
+                                    required property var modelData
+                                    readonly property var device: modelData
+                                    readonly property bool expanded: btList.active === device
+
+                                    width: 280
+                                    height: btHeader.height + btDrop.height
+                                    radius: Theme.radius
+                                    color: btHeaderMouse.containsMouse || expanded ? Theme.pill : "transparent"
+                                    clip: true
+
+                                    Behavior on color {
+                                        ColorAnimation {
+                                            duration: 120
+                                        }
+                                    }
+
+                                    // ── the row itself: icon, name, status ──
+                                    Item {
+                                        id: btHeader
+                                        width: parent.width
+                                        height: 30
+                                        scale: btHeaderMouse.pressed ? 0.85 : 1
+
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 120
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Text {
+                                            id: btGlyph
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: 10
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: btList.glyph(btRow.device)
+                                            color: btRow.device.connected ? Theme.accent : Theme.text
+                                            font.family: Theme.iconFont
+                                            font.pixelSize: Theme.iconSize
+                                            font.variableAxes: Theme.iconAxes
+                                        }
+                                        Text {
+                                            anchors {
+                                                left: btGlyph.right
+                                                right: btStatus.left
+                                                leftMargin: 8
+                                                rightMargin: 8
+                                                verticalCenter: parent.verticalCenter
+                                            }
+                                            text: btRow.device.name
+                                            elide: Text.ElideRight
+                                            color: btRow.device.connected ? Theme.accent : Theme.text
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize
+                                            font.weight: btRow.device.connected ? 700 : 500
+                                            font.letterSpacing: Theme.letterSpacing
+                                        }
+                                        // per-device status (and battery, when the device reports it)
+                                        Text {
+                                            id: btStatus
+                                            anchors {
+                                                right: parent.right
+                                                rightMargin: 10
+                                                verticalCenter: parent.verticalCenter
+                                            }
+                                            text: btList.stateText(btRow.device) + (btRow.device.batteryAvailable ? "  ·  " + Math.round(btRow.device.battery * 100) + "%" : "")
+                                            color: btRow.device.connected ? Theme.green : btRow.device === btList.failedDevice ? Theme.red : Theme.text
+                                            opacity: btRow.device.connected || btRow.device === btList.failedDevice ? 1 : 0.6
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.85
+                                        }
+                                        MouseArea {
+                                            id: btHeaderMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: btList.toggle(btRow.device)
+                                        }
+                                    }
+
+                                    // ── the drop-down: Connect / Disconnect, glides open over 500 ms ──
+                                    Item {
+                                        id: btDrop
+                                        y: btHeader.height
+                                        width: parent.width
+                                        height: btRow.expanded ? btDropContent.implicitHeight + 10 : 0
+                                        clip: true
+
+                                        Behavior on height {
+                                            NumberAnimation {
+                                                duration: 500
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Column {
+                                            id: btDropContent
+                                            x: 10
+                                            width: parent.width - 20
+                                            spacing: 6
+
+                                            Rectangle {
+                                                id: btAction
+                                                // red "Disconnect" when connected, green "Connect" otherwise
+                                                readonly property bool disconnecting: btRow.device.connected
+                                                readonly property color tint: disconnecting ? Theme.red : Theme.green
+                                                readonly property bool busy: btList.busy(btRow.device)
+
+                                                width: parent.width
+                                                height: 26
+                                                radius: height / 2
+                                                color: btActionMouse.containsMouse && !busy ? tint : Theme.bg
+                                                opacity: busy ? 0.5 : 1
+                                                scale: btActionMouse.pressed && !busy ? 0.85 : 1
+
+                                                Behavior on color {
+                                                    ColorAnimation {
+                                                        duration: 120
+                                                    }
+                                                }
+                                                Behavior on scale {
+                                                    NumberAnimation {
+                                                        duration: 120
+                                                        easing.type: Easing.OutCubic
+                                                    }
+                                                }
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    // while it's working, show what it's doing instead
+                                                    text: btAction.busy ? btList.stateText(btRow.device) : btAction.disconnecting ? "Disconnect" : "Connect"
+                                                    color: btActionMouse.containsMouse && !btAction.busy ? Theme.bg : btAction.tint
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize
+                                                    font.weight: 600
+                                                }
+                                                MouseArea {
+                                                    id: btActionMouse
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: btAction.busy ? Qt.ArrowCursor : Qt.PointingHandCursor
+                                                    onClicked: btList.connectOrDisconnect(btRow.device)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     // ── Notification center ──
                     Widget {
@@ -1329,9 +1809,22 @@
                     Widget {
                         anchors.verticalCenter: parent.verticalCenter
                         button: Pill {
-                            icon: "volume_up"
-                            iconColor: Theme.cyan
-                            text: volume.text
+                            // Volume and mute straight from PipeWire. These are bindings, so the
+                            // pill redraws the moment PipeWire reports a change (keyboard keys,
+                            // the slider, pavucontrol...) instead of waiting for a timer.
+                            readonly property var sink: Pipewire.defaultAudioSink
+                            readonly property bool ready: !!sink && !!sink.audio
+                            readonly property bool muted: ready && sink.audio.muted
+
+                            icon: muted ? "volume_off" : "volume_up"
+                            iconColor: muted ? Theme.red : Theme.cyan
+                            text: ready ? Math.round(sink.audio.volume * 100) + "%" : "--"
+
+                            // PipeWire only sends live volume updates for nodes something is
+                            // tracking; this keeps the current output device tracked.
+                            PwObjectTracker {
+                                objects: [Pipewire.defaultAudioSink].filter(n => n)
+                            }
                         }
                         Row {
                             spacing: 14
@@ -1572,12 +2065,13 @@
                         readonly property bool present: !!device && device.ready && device.isLaptopBattery
                         readonly property int percent: present ? Math.round(device.percentage * 100) : 0
                         readonly property bool pluggedIn: !UPower.onBattery
-                        // Material Symbols has battery_0_bar ... battery_6_bar, then battery_full
+                        // Plugged in: a lightning bolt, whatever the level.
+                        // On battery: Material Symbols' battery_0_bar ... battery_6_bar, then battery_full.
                         readonly property string glyph: {
                             if (!present)
                                 return "battery_unknown";
-                            if (pluggedIn && percent < 100)
-                                return "battery_charging_full";
+                            if (pluggedIn)
+                                return "bolt";
                             if (percent >= 95)
                                 return "battery_full";
                             return "battery_" + Math.min(6, Math.floor(percent / 100 * 7)) + "_bar";
@@ -1585,7 +2079,8 @@
 
                         button: Pill {
                             icon: battery.glyph
-                            iconColor: battery.present && battery.percent <= 15 && !battery.pluggedIn ? Theme.red : Theme.yellow
+                            // green bolt while charging, red when low, yellow otherwise
+                            iconColor: battery.pluggedIn ? Theme.green : battery.present && battery.percent <= 15 ? Theme.red : Theme.yellow
                             text: battery.present ? battery.percent + "%" : "--"
                         }
 
@@ -1618,7 +2113,7 @@
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 topPadding: 6
                                 text: battery.glyph
-                                color: battery.present && battery.percent <= 15 && !battery.pluggedIn ? Theme.red : Theme.text
+                                color: battery.pluggedIn ? Theme.green : battery.present && battery.percent <= 15 ? Theme.red : Theme.text
                                 font.family: Theme.iconFont
                                 font.pixelSize: Theme.iconSize * 3
                                 font.variableAxes: Theme.iconAxes
@@ -2545,7 +3040,7 @@
                                     {
                                         icon: "logout",
                                         name: "Log out",
-                                        cmd: ["pkill", "Hyprland"]
+                                        cmd: ["uwsm", "stop"]
                                     }
                                 ]
 
@@ -3111,7 +3606,7 @@
     // Components, by key:  cpu  gpu  mem  vram  swap  disk
     //   SysMon.percent("cpu")  → 0..100
     //   SysMon.detail("mem")   → "12.3 / 30.5 GiB"
-    //   SysMon.has("gpu")      → false when there's nothing to show (no NVIDIA GPU, no swap...)
+    //   SysMon.has("gpu")      → false when there's nothing to show (no GPU found, no swap...)
     //   SysMon.history.cpu     → the last `historyLength` percentages, oldest first
     Singleton {
         id: root
@@ -3125,7 +3620,8 @@
         property real memTotal: 0
         property real swapUsed: 0     // KiB (your zram)
         property real swapTotal: 0
-        property real gpu: -1         // % busy; -1 = nvidia-smi isn't running / no NVIDIA GPU
+        property real gpu: -1         // % busy; -1 = no GPU found
+        property string gpuKind: ""   // "nvidia", "amd", "intel" or "" (found automatically)
         property real gpuTemp: -1     // °C
         property real vramUsed: 0     // MiB
         property real vramTotal: 0
@@ -3173,8 +3669,9 @@
         function has(key) {
             switch (key) {
             case "gpu":
-            case "vram":
                 return gpu >= 0;
+            case "vram":
+                return gpu >= 0 && vramTotal > 0;   // Intel graphics have no VRAM of their own
             case "swap":
                 return swapTotal > 0;
             case "disk":
@@ -3193,7 +3690,9 @@
             switch (key) {
             case "cpu":
             case "gpu":
-                return temp(key) >= 0 ? Math.round(temp(key)) + "°C" : "";
+                if (temp(key) >= 0)
+                    return Math.round(temp(key)) + "°C";
+                return key === "gpu" && gpuKind === "intel" ? "estimated" : "";
             case "mem":
                 return gib(memUsed) + " / " + gib(memTotal) + " GiB";
             case "vram":
@@ -3248,6 +3747,24 @@
             }
             disk = Math.max(0, busiest);
 
+            // GPU from sysmon.sh (AMD / Intel). NVIDIA is filled in by nvidia-smi below instead.
+            if (gpuKind !== "nvidia" && now.gpu) {
+                if ("busy" in now.gpu) {
+                    gpuKind = "amd";
+                    gpu = Math.max(0, now.gpu.busy);
+                    gpuTemp = now.gpu.temp === null ? -1 : now.gpu.temp;
+                    vramUsed = now.gpu.vram[0];
+                    vramTotal = now.gpu.vram[1];
+                } else if ("idle" in now.gpu && before.gpu && now.gpu.idle >= 0) {
+                    // Intel: busy = the part of the last second it wasn't idle
+                    gpuKind = "intel";
+                    const idle = (now.gpu.idle - before.gpu.idle) / ms * 100;
+                    gpu = Math.max(0, Math.min(100, 100 - idle));
+                    gpuTemp = -1;
+                    vramTotal = 0;
+                }
+            }
+
             push("cpu", cpu);
             push("cpuTemp", cpuTemp >= 0 ? cpuTemp : null);
             push("mem", memPercent);
@@ -3255,7 +3772,7 @@
             push("disk", disk);
             push("gpu", gpu >= 0 ? gpu : null);
             push("gpuTemp", gpuTemp >= 0 ? gpuTemp : null);
-            push("vram", gpu >= 0 ? vramPercent : null);
+            push("vram", has("vram") ? vramPercent : null);
             sampled();
         }
 
@@ -3269,16 +3786,17 @@
 
         // NVIDIA: nvidia-smi can repeat its own query (-l 1 = every second), so it's
         // started once and left running. One line per GPU:  "23, 48, 2100, 12282"
-        // (busy %, °C, MiB used, MiB total). If there's no nvidia-smi it just doesn't
-        // start, gpu stays -1, and the GPU rows stay hidden.
+        // (busy %, °C, MiB used, MiB total). Only run when nvidia-smi is installed, so
+        // machines without it (AMD / Intel, read by sysmon.sh) get no warning.
         Process {
-            command: ["nvidia-smi", "--query-gpu=utilization.gpu,temperature.gpu,memory.used,memory.total", "--format=csv,noheader,nounits", "-l", "1"]
+            command: ["sh", "-c", "command -v nvidia-smi >/dev/null && exec nvidia-smi --query-gpu=utilization.gpu,temperature.gpu,memory.used,memory.total --format=csv,noheader,nounits -l 1"]
             running: true
             stdout: SplitParser {
                 onRead: line => {
                     const f = line.split(",").map(Number);
                     if (f.length < 4 || f.some(isNaN))
                         return;     // "[N/A]" or an error message
+                    root.gpuKind = "nvidia";
                     root.gpu = f[0];
                     root.gpuTemp = f[1];
                     root.vramUsed = f[2];
@@ -3294,11 +3812,16 @@
     #!/bin/sh
     # Prints one JSON line per second for the bar's system monitor (SysMon.qml reads it):
     #
-    #   {"cpu":[busy,total],"mem":[total,available],"swap":[total,free],"temp":54.1,"disks":{"nvme0n1":1234}}
+    #   {"cpu":[busy,total],"mem":[total,available],"swap":[total,free],"temp":54.1,"disks":{"nvme0n1":1234},"gpu":...}
     #
     # cpu and disks are running totals since boot (jiffies / ms spent busy); SysMon.qml
     # turns them into percentages by comparing each line with the one before.
     # mem and swap are in KiB. temp is °C, or null if no sensor was found.
+    # gpu is one of:
+    #   {"busy":37,"temp":51.0,"vram":[used,total]}   AMD: busy %, °C, VRAM in MiB
+    #   {"idle":123456}                               Intel: ms spent idle since boot (a running total)
+    #   null                                          no GPU found here (or NVIDIA, which SysMon.qml
+    #                                                 reads with nvidia-smi instead)
 
     # ── Find the CPU package temperature sensor, once ──
     # AMD (k10temp): Tctl is always temp1; use Tdie instead if the chip reports one.
@@ -3322,9 +3845,51 @@
         [ -n "$sensor" ] && break
     done
 
+    # ── Find a GPU that can be read from /sys, once ──
+    # AMD (amdgpu driver): busy %, VRAM and temperature are plain files.
+    # Intel (i915 or xe driver): there's no busy % readable without root, but the time
+    #   the GPU spends idle is, so busy = whatever isn't idle. Intel graphics share system
+    #   RAM, so there's no VRAM to show, and no separate temperature sensor.
+    # Skipped when nvidia-smi exists: SysMon.qml asks that instead.
+    gpu_kind=""
+    gpu_dir=""
+    gpu_idle=""
+    gpu_temp=""
+    if ! command -v nvidia-smi >/dev/null 2>&1; then
+        for c in /sys/class/drm/card[0-9]*; do
+            case $(basename "$c") in *-*) continue ;; esac   # skip outputs like card0-eDP-1
+            drv=$(basename "$(readlink -f "$c/device/driver")")
+            case $drv in
+                amdgpu)
+                    gpu_kind=amd
+                    gpu_dir=$c/device
+                    for t in "$c"/device/hwmon/hwmon*/temp1_input; do
+                        [ -r "$t" ] && gpu_temp=$t
+                    done
+                    break                           # an AMD card wins over Intel graphics
+                    ;;
+                i915)
+                    for f in "$c/gt/gt0/rc6_residency_ms" "$c/power/rc6_residency_ms"; do
+                        if [ -z "$gpu_kind" ] && [ -r "$f" ]; then
+                            gpu_kind=intel
+                            gpu_idle=$f
+                        fi
+                    done
+                    ;;
+                xe)
+                    f=$c/device/tile0/gt0/gtidle/idle_residency_ms
+                    if [ -z "$gpu_kind" ] && [ -r "$f" ]; then
+                        gpu_kind=intel
+                        gpu_idle=$f
+                    fi
+                    ;;
+            esac
+        done
+    fi
+
     # ── Once a second: read the counters, print them as one line ──
     while :; do
-        awk -v sensor="$sensor" '
+        awk -v sensor="$sensor" -v gk="$gpu_kind" -v gdir="$gpu_dir" -v gidle="$gpu_idle" -v gtemp="$gpu_temp" '
             # first line of /proc/stat: all cores together
             # cpu  user nice system idle iowait irq softirq steal
             FILENAME == "/proc/stat" && $1 == "cpu" {
@@ -3337,16 +3902,110 @@
                 disks = disks sep "\"" $3 "\":" sprintf("%.0f", $13)
                 sep = ","
             }
+            # reads the first line of a file as a number; -1 if that fails
+            function num(f,   v) {
+                if (f != "" && (getline v < f) > 0) {
+                    close(f)
+                    return v + 0
+                }
+                return -1
+            }
             END {
                 temp = "null"
                 if (sensor != "" && (getline t < sensor) > 0) temp = sprintf("%.1f", t / 1000)
-                printf "{\"cpu\":[%.0f,%.0f],\"mem\":[%.0f,%.0f],\"swap\":[%.0f,%.0f],\"temp\":%s,\"disks\":{%s}}\n",
-                    busy, total, mem["MemTotal:"], mem["MemAvailable:"], mem["SwapTotal:"], mem["SwapFree:"], temp, disks
+                gpu = "null"
+                if (gk == "amd") {
+                    gt = num(gtemp)
+                    gpu = sprintf("{\"busy\":%.0f,\"temp\":%s,\"vram\":[%.0f,%.0f]}",
+                        num(gdir "/gpu_busy_percent"), gt < 0 ? "null" : sprintf("%.1f", gt / 1000),
+                        num(gdir "/mem_info_vram_used") / 1048576, num(gdir "/mem_info_vram_total") / 1048576)
+                } else if (gk == "intel") {
+                    gpu = sprintf("{\"idle\":%.0f}", num(gidle))
+                }
+                printf "{\"cpu\":[%.0f,%.0f],\"mem\":[%.0f,%.0f],\"swap\":[%.0f,%.0f],\"temp\":%s,\"disks\":{%s},\"gpu\":%s}\n",
+                    busy, total, mem["MemTotal:"], mem["MemAvailable:"], mem["SwapTotal:"], mem["SwapFree:"], temp, disks, gpu
             }' /proc/stat /proc/meminfo /proc/diskstats
         sleep 1
     done
   '';
   services.hyprpolkitagent.enable = true;
+
+  # ── UWSM session environment ──
+  # uwsm reads ~/.config/uwsm/env before starting Hyprland and exports it to the whole
+  # session (systemd services included). Pointing it at home-manager's session variables
+  # file, as the Hyprland wiki suggests, means everything in home.sessionVariables
+  # (these, plus the cursor and Qt ones other modules add) reaches every app.
+  home.sessionVariables = {
+    # [GPU] Same swap as the GPU section of configuration.nix: keep one block active.
+    # ── NVIDIA (active) ───────────────────────────── start of block ──
+    LIBVA_DRIVER_NAME = "nvidia";
+    __GLX_VENDOR_LIBRARY_NAME = "nvidia";
+    NVD_BACKEND = "direct"; # nvidia-vaapi-driver
+    GBM_BACKEND = "nvidia-drm";
+    __GL_GSYNC_ALLOWED = "0";
+    __GL_VRR_ALLOWED = "0";
+    WLR_NO_HARDWARE_CURSORS = "1";
+    # ── NVIDIA ────────────────────────────────────────── end of block ──
+    # ── AMD ───────────────────────────────────────── start of block ──
+    # LIBVA_DRIVER_NAME = "radeonsi";
+    # ── AMD ───────────────────────────────────────────── end of block ──
+    # ── Intel ─────────────────────────────────────── start of block ──
+    # LIBVA_DRIVER_NAME = "iHD"; # "i965" on pre-2014 Intel
+    # ── Intel ─────────────────────────────────────────── end of block ──
+    # Qt apps on Wayland (QT_QPA_PLATFORMTHEME comes from the qt module below)
+    QT_QPA_PLATFORM = "wayland";
+    # Where the time zone database is. NixOS has no /usr/share/zoneinfo, which is where Qt
+    # looks when this isn't set; without it Qt can't load your zone (time.timeZone in
+    # configuration.nix) and warns "Unable to determine system time zone".
+    TZDIR = "/etc/zoneinfo";
+  };
+  # The bar is a systemd service, so give it TZDIR directly too.
+  systemd.user.services.quickshell.Service.Environment = [ "TZDIR=/etc/zoneinfo" ];
+  xdg.configFile."uwsm/env".source = "${config.home.sessionVariablesPackage}/etc/profile.d/hm-session-vars.sh";
+
+  # ── Autostart, as services (were hl.exec_cmd lines in the Hyprland config) ──
+  # Wallpaper: home-manager's awww module runs awww-daemon with the session.
+  services.awww.enable = true;
+  systemd.user.services.awww = {
+    # The module only starts the daemon if WAYLAND_DISPLAY is already in the session's
+    # environment, and a skipped start is never retried. Hyprland exports that variable
+    # while the session is starting, so the daemon could miss it and you'd get no
+    # wallpaper. An empty value clears that check; Restart= retries it instead.
+    Unit.ConditionEnvironment = lib.mkForce "";
+    Service.RestartSec = lib.mkForce 2;
+    # Set the picture every time the daemon (re)starts. awww answers a moment after it
+    # starts, so keep trying for up to ~10 s.
+    Service.ExecStartPost = toString (
+      pkgs.writeShellScript "awww-wallpaper" ''
+        for _ in $(${pkgs.coreutils}/bin/seq 50); do
+          ${pkgs.awww}/bin/awww img ${config.home.homeDirectory}/Pictures/Wallpapers/hk.png && exit 0
+          ${pkgs.coreutils}/bin/sleep 0.2
+        done
+        exit 1
+      ''
+    );
+  };
+
+  # Your session services (awww, quickshell, playerctld, polkit, blueman, music-player)
+  # all start with graphical-session.target.
+  #  - "Hyprland (UWSM)" in ly: uwsm starts that target itself.
+  #  - plain "Hyprland": Hyprland starts hyprland-session.target, which pulls the target
+  #    in. Hyprland ships that unit, but NixOS doesn't install it as a user unit (only
+  #    packages in systemd.packages get that), so here it is, same as Hyprland's own file.
+  #    Under UWSM, Hyprland doesn't start it, so it can't get in the way.
+  systemd.user.targets.hyprland-session.Unit = {
+    Description = "Hyprland session";
+    BindsTo = [ "graphical-session.target" ];
+    Wants = [ "graphical-session-pre.target" ];
+    After = [ "graphical-session-pre.target" ];
+    PropagatesStopTo = [ "graphical-session.target" ];
+  };
+
+  # Keeps track of the most recently active media player for playerctl.
+  services.playerctld.enable = true;
+  # Bluetooth pairing agent (with services.blueman in configuration.nix): when a device
+  # wants a code confirmed, blueman shows the dialog. The bar's widget does the rest.
+  services.blueman-applet.enable = true;
   programs.hyprtoolkit.settings = {
     background = "0xFF2D353B"; # your Theme.bg (everforest bg0)
     base = "0xFF3D484D"; # your Theme.pill (bg2)
@@ -3405,7 +4064,9 @@
     portalPackage = null; # portal already set in configuration.nix
     configType = "lua";
     settings = lib.mkForce { };
-    systemd.enable = true; # your Lua already runs dbus-update-activation-environment
+    # Off for UWSM: uwsm starts graphical-session.target and exports the environment
+    # itself. The Hyprland wiki says this home-manager integration conflicts with it.
+    systemd.enable = false;
     extraConfig = ''
       -- Generated by hyprconf2lua v1.3.2
       -- https://github.com/Prateek-squadron/hyprconf2lua
@@ -3421,30 +4082,16 @@
           scale    = "auto",
       })
 
-      hl.env("XDG_CURRENT_DESKTOP", "Hyprland")
-      hl.env("XDG_SESSION_TYPE", "wayland")
-      hl.env("XDG_SESSION_DESKTOP", "Hyprland")
+      -- Environment variables live in home.nix (home.sessionVariables), which uwsm
+      -- loads from ~/.config/uwsm/env before Hyprland starts. uwsm sets the XDG_* ones itself.
       --hyprmod settings
       hl.unbind("SUPER + SHIFT + Left")
       hl.bind("SUPER + SHIFT + Left", hl.dsp.focus({ workspace = -1 }))
       hl.unbind("SUPER + SHIFT + Right")
       hl.bind("SUPER + SHIFT + Right", hl.dsp.focus({ workspace = "+1" }))
-      hl.bind("Print", hl.dsp.exec_cmd("hyprshot -m region --output-folder ~/Pictures/Screenshots"))
+      hl.bind("Print", hl.dsp.exec_cmd("uwsm app -- hyprshot -m region --output-folder ~/Pictures/Screenshots"))
       hl.bind("SUPER + CTRL + Right", hl.dsp.window.move({ workspace = "+1" }))
       hl.bind("SUPER + CTRL + Left", hl.dsp.window.move({ workspace = -1 }))
-      -- Env vars (Variance by graphics drivers)
-      hl.env("LIBVA_DRIVER_NAME", "nvidia")
-      hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")
-      hl.env("NVD_BACKEND", "direct")
-      hl.env("GBM_BACKEND", "nvidia-drm")
-      hl.env("__GL_GSYNC_ALLOWED", "0")
-      hl.env("__GL_VRR_ALLOWED", "0")
-      hl.env("WLR_NO_HARDWARE_CURSORS", "1")
-      -- Force Qt apps to use qt5ct/qt6ct for styling layouts
-      hl.env("QT_QPA_PLATFORMTHEME", "qt5ct")
-
-      -- Ensure Qt apps pick up Wayland instead of fallback X11 layouts
-      hl.env("QT_QPA_PLATFORM", "wayland")
 
       hl.config({
           layerrule = {
@@ -3501,6 +4148,7 @@
       hl.config({
           cursor = {
               inactive_timeout = 0,
+              -- [GPU] NVIDIA needs software cursors; on AMD / Intel this can be false
               no_hardware_cursors = true,
           },
       })
@@ -3532,11 +4180,11 @@
 
       -- Trigger the rofi power menu
 
-      hl.bind("SUPER + Return", hl.dsp.exec_cmd("kitty"))
+      hl.bind("SUPER + Return", hl.dsp.exec_cmd("uwsm app -- kitty"))
 
       hl.bind("SUPER + Q", hl.dsp.window.close())
 
-      hl.bind("SUPER + SHIFT + E", hl.dsp.exit())
+      hl.bind("SUPER + SHIFT + E", hl.dsp.exec_cmd("uwsm stop"))
 
 
       -- Captures the entire screen and copies it directly to your clipboard
@@ -3555,7 +4203,7 @@
 
       -- Toggle Rofi App Launcher using Super and Tab
 
-      hl.bind("SUPER + TAB", hl.dsp.exec_cmd("pkill rofi || rofi -show drun -theme-str 'window { close-on-click:true; } '"))
+      hl.bind("SUPER + TAB", hl.dsp.exec_cmd("pkill rofi || rofi -show drun -run-command 'uwsm app -- {cmd}' -theme-str 'window { close-on-click:true; } '"))
 
       -- Delete or replace the bottom section with ONLY this line:
 
@@ -3565,15 +4213,9 @@
 
       -- TODO: manual review: blurls = "waybar"
 
-      -- Autostart
-      hl.on("hyprland.start", function()
-         hl.exec_cmd("awww-daemon")
-         hl.exec_cmd("awww img ~/Pictures/Wallpapers/hk.png")
-         hl.exec_cmd("/usr/lib/polkit-kde-authentication-agent-1")
-         hl.exec_cmd("/usr/lib/hyprpolkitagent/hyprpolkitagent")
-         hl.exec_cmd("eww daemon")
-         hl.exec_cmd("playerctld daemon")
-      end)
+      -- Autostart: nothing here anymore. Everything that used to start here is a
+      -- systemd user service in home.nix (awww, playerctld,
+      -- hyprpolkitagent, quickshell, music-player), started by uwsm's graphical-session.target.
 
       -- HyprMod managed settings
       --require("hyprland-gui")

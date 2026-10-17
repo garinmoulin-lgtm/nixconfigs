@@ -19,7 +19,7 @@
 
   boot.blacklistedKernelModules = [
     "acpi_pad"
-    "nouveau"
+    # (nouveau is blacklisted in the NVIDIA block of the GPU section below)
   ];
   # Bootloader.
   #boot.loader.systemd-boot.enable = true;
@@ -93,7 +93,13 @@
   # Enable the Hyprland Compositor via its dedicated module
   # This configures polkit, xdg portals, and session files seamlessly
 
-  programs.hyprland.enable = true;
+  programs.hyprland = {
+    enable = true;
+    # Start Hyprland through UWSM (Universal Wayland Session Manager). It runs the session
+    # as systemd units: graphical-session.target, autostart services, clean shutdown.
+    # Adds a "Hyprland (UWSM)" entry to ly. Pick it once; ly remembers the last session.
+    withUWSM = true;
+  };
   xdg.portal = {
     enable = true;
     extraPortals = [ pkgs.xdg-desktop-portal-hyprland ];
@@ -110,14 +116,9 @@
   };
 
   environment.sessionVariables = {
-    # Tells GTK and XWayland apps what cursor theme to use
-    # Forces Nvidia to render the mouse cursor manually
-    WLR_NO_HARDWARE_CURSORS = "1";
-    # Fixes standard electron/chromium apps on Wayland too
+    # Fixes standard electron/chromium apps on Wayland too (any GPU)
     NIXOS_OZONE_WL = "1";
-    LIBVA_DRIVER_NAME = "nvidia"; # needed with libva 2.20+, which forces this driver
-    MOZ_DISABLE_RDD_SANDBOX = "1"; # lets the RDD process reach the driver
-
+    # (GPU-specific variables are in the GPU section below)
   };
   chaotic.nyx.cache.enable = true;
   # =========================================================================
@@ -161,14 +162,58 @@
 
   # Enable CUPS to print documents.
   services.printing.enable = true;
+  # =========================================================================
+  # [GPU] GRAPHICS DRIVER: everything GPU-specific, one block per vendor.
+  # NVIDIA is active. To switch to another GPU:
+  #   1. Comment out the whole NVIDIA block (put "# " in front of every line).
+  #   2. Uncomment the AMD or Intel block (remove the "# " in front of every line).
+  #   3. Do the same in home.nix: search it for [GPU] (home.sessionVariables).
+  # Only one block may be active at a time, or rebuilding will complain that the
+  # same option is set twice. Same setups as the amd/ and intel/ folders in the repo.
+  # =========================================================================
+
+  # ── NVIDIA (active) ─────────────────────────────────────── start of block ──
   services.xserver.videoDrivers = [ "nvidia" ];
-  #nvidia
   hardware.nvidia = {
     package = pkgs.nvidia_cachyos; # chaotic: prebuilt for linuxPackages_cachyos (was config.boot.kernelPackages.nvidiaPackages.latest)
     open = true;
     modesetting.enable = true;
     powerManagement.enable = true;
   };
+  boot.kernelParams = [ "nvidia-drm.modeset=1" ];
+  boot.extraModprobeConfig = ''
+    blacklist nouveau
+    options nvidia NVreg_PreserveVideoMemoryAllocations=1
+    options nvidia NVreg_TemporaryFilePath=/var/tmp
+  '';
+  environment.sessionVariables.WLR_NO_HARDWARE_CURSORS = "1"; # Nvidia can't draw the cursor in hardware
+  environment.sessionVariables.LIBVA_DRIVER_NAME = "nvidia"; # needed with libva 2.20+, which forces this driver
+  environment.sessionVariables.MOZ_DISABLE_RDD_SANDBOX = "1"; # lets Firefox's decoder process reach the driver
+  programs.firefox.preferences."widget.dmabuf.force-enabled" = true; # README: needed on 500+ series drivers
+  # ── NVIDIA ──────────────────────────────────────────────────── end of block ──
+
+  # ── AMD ─────────────────────────────────────────────────── start of block ──
+  # services.xserver.videoDrivers = [ "amdgpu" ];
+  # hardware.graphics = {
+  #   enable = true;
+  #   enable32Bit = true; # for Steam / 32-bit games
+  # };
+  # environment.sessionVariables.LIBVA_DRIVER_NAME = "radeonsi"; # Mesa's VA-API driver
+  # ── AMD ─────────────────────────────────────────────────────── end of block ──
+
+  # ── Intel ───────────────────────────────────────────────── start of block ──
+  # services.xserver.videoDrivers = [ "modesetting" ]; # the default anyway
+  # hardware.graphics = {
+  #   enable = true;
+  #   enable32Bit = true;
+  #   extraPackages = with pkgs; [
+  #     intel-media-driver # VA-API for Broadwell (2014) and newer
+  #     vpl-gpu-rt         # Quick Sync for newer (Xe) Intel
+  #   ];
+  # };
+  # environment.sessionVariables.LIBVA_DRIVER_NAME = "iHD"; # "i965" on pre-2014 Intel
+  # ── Intel ───────────────────────────────────────────────────── end of block ──
+
   #LE STEAM
   programs.steam = {
     enable = true; # Master switch, already covered in installation
@@ -178,12 +223,6 @@
   };
   # Improves Performance With games (temporary and in game, dont worry)
   programs.gamemode.enable = true;
-  boot.extraModprobeConfig = ''
-    options nvidia NVreg_PreserveVideoMemoryAllocations=1
-    options nvidia NVreg_TemporaryFilePath=/var/tmp
-  '';
-
-  boot.kernelParams = [ "nvidia-drm.modeset=1" ];
   # Enable sound with pipewire.
   services.pulseaudio.enable = false;
   security.rtkit.enable = true;
@@ -250,7 +289,7 @@
     preferences = {
       "media.ffmpeg.vaapi.enabled" = true; # required: turns on VA-API
       "media.rdd-ffmpeg.enabled" = true; # already the default; decode inside RDD
-      "widget.dmabuf.force-enabled" = true; # README: needed on 500+ series driversw
+      # ("widget.dmabuf.force-enabled" is in the NVIDIA block of the GPU section)
     };
   };
   #power prof daemon
@@ -328,6 +367,22 @@
   #   enableSSHSupport = true;
   # };
   services.upower.enable = true;
+
+  # ── Bluetooth ──
+  # BlueZ, which the bar's Bluetooth widget talks to (Quickshell.Bluetooth uses BlueZ over D-Bus).
+  hardware.bluetooth = {
+    enable = true;
+    powerOnBoot = true; # adapter on at boot, so devices can reconnect by themselves
+    settings.General = {
+      # BlueZ's experimental D-Bus features. Some battery reports (e.g. separate
+      # earbud / case levels) are only published with this on. Safe to remove.
+      Experimental = true;
+    };
+  };
+  # Pairing needs an "agent": the program BlueZ asks to confirm a code or PIN. Without
+  # one, devices that want confirmation (phones, PCs) fail with "Authentication Failed".
+  # blueman provides one (the applet runs from home.nix) and pops up the confirm dialog.
+  services.blueman.enable = true;
 
   # Virtualization
   # Use this. It does use a daemon.
