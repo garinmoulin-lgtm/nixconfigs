@@ -2041,6 +2041,477 @@
                             }
                         }
                     }
+                    // ── System monitor ──
+                    // Bar: the CPU package temperature. Popup: a graph of the last minute, every
+                    // component's usage in text, and a list: click a component to graph just that
+                    // one, click it again (or "All") to go back. Numbers come from SysMon.qml.
+                    Widget {
+                        id: sysmon
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        // what the graph shows: "all", or one component's key
+                        property string selected: "all"
+                        readonly property var selectedPart: parts.find(p => p.key === selected) ?? null
+
+                        // The components, in list order. Only looks; the numbers are looked up from SysMon by key.
+                        readonly property var parts: [
+                            {
+                                key: "cpu",
+                                name: "CPU",
+                                icon: "memory",
+                                color: Theme.green
+                            },
+                            {
+                                key: "gpu",
+                                name: "GPU",
+                                icon: "developer_board",
+                                color: Theme.blue
+                            },
+                            {
+                                key: "mem",
+                                name: "Memory",
+                                icon: "memory_alt",
+                                color: Theme.yellow
+                            },
+                            {
+                                key: "vram",
+                                name: "VRAM",
+                                icon: "view_in_ar_new",
+                                color: Theme.magenta
+                            },
+                            {
+                                key: "swap",
+                                name: "Swap",
+                                icon: "swap_horiz",
+                                color: Theme.orange
+                            },
+                            {
+                                key: "disk",
+                                name: "Disk",
+                                icon: "hard_drive",
+                                color: Theme.cyan
+                            }
+                        ]
+
+                        button: Pill {
+                            icon: "device_thermostat"
+                            iconColor: SysMon.cpuTemp >= 85 ? Theme.red : Theme.orange
+                            text: SysMon.cpuTemp < 0 ? "--°C" : Math.round(SysMon.cpuTemp) + "°C"
+                        }
+
+                        Column {
+                            width: 360
+                            spacing: 10
+
+                            // ── header: title on the left, "All" on the right while one component is picked ──
+                            Item {
+                                width: parent.width
+                                height: 26
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "System"
+                                    color: Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 1.2
+                                    font.weight: 700
+                                    font.letterSpacing: Theme.letterSpacing
+                                }
+                                Rectangle {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: allLabel.implicitWidth + 20
+                                    height: 24
+                                    radius: height / 2
+                                    color: allMouse.containsMouse ? Theme.pill : "transparent"
+                                    border.width: 1
+                                    border.color: Theme.pill
+                                    opacity: sysmon.selected === "all" ? 0 : 1
+                                    visible: opacity > 0
+                                    scale: allMouse.pressed ? 0.85 : 1
+
+                                    Behavior on opacity {
+                                        NumberAnimation {
+                                            duration: 150
+                                        }
+                                    }
+                                    Behavior on scale {
+                                        NumberAnimation {
+                                            duration: 120
+                                            easing.type: Easing.OutCubic
+                                        }
+                                    }
+                                    Text {
+                                        id: allLabel
+                                        anchors.centerIn: parent
+                                        text: "All"
+                                        color: Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.9
+                                        font.weight: 600
+                                    }
+                                    MouseArea {
+                                        id: allMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: sysmon.selected = "all"
+                                    }
+                                }
+                            }
+
+                            // ── the graph ──
+                            Rectangle {
+                                width: parent.width
+                                height: 170
+                                radius: Theme.radius
+                                color: Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, 0.45)
+
+                                // what's being graphed, and (for one component) its numbers right now
+                                Item {
+                                    id: graphHeader
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.margins: 10
+                                    height: 22
+
+                                    Row {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 6
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: sysmon.selectedPart ? sysmon.selectedPart.icon : "monitoring"
+                                            color: sysmon.selectedPart ? sysmon.selectedPart.color : Theme.text
+                                            font.family: Theme.iconFont
+                                            font.pixelSize: Theme.iconSize
+                                            font.variableAxes: Theme.iconAxes
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: sysmon.selectedPart ? sysmon.selectedPart.name : "All components"
+                                            color: Theme.text
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize
+                                            font.weight: 700
+                                            font.letterSpacing: Theme.letterSpacing
+                                        }
+                                    }
+                                    Row {
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 8
+                                        visible: !!sysmon.selectedPart
+
+                                        // the temperature (the dashed red line in the graph), for CPU and GPU
+                                        Row {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            visible: !!sysmon.selectedPart && SysMon.temp(sysmon.selected) >= 0
+                                            spacing: 2
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: "device_thermostat"
+                                                color: Theme.red
+                                                font.family: Theme.iconFont
+                                                font.pixelSize: Theme.iconSize * 0.9
+                                                font.variableAxes: Theme.iconAxes
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: Math.round(SysMon.temp(sysmon.selected)) + "°C"
+                                                color: Theme.red
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize * 0.9
+                                                font.weight: 600
+                                            }
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: Math.round(SysMon.percent(sysmon.selected)) + "%"
+                                            color: sysmon.selectedPart ? sysmon.selectedPart.color : Theme.text
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 1.4
+                                            font.weight: 700
+                                            font.letterSpacing: Theme.letterSpacing
+                                        }
+                                    }
+                                }
+
+                                Canvas {
+                                    id: graph
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: graphHeader.bottom
+                                    anchors.bottom: timeLabels.top
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    anchors.topMargin: 8
+                                    anchors.bottomMargin: 4
+
+                                    // Repaint on every new sample (only while the popup is open: nobody
+                                    // sees it otherwise), when it opens, and when the selection changes.
+                                    Connections {
+                                        target: SysMon
+                                        function onSampled() {
+                                            if (sysmon.open)
+                                                graph.requestPaint();
+                                        }
+                                    }
+                                    Connections {
+                                        target: sysmon
+                                        function onOpenChanged() {
+                                            graph.requestPaint();
+                                        }
+                                        function onSelectedChanged() {
+                                            graph.requestPaint();
+                                        }
+                                    }
+
+                                    // "rgba(r, g, b, a)": the canvas wants CSS-style color strings
+                                    function rgba(c, a) {
+                                        return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + "," + Math.round(c.b * 255) + "," + a + ")";
+                                    }
+                                    // x of the i-th sample: the newest sits on the right edge, so the
+                                    // line scrolls in from the right while history is still filling up
+                                    function xAt(i, count) {
+                                        return width - (count - 1 - i) * width / (SysMon.historyLength - 1);
+                                    }
+                                    // y of a value: 0 at the bottom, 100 (% or °C) at the top
+                                    function yAt(v) {
+                                        return height - Math.max(0, Math.min(100, v)) / 100 * height;
+                                    }
+                                    // Draws the path of one list of values; nulls leave a gap.
+                                    function trace(ctx, values) {
+                                        ctx.beginPath();
+                                        let drawing = false;
+                                        for (let i = 0; i < values.length; i++) {
+                                            if (values[i] === null) {
+                                                drawing = false;
+                                                continue;
+                                            }
+                                            const x = xAt(i, values.length), y = yAt(values[i]);
+                                            if (drawing)
+                                                ctx.lineTo(x, y);
+                                            else
+                                                ctx.moveTo(x, y);
+                                            drawing = true;
+                                        }
+                                    }
+
+                                    onPaint: {
+                                        const ctx = getContext("2d");
+                                        ctx.reset();
+                                        ctx.lineJoin = "round";
+                                        ctx.lineCap = "round";
+
+                                        // grid lines at 25 / 50 / 75 %
+                                        ctx.strokeStyle = rgba(Theme.text, 0.08);
+                                        ctx.lineWidth = 1;
+                                        for (const v of [25, 50, 75]) {
+                                            ctx.beginPath();
+                                            ctx.moveTo(0, Math.round(yAt(v)) + 0.5);
+                                            ctx.lineTo(width, Math.round(yAt(v)) + 0.5);
+                                            ctx.stroke();
+                                        }
+
+                                        if (!sysmon.selectedPart) {
+                                            // everything at once: one thin line per component
+                                            ctx.lineWidth = 1.5;
+                                            for (const part of sysmon.parts) {
+                                                if (!SysMon.has(part.key))
+                                                    continue;
+                                                ctx.strokeStyle = rgba(part.color, 1);
+                                                trace(ctx, SysMon.history[part.key]);
+                                                ctx.stroke();
+                                            }
+                                            return;
+                                        }
+
+                                        // one component: its line with a fade underneath...
+                                        const part = sysmon.selectedPart;
+                                        const values = SysMon.history[part.key];
+                                        const first = values.findIndex(v => v !== null);
+                                        if (first >= 0) {
+                                            const fade = ctx.createLinearGradient(0, 0, 0, height);
+                                            fade.addColorStop(0, rgba(part.color, 0.35));
+                                            fade.addColorStop(1, rgba(part.color, 0));
+                                            trace(ctx, values);
+                                            ctx.lineTo(xAt(values.length - 1, values.length), height);
+                                            ctx.lineTo(xAt(first, values.length), height);
+                                            ctx.closePath();
+                                            ctx.fillStyle = fade;
+                                            ctx.fill();
+
+                                            ctx.strokeStyle = rgba(part.color, 1);
+                                            ctx.lineWidth = 2;
+                                            trace(ctx, values);
+                                            ctx.stroke();
+                                        }
+
+                                        // ...plus its temperature as a dashed line, if it has one
+                                        const temps = SysMon.history[part.key + "Temp"];
+                                        if (temps) {
+                                            ctx.strokeStyle = rgba(Theme.red, 0.9);
+                                            ctx.lineWidth = 1.5;
+                                            ctx.setLineDash([3, 3]);
+                                            trace(ctx, temps);
+                                            ctx.stroke();
+                                        }
+                                    }
+                                }
+
+                                // time axis: the left edge is a minute ago, the right edge is now
+                                Item {
+                                    id: timeLabels
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.margins: 10
+                                    anchors.bottomMargin: 6
+                                    height: 14
+
+                                    Text {
+                                        anchors.left: parent.left
+                                        text: SysMon.historyLength + "s ago"
+                                        color: Theme.text
+                                        opacity: 0.4
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.8
+                                    }
+                                    Text {
+                                        anchors.right: parent.right
+                                        text: "now"
+                                        color: Theme.text
+                                        opacity: 0.4
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.8
+                                    }
+                                }
+                            }
+
+                            // ── every component, in text; click one to graph it alone ──
+                            Column {
+                                width: parent.width
+                                spacing: 2
+
+                                Repeater {
+                                    model: sysmon.parts
+
+                                    Rectangle {
+                                        id: partRow
+                                        required property var modelData     // { key, name, icon, color }
+
+                                        readonly property bool picked: sysmon.selected === modelData.key
+                                        readonly property real percent: SysMon.percent(modelData.key)
+
+                                        visible: SysMon.has(modelData.key)
+                                        width: parent.width
+                                        height: 32
+                                        radius: Theme.radius
+                                        color: picked ? Theme.pill : partMouse.containsMouse ? Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, 0.5) : "transparent"
+                                        scale: partMouse.pressed ? 0.97 : 1
+
+                                        Behavior on color {
+                                            ColorAnimation {
+                                                duration: 120
+                                            }
+                                        }
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 120
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        // icon + name on the left
+                                        Row {
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: 10
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 10
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: partRow.modelData.icon
+                                                color: partRow.modelData.color
+                                                font.family: Theme.iconFont
+                                                font.pixelSize: Theme.iconSize
+                                                font.variableAxes: Theme.iconAxes
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: partRow.modelData.name
+                                                color: Theme.text
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize
+                                                font.weight: partRow.picked ? 700 : 500
+                                                font.letterSpacing: Theme.letterSpacing
+                                            }
+                                        }
+
+                                        // detail, a little meter, and the percentage on the right
+                                        Row {
+                                            anchors.right: parent.right
+                                            anchors.rightMargin: 10
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 10
+
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: SysMon.detail(partRow.modelData.key)
+                                                color: Theme.text
+                                                opacity: 0.55
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize * 0.9
+                                                font.weight: 500
+                                                font.letterSpacing: Theme.letterSpacing
+                                            }
+                                            Rectangle {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: 56
+                                                height: 5
+                                                radius: height / 2
+                                                // the empty part of the meter: whichever of the two colors the row isn't
+                                                color: partRow.picked ? Theme.bg : Theme.pill
+                                                Rectangle {
+                                                    width: Math.max(parent.height, parent.width * partRow.percent / 100)
+                                                    height: parent.height
+                                                    radius: height / 2
+                                                    color: partRow.modelData.color
+                                                    Behavior on width {
+                                                        NumberAnimation {
+                                                            duration: 400
+                                                            easing.type: Easing.OutCubic
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: 38
+                                                horizontalAlignment: Text.AlignRight
+                                                text: Math.round(partRow.percent) + "%"
+                                                color: Theme.text
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize
+                                                font.weight: 700
+                                                font.letterSpacing: Theme.letterSpacing
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            id: partMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            // click the picked one again to go back to all
+                                            onClicked: sysmon.selected = partRow.picked ? "all" : partRow.modelData.key
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     // ── Power menu ──
                     Widget {
                         icon: "power_settings_new"
@@ -2421,8 +2892,7 @@
 
         // Which number the mouse is over: -1 = none.
         property int hoveredIndex: -1
-        property real hoverGrow: 1.35     // size of the hovered number
-        property real hoverShrink: 0.8    // size of the others while one is hovered
+        property real hoverShrink: 0.85   // size of the hovered number (same as the other bar buttons)
         property int hoverTime: 150
 
         implicitWidth: root.list.length * root.cellWidth + root.padding * 2
@@ -2471,8 +2941,8 @@
                     font.pixelSize: Theme.textSize
                     font.weight: 600
 
-                    // nothing hovered: normal size. Otherwise: big if it's this one, small if not.
-                    scale: root.hoveredIndex === -1 ? 1 : root.hoveredIndex === wsNumber.index ? root.hoverGrow : root.hoverShrink
+                    // only the hovered number shrinks; the rest stay as they are
+                    scale: root.hoveredIndex === wsNumber.index ? root.hoverShrink : 1
 
                     Behavior on color {
                         ColorAnimation {
@@ -2626,6 +3096,255 @@
             onTriggered: process.running = true
         }
     }
+  '';
+  # The system monitor's sampler (a singleton: one for every bar). See the widget in shell.qml.
+  xdg.configFile."quickshell/SysMon.qml".text = ''
+    pragma Singleton
+
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+
+    // Samples the system once a second for the bar's system monitor widget.
+    // A singleton, so there's one sampler however many monitors (bars) there are.
+    //
+    // Components, by key:  cpu  gpu  mem  vram  swap  disk
+    //   SysMon.percent("cpu")  → 0..100
+    //   SysMon.detail("mem")   → "12.3 / 30.5 GiB"
+    //   SysMon.has("gpu")      → false when there's nothing to show (no NVIDIA GPU, no swap...)
+    //   SysMon.history.cpu     → the last `historyLength` percentages, oldest first
+    Singleton {
+        id: root
+
+        readonly property int historyLength: 60     // seconds the graph spans
+
+        // ── latest values ──
+        property real cpu: 0          // % busy, all cores together
+        property real cpuTemp: -1     // °C, package; -1 = no sensor found
+        property real memUsed: 0      // KiB
+        property real memTotal: 0
+        property real swapUsed: 0     // KiB (your zram)
+        property real swapTotal: 0
+        property real gpu: -1         // % busy; -1 = nvidia-smi isn't running / no NVIDIA GPU
+        property real gpuTemp: -1     // °C
+        property real vramUsed: 0     // MiB
+        property real vramTotal: 0
+        property real disk: 0         // % of the last second the busiest disk spent working
+        property string diskName: ""  // which disk that was
+
+        readonly property real memPercent: memTotal > 0 ? memUsed / memTotal * 100 : 0
+        readonly property real swapPercent: swapTotal > 0 ? swapUsed / swapTotal * 100 : 0
+        readonly property real vramPercent: vramTotal > 0 ? vramUsed / vramTotal * 100 : 0
+
+        // ── graph data ──
+        // Plain JS arrays, changed in place, so QML can't see them change by itself:
+        // `sampled` is emitted after every update instead, for the graph to repaint on.
+        // A null in a list means "no reading" (a gap in the line).
+        readonly property var history: ({
+                cpu: [],
+                cpuTemp: [],
+                gpu: [],
+                gpuTemp: [],
+                mem: [],
+                vram: [],
+                swap: [],
+                disk: []
+            })
+        signal sampled
+
+        function percent(key) {
+            switch (key) {
+            case "cpu":
+                return cpu;
+            case "gpu":
+                return Math.max(0, gpu);
+            case "mem":
+                return memPercent;
+            case "vram":
+                return vramPercent;
+            case "swap":
+                return swapPercent;
+            case "disk":
+                return disk;
+            }
+            return 0;
+        }
+
+        function has(key) {
+            switch (key) {
+            case "gpu":
+            case "vram":
+                return gpu >= 0;
+            case "swap":
+                return swapTotal > 0;
+            case "disk":
+                return diskName !== "";
+            }
+            return true;
+        }
+
+        // the temperature that goes with a component, -1 if it has none
+        function temp(key) {
+            return key === "cpu" ? cpuTemp : key === "gpu" ? gpuTemp : -1;
+        }
+
+        function detail(key) {
+            const gib = kib => (kib / 1048576).toFixed(1);
+            switch (key) {
+            case "cpu":
+            case "gpu":
+                return temp(key) >= 0 ? Math.round(temp(key)) + "°C" : "";
+            case "mem":
+                return gib(memUsed) + " / " + gib(memTotal) + " GiB";
+            case "vram":
+                return gib(vramUsed * 1024) + " / " + gib(vramTotal * 1024) + " GiB";
+            case "swap":
+                return gib(swapUsed) + " / " + gib(swapTotal) + " GiB";
+            case "disk":
+                return diskName;
+            }
+            return "";
+        }
+
+        function push(key, value) {
+            const list = history[key];
+            list.push(value);
+            if (list.length > historyLength)
+                list.shift();
+        }
+
+        // ── turning sysmon.sh's running totals into percentages ──
+        property var last: null     // the previous line, to compare against
+        property real lastTime: 0
+
+        function update(now) {
+            const before = last;
+            const ms = Date.now() - lastTime;
+            last = now;
+            lastTime = Date.now();
+            if (!before)
+                return;       // the first line has nothing to compare with
+
+            // CPU: of the jiffies that passed, how many weren't idle
+            const total = now.cpu[1] - before.cpu[1];
+            cpu = total > 0 ? (now.cpu[0] - before.cpu[0]) / total * 100 : 0;
+            cpuTemp = now.temp === null ? -1 : now.temp;
+
+            memTotal = now.mem[0];
+            memUsed = now.mem[0] - now.mem[1];
+            swapTotal = now.swap[0];
+            swapUsed = now.swap[0] - now.swap[1];
+
+            // Disks: ms spent busy since last time, out of the ms that passed. Show the busiest.
+            let busiest = -1;
+            for (const name in now.disks) {
+                if (!(name in before.disks))
+                    continue;
+                const busy = Math.min(100, (now.disks[name] - before.disks[name]) / ms * 100);
+                if (busy > busiest) {
+                    busiest = busy;
+                    diskName = name;
+                }
+            }
+            disk = Math.max(0, busiest);
+
+            push("cpu", cpu);
+            push("cpuTemp", cpuTemp >= 0 ? cpuTemp : null);
+            push("mem", memPercent);
+            push("swap", swapPercent);
+            push("disk", disk);
+            push("gpu", gpu >= 0 ? gpu : null);
+            push("gpuTemp", gpuTemp >= 0 ? gpuTemp : null);
+            push("vram", gpu >= 0 ? vramPercent : null);
+            sampled();
+        }
+
+        Process {
+            command: ["sh", Quickshell.shellDir + "/sysmon.sh"]
+            running: true
+            stdout: SplitParser {
+                onRead: line => root.update(JSON.parse(line))
+            }
+        }
+
+        // NVIDIA: nvidia-smi can repeat its own query (-l 1 = every second), so it's
+        // started once and left running. One line per GPU:  "23, 48, 2100, 12282"
+        // (busy %, °C, MiB used, MiB total). If there's no nvidia-smi it just doesn't
+        // start, gpu stays -1, and the GPU rows stay hidden.
+        Process {
+            command: ["nvidia-smi", "--query-gpu=utilization.gpu,temperature.gpu,memory.used,memory.total", "--format=csv,noheader,nounits", "-l", "1"]
+            running: true
+            stdout: SplitParser {
+                onRead: line => {
+                    const f = line.split(",").map(Number);
+                    if (f.length < 4 || f.some(isNaN))
+                        return;     // "[N/A]" or an error message
+                    root.gpu = f[0];
+                    root.gpuTemp = f[1];
+                    root.vramUsed = f[2];
+                    root.vramTotal = f[3];
+                }
+            }
+        }
+    }
+  '';
+
+  # Read once a second by SysMon.qml. Inside '' '' strings, the shell's ${...} is written ''${...}.
+  xdg.configFile."quickshell/sysmon.sh".text = ''
+    #!/bin/sh
+    # Prints one JSON line per second for the bar's system monitor (SysMon.qml reads it):
+    #
+    #   {"cpu":[busy,total],"mem":[total,available],"swap":[total,free],"temp":54.1,"disks":{"nvme0n1":1234}}
+    #
+    # cpu and disks are running totals since boot (jiffies / ms spent busy); SysMon.qml
+    # turns them into percentages by comparing each line with the one before.
+    # mem and swap are in KiB. temp is °C, or null if no sensor was found.
+
+    # ── Find the CPU package temperature sensor, once ──
+    # AMD (k10temp): Tctl is always temp1; use Tdie instead if the chip reports one.
+    # Intel (coretemp): the input labelled "Package id 0".
+    sensor=""
+    for h in /sys/class/hwmon/hwmon*; do
+        [ -r "$h/name" ] || continue
+        case $(cat "$h/name") in
+            k10temp | zenpower)
+                sensor=$h/temp1_input
+                for l in "$h"/temp*_label; do
+                    [ "$(cat "$l" 2>/dev/null)" = Tdie ] && sensor=''${l%_label}_input
+                done
+                ;;
+            coretemp)
+                for l in "$h"/temp*_label; do
+                    [ "$(cat "$l" 2>/dev/null)" = "Package id 0" ] && sensor=''${l%_label}_input
+                done
+                ;;
+        esac
+        [ -n "$sensor" ] && break
+    done
+
+    # ── Once a second: read the counters, print them as one line ──
+    while :; do
+        awk -v sensor="$sensor" '
+            # first line of /proc/stat: all cores together
+            # cpu  user nice system idle iowait irq softirq steal
+            FILENAME == "/proc/stat" && $1 == "cpu" {
+                for (i = 2; i <= 9; i++) total += $i
+                busy = total - $5 - $6          # everything but idle and iowait
+            }
+            FILENAME == "/proc/meminfo" { mem[$1] = $2 }
+            # whole disks only (nvme0n1, sda...), not partitions; column 13 = ms spent doing I/O
+            FILENAME == "/proc/diskstats" && $3 ~ /^(nvme[0-9]+n[0-9]+|sd[a-z]+|vd[a-z]+|mmcblk[0-9]+)$/ {
+                disks = disks sep "\"" $3 "\":" sprintf("%.0f", $13)
+                sep = ","
+            }
+            END {
+                temp = "null"
+                if (sensor != "" && (getline t < sensor) > 0) temp = sprintf("%.1f", t / 1000)
+                printf "{\"cpu\":[%.0f,%.0f],\"mem\":[%.0f,%.0f],\"swap\":[%.0f,%.0f],\"temp\":%s,\"disks\":{%s}}\n",
+                    busy, total, mem["MemTotal:"], mem["MemAvailable:"], mem["SwapTotal:"], mem["SwapFree:"], temp, disks
+            }' /proc/stat /proc/meminfo /proc/diskstats
+        sleep 1
+    done
   '';
   services.hyprpolkitagent.enable = true;
   programs.hyprtoolkit.settings = {
