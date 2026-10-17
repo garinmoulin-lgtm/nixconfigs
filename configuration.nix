@@ -115,6 +115,8 @@
     WLR_NO_HARDWARE_CURSORS = "1";
     # Fixes standard electron/chromium apps on Wayland too
     NIXOS_OZONE_WL = "1";
+    LIBVA_DRIVER_NAME = "nvidia"; # needed with libva 2.20+, which forces this driver
+    MOZ_DISABLE_RDD_SANDBOX = "1"; # lets the RDD process reach the driver
 
   };
   chaotic.nyx.cache.enable = true;
@@ -242,8 +244,15 @@
   };
   services.udisks2.enable = true;
   # Install firefox.
-  programs.firefox.enable = true;
-  programs.firefox.package = pkgs.firefox_nightly; # chaotic: Firefox Nightly instead of stable
+  programs.firefox = {
+    enable = true;
+    package = pkgs.firefox_nightly;
+    preferences = {
+      "media.ffmpeg.vaapi.enabled" = true; # required: turns on VA-API
+      "media.rdd-ffmpeg.enabled" = true; # already the default; decode inside RDD
+      "widget.dmabuf.force-enabled" = true; # README: needed on 500+ series driversw
+    };
+  };
   #power prof daemon
   services.power-profiles-daemon.enable = true;
   # Allow unfree packages
