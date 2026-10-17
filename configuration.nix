@@ -117,6 +117,7 @@
     NIXOS_OZONE_WL = "1";
 
   };
+  chaotic.nyx.cache.enable = true;
   # =========================================================================
   # 2. SYSTEM-WIDE FONTS SETTINGS (Nerd Fonts, Ioskeley Mono, Hanken Grotesk)
   # =========================================================================
@@ -317,7 +318,7 @@
   #   enable = true;
   #   enableSSHSupport = true;
   # };
- services.upower.enable = true;
+  services.upower.enable = true;
 
   # Virtualization
   # Use this. It does use a daemon.
