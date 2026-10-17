@@ -2806,6 +2806,7 @@
           active = mkLiteral "#83c092";
           urgent = mkLiteral "#e67e80";
           font = "SFMono Nerd Font 11";
+          border-radius = mkLiteral "8px"; 
         };
         "window" = {
           transparency = "real";
