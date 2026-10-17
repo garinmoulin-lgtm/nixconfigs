@@ -2571,6 +2571,50 @@
     font_family_monospace = "SFMono Nerd Font";
   };
 
+  # ── Qt theming (polkit agent, pavucontrol-qt, any Qt app) ──
+  # hyprpolkitagent in nixpkgs is the Qt/QML version, so it takes its colors from
+  # Qt's palette, not hyprtoolkit. qt6ct supplies that palette. This module also
+  # exports QT_QPA_PLATFORMTHEME to systemd user services, so the polkit agent sees it.
+  qt = {
+    enable = true;
+    platformTheme.name = "qtct"; # installs qt5ct + qt6ct
+    qt5ctSettings = {
+      Appearance = {
+        style = "Fusion";
+        custom_palette = true;
+        color_scheme_path = "${config.xdg.configHome}/qt6ct/colors/everforest.conf";
+      };
+      Fonts = {
+        general = ''"SFProText Nerd Font,11"'';
+        fixed = ''"SFMono Nerd Font,11"'';
+      };
+    };
+    qt6ctSettings = {
+      Appearance = {
+        style = "Fusion";
+        custom_palette = true;
+        color_scheme_path = "${config.xdg.configHome}/qt6ct/colors/everforest.conf";
+      };
+      Fonts = {
+        general = ''"SFProText Nerd Font,11"'';
+        fixed = ''"SFMono Nerd Font,11"'';
+      };
+    };
+  };
+  xdg.configFile."qt5ct/qt5ct.conf".force = true;
+  xdg.configFile."qt6ct/qt6ct.conf".force = true;
+
+  # Everforest dark (medium) as a qt6ct color scheme. One color per Qt palette role, in order:
+  # WindowText, Button, Light, Midlight, Dark, Mid, Text, BrightText, ButtonText, Base, Window,
+  # Shadow, Highlight, HighlightedText, Link, LinkVisited, AlternateBase, NoRole,
+  # ToolTipBase, ToolTipText, PlaceholderText
+  xdg.configFile."qt6ct/colors/everforest.conf".text = ''
+    [ColorScheme]
+    active_colors=#ffd3c6aa, #ff3d484d, #ff4f585e, #ff475258, #ff232a2e, #ff343f44, #ffd3c6aa, #ffe6e2cc, #ffd3c6aa, #ff343f44, #ff2d353b, #ff232a2e, #ffa7c080, #ff2d353b, #ff7fbbb3, #ffd699b6, #ff3d484d, #ff000000, #ff2d353b, #ffd3c6aa, #ff859289
+    inactive_colors=#ffd3c6aa, #ff3d484d, #ff4f585e, #ff475258, #ff232a2e, #ff343f44, #ffd3c6aa, #ffe6e2cc, #ffd3c6aa, #ff343f44, #ff2d353b, #ff232a2e, #ffa7c080, #ff2d353b, #ff7fbbb3, #ffd699b6, #ff3d484d, #ff000000, #ff2d353b, #ffd3c6aa, #ff859289
+    disabled_colors=#ff7a8478, #ff3d484d, #ff4f585e, #ff475258, #ff232a2e, #ff343f44, #ff7a8478, #ffe6e2cc, #ff7a8478, #ff343f44, #ff2d353b, #ff232a2e, #ffa7c080, #ff2d353b, #ff7fbbb3, #ffd699b6, #ff3d484d, #ff000000, #ff2d353b, #ffd3c6aa, #ff859289
+  '';
+
   wayland.windowManager.hyprland = {
     enable = true;
     package = null; # use programs.hyprland from configuration.nix
@@ -2816,7 +2860,7 @@
           active = mkLiteral "#83c092";
           urgent = mkLiteral "#e67e80";
           font = "SFMono Nerd Font 11";
-          border-radius = mkLiteral "8px"; 
+          border-radius = mkLiteral "8px";
         };
         "window" = {
           transparency = "real";
