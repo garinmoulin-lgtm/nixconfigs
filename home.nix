@@ -133,6 +133,7 @@
     import Quickshell.Services.Mpris
     import QtQuick.Controls.Basic
     import Quickshell.Services.Pipewire
+    import Quickshell.Services.UPower
     import Quickshell.Networking
     import Quickshell.Services.Notifications
     import Quickshell.Io
@@ -375,7 +376,6 @@
                     cmd: "bluetoothctl show | grep -q 'Powered: yes' && echo on || echo off"
                 }
                 */
-                // Battery would go here but I'm lazy
                 Poll {
                     id: net
                     cmd: "nmcli -t -f TYPE,STATE,CONNECTION device | grep -E '^(ethernet|wifi):connected:' | head -n1"
@@ -1557,6 +1557,71 @@
                                     onClicked: if (vol.ready)
                                         vol.sink.audio.muted = !vol.sink.audio.muted
                                 }
+                            }
+                        }
+                    }
+                    // ── Battery ──
+                    Widget {
+                        id: battery
+                        anchors.verticalCenter: parent.verticalCenter
+                        // hidden on machines without a laptop battery (this desktop)
+                        visible: battery.present
+
+                        // UPower's combined battery. percentage is 0..1 (Quickshell converts UPower's 0-100).
+                        readonly property var device: UPower.displayDevice
+                        readonly property bool present: !!device && device.ready && device.isLaptopBattery
+                        readonly property int percent: present ? Math.round(device.percentage * 100) : 0
+                        readonly property bool pluggedIn: !UPower.onBattery
+                        // Material Symbols has battery_0_bar ... battery_6_bar, then battery_full
+                        readonly property string glyph: {
+                            if (!present)
+                                return "battery_unknown";
+                            if (pluggedIn && percent < 100)
+                                return "battery_charging_full";
+                            if (percent >= 95)
+                                return "battery_full";
+                            return "battery_" + Math.min(6, Math.floor(percent / 100 * 7)) + "_bar";
+                        }
+
+                        button: Pill {
+                            icon: battery.glyph
+                            iconColor: battery.present && battery.percent <= 15 && !battery.pluggedIn ? Theme.red : Theme.yellow
+                            text: battery.present ? battery.percent + "%" : "--"
+                        }
+
+                        Column {
+                            spacing: 4
+
+                            // percentage
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: battery.present ? battery.percent + "%" : "No battery"
+                                color: Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 2.4
+                                font.weight: 700
+                                font.letterSpacing: Theme.letterSpacing
+                            }
+                            // plugged in / on battery
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: battery.pluggedIn ? "Plugged in" : "Running off battery"
+                                color: battery.pluggedIn ? Theme.green : Theme.yellow
+                                opacity: 0.8
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize
+                                font.weight: 600
+                                font.letterSpacing: Theme.letterSpacing
+                            }
+                            // the battery ligature, big
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                topPadding: 6
+                                text: battery.glyph
+                                color: battery.present && battery.percent <= 15 && !battery.pluggedIn ? Theme.red : Theme.text
+                                font.family: Theme.iconFont
+                                font.pixelSize: Theme.iconSize * 3
+                                font.variableAxes: Theme.iconAxes
                             }
                         }
                     }

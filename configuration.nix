@@ -317,6 +317,7 @@
   #   enable = true;
   #   enableSSHSupport = true;
   # };
+ services.upower.enable = true;
 
   # Virtualization
   # Use this. It does use a daemon.
