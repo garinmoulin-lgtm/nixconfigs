@@ -457,6 +457,11 @@
                                 }
                                 Slider {
                                     id: control
+                                    // pointing hand over the whole slider, grab hand while dragging.
+                                    // HoverHandler only watches the mouse, so dragging still works.
+                                    HoverHandler {
+                                        cursorShape: control.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+                                    }
                                     padding: 8
                                     width: 400
                                     anchors.horizontalCenter: parent.horizontalCenter
@@ -1498,6 +1503,11 @@
 
                                 Slider {
                                     id: volSlider
+                                    // pointing hand over the whole slider, grab hand while dragging.
+                                    // HoverHandler only watches the mouse, so dragging still works.
+                                    HoverHandler {
+                                        cursorShape: volSlider.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+                                    }
                                     anchors.horizontalCenter: parent.horizontalCenter
                                     orientation: Qt.Vertical       // top = loud, bottom = silent
                                     width: 24
