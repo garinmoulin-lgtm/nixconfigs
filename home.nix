@@ -2577,10 +2577,10 @@
       ---@module 'hl'
 
       hl.monitor({
-          output   = "DP-1", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
-          mode     = "1920x1080@240",
-          position = "0x0",
-          scale    = 1,
+          output   = "", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
+          mode     = "highrr",
+          position = "auto",
+          scale    = "auto",
       })
 
       hl.env("XDG_CURRENT_DESKTOP", "Hyprland")
