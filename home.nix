@@ -955,10 +955,21 @@
                                     height: 356
                                     clip: true
                                     spacing: 2
-                                    model: music.queue
+                                    // ScriptModel compares the new queue with the old one and only
+                                    // updates the rows that changed. A plain array (model: music.queue)
+                                    // makes the ListView throw every row away and rebuild the list on
+                                    // each mpv update, which is what jumped it back to the top after a drop.
+                                    model: ScriptModel {
+                                        values: music.queue
+                                    }
                                     boundsBehavior: Flickable.StopAtBounds
-                                    // no scrolling the list while a row is being dragged
+                                    // no flicking the list while a row is being dragged
+                                    // (it scrolls by itself near the edges instead, see edgeScroll)
                                     interactive: dragFrom < 0
+                                    // The ListView deletes rows that are far off screen. While dragging,
+                                    // keep them all, so the row in your hand isn't deleted when the list
+                                    // scrolls a long way.
+                                    cacheBuffer: dragFrom >= 0 ? Math.max(400, contentHeight) : 400
 
                                     // ── drag to reorder ──
                                     // Kept here, not in the rows, so every row can see the drag.
@@ -967,6 +978,103 @@
                                     property real dragOffset: 0    // how far it has moved from its spot
                                     property bool settling: false  // just dropped: skip the slide-back animation
                                     readonly property real rowStep: 46 + spacing   // row height + gap
+                                    property real grabY: 0         // where you grabbed it, in list-content coordinates
+                                    property real dragMouseY: 0    // the mouse, measured from the list's top edge
+                                    property real grabInRow: 0     // where in the row you grabbed it
+                                    property var dragSong: null    // the song being dragged (mpv entry)
+                                    property var dragInfo: null    // ...and its library info, for the floating copy
+                                    property bool dropping: false  // let go, waiting for mpv to send the new order
+                                    property real dropViewY: 0     // where the dropped row lands, from the list's top edge
+
+                                    // Let go: the floating copy glides into the gap and everything stays
+                                    // as it looks until mpv sends the new order (a few ms). Then the real
+                                    // rows take over, scrolled so nothing on screen moves.
+                                    function drop() {
+                                        const from = dragFrom, to = dragTo;
+                                        if (from < 0 || from === to) {
+                                            endDrag();
+                                            return;
+                                        }
+                                        // the gap = where the row now at `to` sits normally
+                                        const slot = itemAtIndex(to);
+                                        dropViewY = (slot ? slot.y : originY + to * rowStep) - contentY;
+                                        dropping = true;
+                                        dropTimeout.restart();
+                                        music.move(from, to);
+                                    }
+                                    function finishDrop() {
+                                        if (!dropping)
+                                            return;
+                                        const to = dragTo, viewY = dropViewY;
+                                        endDrag();
+                                        forceLayout();
+                                        const row = itemAtIndex(to);
+                                        if (row) {
+                                            const top = originY;
+                                            const bottom = originY + Math.max(0, contentHeight - height);
+                                            contentY = Math.max(top, Math.min(bottom, row.y - viewY));
+                                        }
+                                    }
+                                    function endDrag() {
+                                        dropTimeout.stop();
+                                        settling = true;      // rows jump to their new places, no slide
+                                        dropping = false;
+                                        dragFrom = -1;
+                                        dragTo = -1;
+                                        dragOffset = 0;
+                                    }
+                                    Connections {
+                                        target: music
+                                        // after the list has caught up with the new order
+                                        function onQueueChanged() {
+                                            if (queueList.dropping)
+                                                Qt.callLater(queueList.finishDrop);
+                                        }
+                                    }
+                                    // mpv didn't answer: put things back
+                                    Timer {
+                                        id: dropTimeout
+                                        interval: 800
+                                        onTriggered: queueList.endDrag()
+                                    }
+
+                                    // Content coordinates count from the top of the whole queue, not the
+                                    // visible part, so the offset stays right while the list scrolls.
+                                    function updateDrag() {
+                                        dragOffset = dragMouseY + contentY - grabY;
+                                        // the slot under the middle of the dragged row
+                                        const slot = Math.round(dragFrom + dragOffset / rowStep);
+                                        dragTo = Math.max(0, Math.min(count - 1, slot));
+                                    }
+
+                                    // While dragging, hold the row near the top or bottom edge (or past
+                                    // it) and the list scrolls that way; the closer to the edge, the faster.
+                                    Timer {
+                                        id: edgeScroll
+                                        interval: 16          // about once a frame
+                                        repeat: true
+                                        running: queueList.dragFrom >= 0 && !queueList.dropping
+                                        onTriggered: {
+                                            const zone = 48;      // px from each edge where it starts scrolling
+                                            const maxSpeed = 12;  // px per tick at the very edge
+                                            const y = queueList.dragMouseY;
+                                            let push = 0;
+                                            if (y < zone)
+                                                push = -(zone - y) / zone;
+                                            else if (y > queueList.height - zone)
+                                                push = (y - (queueList.height - zone)) / zone;
+                                            if (push === 0)
+                                                return;
+                                            push = Math.max(-1, Math.min(1, push));
+                                            const top = queueList.originY;
+                                            const bottom = queueList.originY + Math.max(0, queueList.contentHeight - queueList.height);
+                                            const next = Math.max(top, Math.min(bottom, queueList.contentY + push * maxSpeed));
+                                            if (next === queueList.contentY)
+                                                return;
+                                            queueList.contentY = next;
+                                            queueList.updateDrag();
+                                        }
+                                    }
 
                                     ScrollBar.vertical: ScrollBar {
                                         id: queueBar
@@ -1012,12 +1120,15 @@
                                         color: entryMouse.containsMouse || dragged ? Theme.pill : "transparent"
                                         border.width: 1
                                         border.color: entry.modelData.current ? Theme.accent : "transparent"
-                                        scale: dragged ? 1.03 : entryMouse.pressed ? 0.95 : 1
-                                        z: dragged ? 10 : 0                   // drawn above the others
-                                        opacity: dragged ? 0.9 : 1
+                                        scale: entryMouse.pressed && !dragged ? 0.95 : 1
+                                        // The row you're dragging stays in its slot, invisible; a floating
+                                        // copy (dragGhost, below the delegate) follows the mouse instead.
+                                        // The list stops drawing rows that scroll out of view, so a row
+                                        // that moved itself would vanish once its slot scrolled away.
+                                        opacity: dragged ? 0 : 1
 
                                         transform: Translate {
-                                            y: entry.dragged ? queueList.dragOffset : entry.shift
+                                            y: entry.dragged ? 0 : entry.shift
                                             Behavior on y {
                                                 enabled: !entry.dragged && !queueList.settling
                                                 NumberAnimation {
@@ -1064,39 +1175,28 @@
                                                     anchors.margins: -6               // a bit easier to grab
                                                     cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
                                                     preventStealing: true             // keep the list from scrolling instead
-                                                    property real startY: 0
 
                                                     onPressed: mouse => {
-                                                        startY = mapToItem(queueList, 0, mouse.y).y;
+                                                        if (queueList.dropping)
+                                                            return;
+                                                        queueList.dragMouseY = mapToItem(queueList, 0, mouse.y).y;
+                                                        queueList.grabInRow = mapToItem(entry, 0, mouse.y).y;
+                                                        queueList.dragSong = entry.modelData;
+                                                        queueList.dragInfo = entry.info;
+                                                        queueList.grabY = queueList.dragMouseY + queueList.contentY;
                                                         queueList.settling = false;
                                                         queueList.dragOffset = 0;
                                                         queueList.dragTo = entry.index;
                                                         queueList.dragFrom = entry.index;
                                                     }
                                                     onPositionChanged: mouse => {
-                                                        if (queueList.dragFrom < 0)
+                                                        if (queueList.dragFrom < 0 || queueList.dropping)
                                                             return;
-                                                        queueList.dragOffset = mapToItem(queueList, 0, mouse.y).y - startY;
-                                                        // the slot under the middle of the dragged row
-                                                        const slot = Math.round(entry.index + queueList.dragOffset / queueList.rowStep);
-                                                        queueList.dragTo = Math.max(0, Math.min(queueList.count - 1, slot));
+                                                        queueList.dragMouseY = mapToItem(queueList, 0, mouse.y).y;
+                                                        queueList.updateDrag();
                                                     }
-                                                    onReleased: {
-                                                        const from = queueList.dragFrom, to = queueList.dragTo;
-                                                        // snap everything back without animating; mpv's new
-                                                        // order arrives a moment later and redraws the list
-                                                        queueList.settling = true;
-                                                        queueList.dragFrom = -1;
-                                                        queueList.dragTo = -1;
-                                                        queueList.dragOffset = 0;
-                                                        music.move(from, to);
-                                                    }
-                                                    onCanceled: {
-                                                        queueList.settling = true;
-                                                        queueList.dragFrom = -1;
-                                                        queueList.dragTo = -1;
-                                                        queueList.dragOffset = 0;
-                                                    }
+                                                    onReleased: queueList.drop()
+                                                    onCanceled: queueList.endDrag()
                                                 }
                                             }
 
@@ -1168,6 +1268,101 @@
                                             }
                                         }
                                     }
+
+                                    // the floating copy of the row being dragged
+                                    Rectangle {
+                                        id: dragGhost
+                                        parent: queueList          // the list itself, not its scrolling content
+                                        visible: queueList.dragFrom >= 0
+                                        z: 10
+                                        x: 0
+                                        y: queueList.dropping ? queueList.dropViewY : queueList.dragMouseY - queueList.grabInRow
+                                        width: queueList.width - 8
+                                        height: 46
+                                        radius: Theme.radius
+                                        color: Theme.pill
+                                        border.width: 1
+                                        border.color: queueList.dragSong && queueList.dragSong.current ? Theme.accent : "transparent"
+                                        scale: queueList.dropping ? 1 : 1.03
+
+                                        // only animates the glide into the gap, not following the mouse
+                                        Behavior on y {
+                                            enabled: queueList.dropping
+                                            NumberAnimation {
+                                                duration: 120
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 120
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Text {
+                                            x: 4
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "drag_indicator"
+                                            color: Theme.text
+                                            opacity: 0.8
+                                            font.family: Theme.iconFont
+                                            font.pixelSize: Theme.iconSize
+                                            font.variableAxes: Theme.iconAxes
+                                        }
+                                        ClippingRectangle {
+                                            id: ghostCover
+                                            x: 28
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 36
+                                            height: 36
+                                            radius: 6
+                                            color: Theme.bg
+
+                                            Image {
+                                                anchors.fill: parent
+                                                source: queueList.dragInfo ? queueList.dragInfo.cover : ""
+                                                sourceSize: Qt.size(72, 72)
+                                                fillMode: Image.PreserveAspectCrop
+                                            }
+                                            Text {
+                                                anchors.centerIn: parent
+                                                visible: !queueList.dragInfo || queueList.dragInfo.cover === ""
+                                                text: "music_note"
+                                                color: Theme.pillIcon
+                                                font.family: Theme.iconFont
+                                                font.pixelSize: Theme.iconSize
+                                            }
+                                        }
+                                        Column {
+                                            anchors.left: ghostCover.right
+                                            anchors.leftMargin: 10
+                                            anchors.right: parent.right
+                                            anchors.rightMargin: 12
+                                            anchors.verticalCenter: parent.verticalCenter
+
+                                            Text {
+                                                width: parent.width
+                                                text: queueList.dragInfo ? queueList.dragInfo.title : queueList.dragSong ? queueList.dragSong.filename.split("/").pop() : ""
+                                                elide: Text.ElideRight
+                                                color: queueList.dragSong && queueList.dragSong.current ? Theme.accent : Theme.text
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize
+                                                font.weight: 700
+                                                font.letterSpacing: Theme.letterSpacing
+                                            }
+                                            Text {
+                                                width: parent.width
+                                                visible: text !== ""
+                                                text: queueList.dragInfo ? queueList.dragInfo.artist : ""
+                                                elide: Text.ElideRight
+                                                color: Theme.text
+                                                opacity: 0.6
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize * 0.85
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1235,11 +1430,335 @@
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Theme.spacing
 
+                    // ── Display: brightness, night light, color filters ──
+                    // Icon only, like Bluetooth. The icon shows what's on: a filter, night
+                    // light, or plain brightness.
+                    Widget {
+                        anchors.verticalCenter: parent.verticalCenter
+                        icon: {
+                            if (disp.filter === "invert")
+                                return "invert_colors";
+                            if (disp.filter === "grayscale")
+                                return "filter_b_and_w";
+                            if (disp.filter === "sepia")
+                                return "filter_vintage";
+                            if (disp.filter === "contrast")
+                                return "contrast";
+                            return disp.nightOn ? "nightlight" : "brightness_6";
+                        }
+
+                        Column {
+                            id: disp
+                            spacing: 8
+                            width: 280
+
+                            // ── state ──
+                            // "backlight": a laptop screen, set for real with brightnessctl.
+                            // "gamma": no backlight (desktop monitor), so dim it in software with
+                            //          hyprsunset instead. Looks the same, but the panel stays at
+                            //          full power.
+                            property string mode: "backlight"
+                            property int brightness: 100     // percent
+                            property bool nightOn: false
+                            property int kelvin: 4000        // night light warmth: lower = warmer
+                            property string filter: "none"   // none / invert / grayscale / sepia / contrast
+                            readonly property string shaderDir: Quickshell.env("HOME") + "/.config/hypr/shaders/"
+
+                            // Read the real values each time the popup opens, so keys or other
+                            // tools changing them are picked up.
+                            readonly property bool shown: !!QsWindow.window && QsWindow.window.visible
+                            onShownChanged: if (shown)
+                                reader.running = true
+
+                            Process {
+                                id: reader
+                                running: true
+                                // prints e.g. "backlight 45" (or "gamma 100.000000"), then "night false 4000"
+                                command: ["sh", "-c", "if out=$(brightnessctl -m -c backlight 2>/dev/null); then echo \"backlight $(echo \"$out\" | head -n1 | cut -d, -f4 | tr -d %)\"; else echo \"gamma $(hyprctl hyprsunset gamma 2>/dev/null)\"; fi; echo \"night $(hyprctl hyprsunset identity get 2>/dev/null) $(hyprctl hyprsunset temperature 2>/dev/null)\""]
+                                stdout: StdioCollector {
+                                    onStreamFinished: {
+                                        for (const line of text.trim().split("\n")) {
+                                            const f = line.trim().split(/\s+/);
+                                            if (f[0] === "backlight" || f[0] === "gamma") {
+                                                disp.mode = f[0];
+                                                const v = parseFloat(f[1]);
+                                                if (!isNaN(v) && !brightSlider.pressed)
+                                                    disp.brightness = Math.round(v);
+                                            } else if (f[0] === "night" && (f[1] === "true" || f[1] === "false")) {
+                                                // identity = "no color change", so night light is off
+                                                disp.nightOn = f[1] === "false";
+                                                const k = parseInt(f[2]);
+                                                if (disp.nightOn && !isNaN(k) && !warmSlider.pressed)
+                                                    disp.kelvin = k;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Sliders fire many times a second while dragging. Each setter runs
+                            // one command at a time: if you move again while it's still running,
+                            // it sends the newest value as soon as it's done. That keeps it
+                            // smooth without piling up hundreds of processes.
+                            property bool brightDirty: false
+                            function pushBrightness() {
+                                if (brightSetter.running) {
+                                    brightDirty = true;
+                                    return;
+                                }
+                                brightSetter.command = mode === "backlight" ? ["brightnessctl", "-q", "-c", "backlight", "set", brightness + "%"] : ["hyprctl", "hyprsunset", "gamma", String(brightness)];
+                                brightSetter.running = true;
+                            }
+                            Process {
+                                id: brightSetter
+                                onExited: if (disp.brightDirty) {
+                                    disp.brightDirty = false;
+                                    disp.pushBrightness();
+                                }
+                            }
+
+                            property bool sunDirty: false
+                            function pushNight() {
+                                if (sunSetter.running) {
+                                    sunDirty = true;
+                                    return;
+                                }
+                                // "identity" = no tint at all; "temperature N" turns the tint on
+                                sunSetter.command = nightOn ? ["hyprctl", "hyprsunset", "temperature", String(kelvin)] : ["hyprctl", "hyprsunset", "identity"];
+                                sunSetter.running = true;
+                            }
+                            Process {
+                                id: sunSetter
+                                onExited: if (disp.sunDirty) {
+                                    disp.sunDirty = false;
+                                    disp.pushNight();
+                                }
+                            }
+
+                            // Color filters are Hyprland screen shaders (the .frag files in
+                            // ~/.config/hypr/shaders). Setting decoration.screen_shader to ""
+                            // turns the filter off. Picking the active one again also turns it off.
+                            function setFilter(name) {
+                                filter = filter === name ? "none" : name;
+                                const path = filter === "none" ? "" : shaderDir + filter + ".frag";
+                                Quickshell.execDetached(["hyprctl", "eval", "hl.config({ decoration = { screen_shader = \"" + path + "\" } })"]);
+                            }
+
+                            // ── header: title, and Reset on the right ──
+                            Item {
+                                width: parent.width
+                                height: 26
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Display"
+                                    color: Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 1.2
+                                    font.weight: 700
+                                    font.letterSpacing: Theme.letterSpacing
+                                }
+                                Chip {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    label: "Reset"
+                                    // full brightness, no tint, no filter
+                                    onClicked: {
+                                        disp.brightness = 100;
+                                        disp.pushBrightness();
+                                        disp.nightOn = false;
+                                        disp.pushNight();
+                                        if (disp.filter !== "none")
+                                            disp.setFilter(disp.filter);
+                                    }
+                                }
+                            }
+
+                            // ── brightness ──
+                            Item {
+                                width: parent.width
+                                height: brightLabel.implicitHeight
+
+                                Text {
+                                    id: brightLabel
+                                    text: disp.mode === "backlight" ? "Brightness" : "Brightness (software)"
+                                    color: Theme.text
+                                    opacity: 0.6
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                    font.weight: 600
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    text: disp.brightness + "%"
+                                    color: Theme.yellow
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                    font.weight: 700
+                                }
+                            }
+                            Row {
+                                spacing: 6
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "brightness_low"
+                                    color: Theme.text
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                                HSlider {
+                                    id: brightSlider
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: disp.width - 2 * (Theme.iconSize + 6)
+                                    // never all the way to 0: a black screen is hard to fix by mouse
+                                    from: disp.mode === "backlight" ? 1 : 20
+                                    to: 100
+                                    stepSize: 1
+                                    tint: Theme.yellow
+                                    value: disp.brightness
+                                    onMoved: {
+                                        disp.brightness = Math.round(value);
+                                        disp.pushBrightness();
+                                    }
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "brightness_high"
+                                    color: Theme.yellow
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                            }
+
+                            // ── night light ──
+                            Item {
+                                width: parent.width
+                                height: 24
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Night light" + (disp.nightOn ? "  ·  " + disp.kelvin + " K" : "")
+                                    color: Theme.text
+                                    opacity: 0.6
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                    font.weight: 600
+                                }
+                                Chip {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    label: disp.nightOn ? "On" : "Off"
+                                    selected: disp.nightOn
+                                    tint: Theme.orange
+                                    onClicked: {
+                                        disp.nightOn = !disp.nightOn;
+                                        disp.pushNight();
+                                    }
+                                }
+                            }
+                            Row {
+                                spacing: 6
+                                // dimmed while off; dragging it turns night light on
+                                opacity: disp.nightOn ? 1 : 0.5
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: 150
+                                    }
+                                }
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "local_fire_department"
+                                    color: Theme.orange
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                                HSlider {
+                                    id: warmSlider
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: disp.width - 2 * (Theme.iconSize + 6)
+                                    // left = warm (2500 K), right = barely tinted (6000 K)
+                                    from: 2500
+                                    to: 6000
+                                    stepSize: 100
+                                    tint: Theme.orange
+                                    value: disp.kelvin
+                                    onMoved: {
+                                        disp.kelvin = Math.round(value);
+                                        disp.nightOn = true;
+                                        disp.pushNight();
+                                    }
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "ac_unit"
+                                    color: Theme.blue
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                            }
+
+                            // ── color filters: one at a time ──
+                            Text {
+                                text: "Color filter"
+                                color: Theme.text
+                                opacity: 0.6
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.85
+                                font.weight: 600
+                            }
+                            Grid {
+                                width: parent.width
+                                columns: 2
+                                spacing: 6
+
+                                Repeater {
+                                    model: [
+                                        {
+                                            "id": "invert",
+                                            "label": "Invert"
+                                        },
+                                        {
+                                            "id": "grayscale",
+                                            "label": "Grayscale"
+                                        },
+                                        {
+                                            "id": "sepia",
+                                            "label": "Sepia"
+                                        },
+                                        {
+                                            "id": "contrast",
+                                            "label": "Contrast"
+                                        }
+                                    ]
+
+                                    Chip {
+                                        required property var modelData
+                                        width: (disp.width - 6) / 2   // two per row, same size
+                                        label: modelData.label
+                                        selected: disp.filter === modelData.id
+                                        tint: Theme.magenta
+                                        onClicked: disp.setFilter(modelData.id)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // ── Bluetooth ──
                     // In the bar: just the icon, no pill. Click it for the device list.
                     Widget {
                         anchors.verticalCenter: parent.verticalCenter
-                        icon: !btList.powered ? "bluetooth_disabled" : btList.anyConnected ? "bluetooth_connected" : "bluetooth"
+                        // bluetooth_searching (the one with waves) while something is still connecting
+                        icon: !btList.powered ? "bluetooth_disabled" : btList.anyConnected ? "bluetooth_connected" : btList.anyConnecting ? "bluetooth_searching" : "bluetooth"
 
                         Column {
                             id: btList
@@ -1247,7 +1766,58 @@
 
                             readonly property var adapter: Bluetooth.defaultAdapter
                             readonly property bool powered: !!adapter && adapter.enabled
-                            readonly property bool anyConnected: Bluetooth.devices.values.some(d => d.connected)
+                            // "Connected" here means actually usable (see ready() below), not just
+                            // "BlueZ has a radio link".
+                            readonly property bool anyConnected: Bluetooth.devices.values.some(d => ready(d))
+                            readonly property bool anyConnecting: Bluetooth.devices.values.some(d => d.state === BluetoothDeviceState.Connecting || (d.connected && !ready(d)))
+
+                            // ── When is a device really connected? ──
+                            // BlueZ (and so Quickshell) flips a device to "Connected" as soon as the
+                            // Bluetooth link is up. For headphones and speakers the audio part (A2DP)
+                            // takes a few more seconds; that's the gap you saw with the AirPods.
+                            // WirePlumber only creates the device's audio node once audio is ready,
+                            // and names it after the MAC address with _ for : (from WirePlumber's
+                            // monitor-utils.lua: "bluez_output.C0_1E_7C_D0_1C_84.1", or
+                            // "bluez_input..." for a mic). So an audio device counts as connected
+                            // once a node with its address exists.
+                            // Mice, keyboards, phones etc. have no node; for them BlueZ's
+                            // "Connected" is used as-is.
+                            readonly property var btNodeNames: Pipewire.nodes.values.filter(n => n.name.startsWith("bluez_")).map(n => n.name)
+                            function isAudio(device) {
+                                return device.icon.startsWith("audio");
+                            }
+                            function hasNode(device) {
+                                const key = device.address.replace(/:/g, "_");
+                                return btNodeNames.some(n => n.includes(key));
+                            }
+                            // Safety net: if an audio device is linked but never gets a node (say
+                            // it only connected for something other than audio), call it connected
+                            // after 15 s anyway instead of saying "Connecting..." forever.
+                            property var linkedSince: ({})  // address -> time BlueZ said Connected
+                            property double now: Date.now()
+                            function ready(device) {
+                                if (device.state !== BluetoothDeviceState.Connected)
+                                    return false;
+                                if (!isAudio(device) || hasNode(device))
+                                    return true;
+                                const t = linkedSince[device.address];
+                                return t !== undefined && now - t >= 15000;
+                            }
+                            Timer {
+                                // only ticks while an audio device is linked but has no node yet
+                                running: Bluetooth.devices.values.some(d => d.connected && btList.isAudio(d) && !btList.hasNode(d))
+                                interval: 1000
+                                repeat: true
+                                triggeredOnStart: true
+                                onTriggered: {
+                                    btList.now = Date.now();
+                                    const next = {};
+                                    for (const d of Bluetooth.devices.values)
+                                        if (d.connected)
+                                            next[d.address] = btList.linkedSince[d.address] ?? btList.now;
+                                    btList.linkedSince = next; // reassign so bindings notice
+                                }
+                            }
 
                             // Devices that have a name (or that you've paired): connected first, then
                             // paired, then A to Z. Nameless ones are usually random nearby gadgets.
@@ -1265,7 +1835,7 @@
                             // Status shown next to each device.
                             function stateText(device) {
                                 if (device.state === BluetoothDeviceState.Connected)
-                                    return "Connected";
+                                    return ready(device) ? "Connected" : "Connecting...";
                                 if (device.state === BluetoothDeviceState.Connecting)
                                     return "Connecting...";
                                 if (device.state === BluetoothDeviceState.Disconnecting)
@@ -1472,6 +2042,7 @@
                                     required property var modelData
                                     readonly property var device: modelData
                                     readonly property bool expanded: btList.active === device
+                                    readonly property bool ready: btList.ready(device)  // really connected
 
                                     width: 280
                                     height: btHeader.height + btDrop.height
@@ -1505,7 +2076,7 @@
                                             anchors.leftMargin: 10
                                             anchors.verticalCenter: parent.verticalCenter
                                             text: btList.glyph(btRow.device)
-                                            color: btRow.device.connected ? Theme.accent : Theme.text
+                                            color: btRow.ready ? Theme.accent : Theme.text
                                             font.family: Theme.iconFont
                                             font.pixelSize: Theme.iconSize
                                             font.variableAxes: Theme.iconAxes
@@ -1520,10 +2091,10 @@
                                             }
                                             text: btRow.device.name
                                             elide: Text.ElideRight
-                                            color: btRow.device.connected ? Theme.accent : Theme.text
+                                            color: btRow.ready ? Theme.accent : Theme.text
                                             font.family: Theme.font
                                             font.pixelSize: Theme.textSize
-                                            font.weight: btRow.device.connected ? 700 : 500
+                                            font.weight: btRow.ready ? 700 : 500
                                             font.letterSpacing: Theme.letterSpacing
                                         }
                                         // per-device status (and battery, when the device reports it)
@@ -1535,7 +2106,7 @@
                                                 verticalCenter: parent.verticalCenter
                                             }
                                             text: btList.stateText(btRow.device) + (btRow.device.batteryAvailable ? "  ·  " + Math.round(btRow.device.battery * 100) + "%" : "")
-                                            color: btRow.device.connected ? Theme.green : btRow.device === btList.failedDevice ? Theme.red : Theme.text
+                                            color: btRow.ready ? Theme.green : btRow.device === btList.failedDevice ? Theme.red : btRow.device.connected ? Theme.yellow : Theme.text
                                             opacity: btRow.device.connected || btRow.device === btList.failedDevice ? 1 : 0.6
                                             font.family: Theme.font
                                             font.pixelSize: Theme.textSize * 0.85
@@ -3161,7 +3732,8 @@
   xdg.configFile."quickshell/Widget.qml".text = ''
     // A bar button that opens its own popup underneath it.
     // The popup hangs off the bottom of the bar and curves into it, like it's
-    // part of the bar, and slides down when it opens.
+    // part of the bar, slides down when it opens, and slides back up into the
+    // bar when it closes.
     // Click to open, click again (or anywhere outside) to close.
     //
     //   Widget {
@@ -3177,6 +3749,7 @@
     import QtQuick
     import QtQuick.Shapes
     import Quickshell
+    import Quickshell.Hyprland
 
     Item {
         id: root
@@ -3189,7 +3762,8 @@
         property int padding: 12       // space between the popup's edge and your content
         property int curve: 14         // size of the two curves where the popup melts into the bar
         property int cornerRadius: 14  // roundness of the popup's two bottom corners
-        property int duration: 350     // slide-down time in ms
+        property int duration: 350       // slide-down (open) time in ms
+        property int closeDuration: 260  // slide-up (close) time in ms; closing a bit faster feels snappier
 
         // true while the popup is open (or opening)
         property bool open: false
@@ -3206,12 +3780,24 @@
         function openPopup() {
             popup.visible = true
             root.open = true
+            grab.active = true
+            // Opening: starts fast and settles (OutCubic), sliding down out of the bar.
+            slide.duration = root.duration
+            slide.easing.type = Easing.OutCubic
             slide.to = 1
             slide.restart()
         }
 
         function closePopup() {
+            if (!root.open)
+                return
             root.open = false
+            grab.active = false
+            // Closing: the same slide played backwards. The mirror of "starts fast and
+            // settles" is "starts gently and speeds up", so it gets pulled back into
+            // the bar. InQuad instead of InCubic so it reacts right away on click.
+            slide.duration = root.closeDuration
+            slide.easing.type = Easing.InQuad
             slide.to = 0
             slide.restart()      // the window is hidden once this finishes (see onFinished)
         }
@@ -3220,10 +3806,25 @@
             id: slide
             target: root
             property: "openness"
-            duration: root.duration
-            easing.type: Easing.OutCubic
             onFinished: if (root.openness === 0) popup.visible = false
         }
+
+        // Click-outside-to-close. The popup used to take the pointer itself
+        // (grabFocus), but then Hyprland closes it instantly when you click away and
+        // there's no time to animate. Hyprland's focus grab only *tells* us about the
+        // outside click (onCleared) and leaves the window up, so we can slide it back
+        // into the bar first. Keyboard input still goes to the popup while it's active.
+        HyprlandFocusGrab {
+            id: grab
+            windows: [popup]
+            onCleared: {
+                root.clearedAt = Date.now()
+                root.closePopup()
+            }
+        }
+        // When the outside click that closed it was on this same button, don't let
+        // that click reopen it straight away.
+        property double clearedAt: 0
 
         // Creates whatever was passed as `button:` and shows it, centered.
         Loader {
@@ -3242,7 +3843,12 @@
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.open ? root.closePopup() : root.openPopup()
+            onClicked: {
+                if (root.open)
+                    root.closePopup()
+                else if (Date.now() - root.clearedAt > 300)
+                    root.openPopup()
+            }
         }
 
         // The default button: a Material Symbols icon, like IconButton.
@@ -3285,12 +3891,12 @@
 
             color: "transparent"    // the shape below is what you see
             visible: false          // starts closed
-            grabFocus: true         // clicking outside closes it
 
-            // Clicking outside makes the compositor close the popup instantly,
-            // without our animation. Reset so the next click opens it again.
+            // If the compositor ever hides the popup by itself, skip the animation
+            // and reset so the next click opens it again.
             onClosed: {
                 slide.stop()
+                grab.active = false
                 root.openness = 0
                 root.open = false
             }
@@ -3516,6 +4122,164 @@
                 font.letterSpacing: Theme.letterSpacing
             }
         }
+    }
+  '';
+
+  # A small rounded toggle/button with a label, used by the Display widget.
+  #   Chip { label: "On"; selected: true; tint: Theme.orange; onClicked: ... }
+  xdg.configFile."quickshell/Chip.qml".text = ''
+    import QtQuick
+
+    Rectangle {
+        id: chip
+
+        property string label: ""
+        property bool selected: false      // filled with `tint` when true
+        property color tint: Theme.accent
+
+        signal clicked
+
+        implicitWidth: chipLabel.implicitWidth + 24
+        implicitHeight: 24
+        radius: height / 2
+        color: selected ? tint : chipMouse.containsMouse ? Theme.pill : "transparent"
+        border.width: 1
+        border.color: selected ? tint : Theme.pill
+        scale: chipMouse.pressed ? 0.85 : 1
+
+        Behavior on color {
+            ColorAnimation {
+                duration: 120
+            }
+        }
+        Behavior on scale {
+            NumberAnimation {
+                duration: 120
+                easing.type: Easing.OutCubic
+            }
+        }
+
+        Text {
+            id: chipLabel
+            anchors.centerIn: parent
+            text: chip.label
+            color: chip.selected ? Theme.bg : Theme.text
+            font.family: Theme.font
+            font.pixelSize: Theme.textSize * 0.9
+            font.weight: 700
+        }
+        MouseArea {
+            id: chipMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: chip.clicked()
+        }
+    }
+  '';
+
+  # A horizontal slider in the same style as the media seek bar, with a color.
+  xdg.configFile."quickshell/HSlider.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+
+    Slider {
+        id: control
+
+        property color tint: Theme.accent
+
+        padding: 6
+        HoverHandler {
+            cursorShape: control.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+        }
+
+        background: Rectangle {        // the track
+            x: control.leftPadding
+            y: control.topPadding + control.availableHeight / 2 - height / 2
+            implicitWidth: 200
+            implicitHeight: 4
+            width: control.availableWidth
+            height: implicitHeight
+            radius: 2
+            color: Theme.pill
+
+            Rectangle {                // the filled part
+                width: control.visualPosition * parent.width
+                height: parent.height
+                radius: 2
+                color: control.tint
+            }
+        }
+
+        handle: Rectangle {            // the knob
+            x: control.leftPadding + control.visualPosition * (control.availableWidth - width)
+            y: control.topPadding + control.availableHeight / 2 - height / 2
+            implicitWidth: 12
+            implicitHeight: 12
+            radius: 6
+            color: control.pressed ? control.tint : Theme.text
+        }
+    }
+  '';
+
+  # ── Color filters for the Display widget ──
+  # Hyprland runs one of these over the whole screen (decoration.screen_shader).
+  # Same format as Hyprland's own shaders: the screen comes in as `tex`.
+  xdg.configFile."hypr/shaders/invert.frag".text = ''
+    #version 300 es
+    precision highp float;
+    in vec2 v_texcoord;
+    uniform sampler2D tex;
+    layout(location = 0) out vec4 fragColor;
+
+    void main() {
+        vec4 c = texture(tex, v_texcoord);
+        fragColor = vec4(1.0 - c.rgb, c.a);
+    }
+  '';
+  xdg.configFile."hypr/shaders/grayscale.frag".text = ''
+    #version 300 es
+    precision highp float;
+    in vec2 v_texcoord;
+    uniform sampler2D tex;
+    layout(location = 0) out vec4 fragColor;
+
+    void main() {
+        vec4 c = texture(tex, v_texcoord);
+        // how bright each color looks to the eye (Rec. 709 weights)
+        float y = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+        fragColor = vec4(vec3(y), c.a);
+    }
+  '';
+  xdg.configFile."hypr/shaders/sepia.frag".text = ''
+    #version 300 es
+    precision highp float;
+    in vec2 v_texcoord;
+    uniform sampler2D tex;
+    layout(location = 0) out vec4 fragColor;
+
+    void main() {
+        vec4 c = texture(tex, v_texcoord);
+        // the classic sepia-tone matrix
+        vec3 s = vec3(
+            dot(c.rgb, vec3(0.393, 0.769, 0.189)),
+            dot(c.rgb, vec3(0.349, 0.686, 0.168)),
+            dot(c.rgb, vec3(0.272, 0.534, 0.131)));
+        fragColor = vec4(min(s, vec3(1.0)), c.a);
+    }
+  '';
+  xdg.configFile."hypr/shaders/contrast.frag".text = ''
+    #version 300 es
+    precision highp float;
+    in vec2 v_texcoord;
+    uniform sampler2D tex;
+    layout(location = 0) out vec4 fragColor;
+
+    void main() {
+        vec4 c = texture(tex, v_texcoord);
+        // push colors away from mid-gray: darks darker, lights lighter
+        vec3 h = (c.rgb - 0.5) * 1.35 + 0.5;
+        fragColor = vec4(clamp(h, 0.0, 1.0), c.a);
     }
   '';
 
@@ -4006,6 +4770,19 @@
   # Bluetooth pairing agent (with services.blueman in configuration.nix): when a device
   # wants a code confirmed, blueman shows the dialog. The bar's widget does the rest.
   services.blueman-applet.enable = true;
+
+  # Night light (and software dimming on screens without a backlight) for the
+  # bar's Display widget. --identity: start with no tint; the widget turns it on.
+  services.hyprsunset = {
+    enable = true;
+    extraArgs = [ "--identity" ];
+  };
+  # Same start-up race as awww: don't skip it if WAYLAND_DISPLAY isn't set yet,
+  # just retry quickly.
+  systemd.user.services.hyprsunset = {
+    Unit.ConditionEnvironment = lib.mkForce "";
+    Service.RestartSec = lib.mkForce 2;
+  };
   programs.hyprtoolkit.settings = {
     background = "0xFF2D353B"; # your Theme.bg (everforest bg0)
     base = "0xFF3D484D"; # your Theme.pill (bg2)
@@ -4090,6 +4867,10 @@
       hl.unbind("SUPER + SHIFT + Right")
       hl.bind("SUPER + SHIFT + Right", hl.dsp.focus({ workspace = "+1" }))
       hl.bind("Print", hl.dsp.exec_cmd("uwsm app -- hyprshot -m region --output-folder ~/Pictures/Screenshots"))
+      -- Laptop brightness keys: hold to keep going, and they work on the lock screen too.
+      -- --min-value=1 stops it at 1 instead of going fully black.
+      hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd("brightnessctl -q -c backlight set 5%+"), { repeating = true, locked = true })
+      hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("brightnessctl -q -c backlight --min-value=1 set 5%-"), { repeating = true, locked = true })
       hl.bind("SUPER + CTRL + Right", hl.dsp.window.move({ workspace = "+1" }))
       hl.bind("SUPER + CTRL + Left", hl.dsp.window.move({ workspace = -1 }))
 
