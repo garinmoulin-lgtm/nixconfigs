@@ -1689,6 +1689,77 @@ in
   # hardware-configuration.nix usually turns this on already; set here so it's certain.
   hardware.enableRedistributableFirmware = true;
 
+  # ── Bluetooth firmware for the board's MediaTek MT7927 (ROG Strix X870E-E) ──
+  # The kernel driver is there (Linux 7.1+), but its firmware file,
+  # mediatek/mt7927/BT_RAM_CODE_MT6639_2_1_hdr.bin, isn't in linux-firmware (only the
+  # Wi-Fi files are), so without this the chip just resets over and over. It's pulled out
+  # of ASUS's own Wi-Fi/Bluetooth driver ZIP, the way the mediatek-mt7927-dkms package
+  # does it (the `mt7927-dkms` input in flake.nix).
+  #
+  # Updates: which ASUS driver release to use (file name + SHA-256) and the extractor
+  # script both come from that repo, so `nix flake update` moves to whatever release it
+  # uses next. Nix still only accepts a ZIP that matches the hash the repo lists.
+  # Once linux-firmware ships this file, delete this block (and the flake input).
+  hardware.firmware =
+    let
+      dkms = inputs.mt7927-dkms;
+      # "_driver_filename='...'" and "_driver_sha256='...'" from the repo's PKGBUILD
+      pkgbuildLines = builtins.filter builtins.isString (builtins.split "\n" (builtins.readFile "${dkms}/PKGBUILD"));
+      pkgbuildValue =
+        key:
+        let
+          found = builtins.filter (m: m != null) (map (l: builtins.match "${key}='([^']+)'" l) pkgbuildLines);
+        in
+        if found == [ ] then
+          throw "mt7927 firmware: ${key} not found in mediatek-mt7927-dkms's PKGBUILD (format changed?)"
+        else
+          builtins.head (builtins.head found);
+      driverZipName = pkgbuildValue "_driver_filename";
+
+      # Download the ZIP. ASUS serves it at a plain address; if that ever stops working,
+      # it falls back to ASUS's signed-link service (what the repo's download-driver.sh
+      # does). This is a fixed-output build: it may use the network because its result
+      # must match the hash, like fetchurl.
+      asusDriverZip =
+        pkgs.runCommand driverZipName
+          {
+            nativeBuildInputs = [
+              pkgs.curl
+              pkgs.jq
+            ];
+            SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+            outputHashMode = "flat";
+            outputHashAlgo = "sha256";
+            outputHash = pkgbuildValue "_driver_sha256";
+          }
+          ''
+            file=${driverZipName}
+            path="https://dlcdnets.asus.com/pub/ASUS/mb/08WIRELESS/$file"
+            if ! curl -sSfL -o "$out" "$path"; then
+              echo "plain download failed, asking ASUS for a signed link" >&2
+              json=$(curl -sSf -X POST -H 'Origin: https://rog.asus.com' \
+                "https://cdnta.asus.com/api/v1/TokenHQ?filePath=https:%2F%2Fdlcdnta.asus.com%2Fpub%2FASUS%2Fmb%2F08WIRELESS%2F$file%3Fmodel%3DROG%2520CROSSHAIR%2520X870E%2520HERO&systemCode=rog")
+              field() { echo "$json" | jq -r "[.. | .$1? // empty] | first"; }
+              curl -sSfL -o "$out" \
+                "https://dlcdnta.asus.com/pub/ASUS/mb/08WIRELESS/$file?model=ROG%20CROSSHAIR%20X870E%20HERO&Signature=$(field signature)&Expires=$(field expires)&Key-Pair-Id=$(field keyPairId)"
+            fi
+          '';
+    in
+    [
+      (pkgs.stdenvNoCC.mkDerivation {
+        pname = "mt7927-bt-firmware";
+        version = builtins.substring 0 8 (dkms.rev or "unknown");
+        src = asusDriverZip;
+        nativeBuildInputs = [ pkgs.python3 ];
+        dontUnpack = true;
+        installPhase = ''
+          python3 ${dkms}/extract_firmware.py $src fw --bluetooth-only
+          install -Dm644 fw/BT_RAM_CODE_MT6639_2_1_hdr.bin \
+            $out/lib/firmware/mediatek/mt7927/BT_RAM_CODE_MT6639_2_1_hdr.bin
+        '';
+      })
+    ];
+
   # ── Bluetooth ──
   # BlueZ, which the bar's Bluetooth widget talks to (Quickshell.Bluetooth uses BlueZ over D-Bus).
   # If it doesn't show up: BIOS → Advanced → Onboard Devices Configuration → Bluetooth

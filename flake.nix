@@ -19,6 +19,13 @@
       url = "github:Lyndeno/apple-fonts.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # MediaTek MT7927 Bluetooth firmware (see hardware.firmware in configuration.nix).
+    # Not a flake, just the repo's files: its firmware extractor, and the ASUS driver
+    # release (file name + hash) it currently uses. `nix flake update` follows it.
+    mt7927-dkms = {
+      url = "github:jetm/mediatek-mt7927-dkms";
+      flake = false;
+    };
   };
 
   outputs =
