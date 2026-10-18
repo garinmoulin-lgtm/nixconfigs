@@ -6242,7 +6242,7 @@ in
           selected = mkLiteral "#a7c080";
           active = mkLiteral "#83c092";
           urgent = mkLiteral "#e67e80";
-          font = "SFMono Nerd Font 11";
+          font = "SFMono Nerd Font Semi-Bold 11";
           border-radius = mkLiteral "8px";
         };
         "window" = {
