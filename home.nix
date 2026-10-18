@@ -482,9 +482,855 @@ in
                     Workspaces {
                         screen: bar.screen
                     }
-                    Weather {
+
+                    // ── Display: brightness, night light, color filters ──
+                    // Icon only, like Bluetooth. The icon shows what's on: a filter, night
+                    // light, or plain brightness.
+                    Widget {
                         anchors.verticalCenter: parent.verticalCenter
+                        icon: {
+                            if (disp.filter === "invert")
+                                return "invert_colors";
+                            if (disp.filter === "grayscale")
+                                return "filter_b_and_w";
+                            if (disp.filter === "sepia")
+                                return "filter_vintage";
+                            if (disp.filter === "contrast")
+                                return "contrast";
+                            return disp.nightOn ? "nightlight" : "brightness_6";
+                        }
+
+                        Column {
+                            id: disp
+                            spacing: 8
+                            width: 280
+
+                            // ── state ──
+                            // "backlight": a laptop screen; brightness is set for real with
+                            //              brightnessctl (the panel actually dims).
+                            // "software":  no backlight (a desktop monitor), so it's dimmed by
+                            //              Hyprland's screen shader instead, like night light.
+                            property string mode: "backlight"
+                            property int brightness: 100     // percent
+                            property bool nightOn: false
+                            property int kelvin: 4000        // night light warmth: lower = warmer
+                            property string filter: "none"   // none / invert / grayscale / sepia / contrast
+
+                            // ── How night light, software dimming and the filters work ──
+                            // All three are one screen shader: a tiny GPU program Hyprland runs
+                            // over the finished picture of the whole screen. Whenever something
+                            // changes, a new shader is written with the settings baked in and
+                            // Hyprland is told to use it. When everything is off there's no
+                            // shader at all, so it costs nothing.
+                            // (This used to go through hyprsunset, which needs the GPU driver to
+                            // support Hyprland's color-matrix feature. NVIDIA's doesn't reliably,
+                            // which is why night light and software brightness did nothing.)
+
+                            // Night light color: how much red / green / blue light to keep at a
+                            // given temperature (Tanner Helland's well-known approximation of a
+                            // black body's color; 6500 K is about white).
+                            function tint(k) {
+                                const t = k / 100;
+                                const clamp = v => Math.max(0, Math.min(255, v)) / 255;
+                                const r = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592);
+                                const g = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661 : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
+                                const b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
+                                return [clamp(r), clamp(g), clamp(b)];
+                            }
+                            // The GLSL for the current settings, or "" when nothing is on.
+                            function shaderSource() {
+                                const dim = mode === "software" && brightness < 100;
+                                if (!nightOn && !dim && filter === "none")
+                                    return "";
+                                const f = n => n.toFixed(4);
+                                const lines = [];
+                                if (filter === "invert")
+                                    lines.push("col = 1.0 - col;");
+                                else if (filter === "grayscale")
+                                    lines.push("col = vec3(dot(col, vec3(0.2126, 0.7152, 0.0722)));");
+                                else if (filter === "sepia")
+                                    lines.push("col = min(vec3(dot(col, vec3(0.393, 0.769, 0.189)), dot(col, vec3(0.349, 0.686, 0.168)), dot(col, vec3(0.272, 0.534, 0.131))), vec3(1.0));");
+                                else if (filter === "contrast")
+                                    lines.push("col = clamp((col - 0.5) * 1.35 + 0.5, 0.0, 1.0);");
+                                if (nightOn) {
+                                    const c = tint(kelvin);
+                                    lines.push("col *= vec3(" + f(c[0]) + ", " + f(c[1]) + ", " + f(c[2]) + ");");
+                                }
+                                if (dim)
+                                    lines.push("col *= " + f(brightness / 100) + ";");
+                                return ["#version 300 es", "precision highp float;", "in vec2 v_texcoord;", "uniform sampler2D tex;", "layout(location = 0) out vec4 fragColor;", "void main() {", "    vec4 c = texture(tex, v_texcoord);", "    vec3 col = c.rgb;"].concat(lines.map(l => "    " + l)).concat(["    fragColor = vec4(col, c.a);", "}", ""]).join("\n");
+                            }
+
+                            // Writes the shader and switches Hyprland to it. One change at a time:
+                            // while Hyprland is busy with one, newer changes wait, and only the
+                            // latest is sent. (Before, every click went out at once and Hyprland
+                            // worked through the backlog, which is why filters came in bursts.)
+                            // the shader files live in RAM (XDG_RUNTIME_DIR) and are gone after a reboot
+                            readonly property string runDir: Quickshell.env("XDG_RUNTIME_DIR") + "/quickshell-display"
+                            property int shaderSlot: 0       // rotates between 3 file names so Hyprland sees a new path
+                            property bool effectsDirty: false
+                            function applyEffects() {
+                                if (!restored)
+                                    return;
+                                if (effectsSetter.running) {
+                                    effectsDirty = true;
+                                    return;
+                                }
+                                const src = shaderSource();
+                                let path = "";
+                                if (src !== "") {
+                                    shaderSlot = (shaderSlot + 1) % 3;
+                                    path = runDir + "/effect-" + shaderSlot + ".frag";
+                                }
+                                const state = JSON.stringify({
+                                    "brightness": mode === "software" ? brightness : 100,
+                                    "nightOn": nightOn,
+                                    "kelvin": kelvin,
+                                    "filter": filter
+                                });
+                                // $1 folder, $2 shader file ("" = none), $3 shader text, $4 settings file, $5 settings
+                                // Why dim_strength: changing only the shader makes Hyprland redraw just the
+                                // parts of the screen that change, and it keeps 2-3 screen buffers, so old
+                                // and new frames alternate for a while: the flicker, and filters that take
+                                // a while to go away. Setting any window-look option (here dim_strength,
+                                // to the value it already has) makes Hyprland redraw the whole screen for
+                                // the next frames, which gets every buffer up to date. Done twice, a moment
+                                // apart, to cover all of them. (Hyprland does the same "3 full frames"
+                                // trick itself when a monitor is plugged in.)
+                                effectsSetter.command = ["sh", "-c", "mkdir -p \"$1\" \"$(dirname \"$4\")\"; printf '%s' \"$5\" > \"$4\"; [ -n \"$2\" ] && printf '%s' \"$3\" > \"$2\"; keep='dim_strength = hl.get_config(\"decoration.dim_strength\")'; hyprctl eval \"hl.config({ decoration = { screen_shader = \\\"$2\\\", $keep } })\"; sleep 0.05; exec hyprctl eval \"hl.config({ decoration = { $keep } })\"", "sh", runDir, path, src, statePath, state];
+                                effectsSetter.running = true;
+                            }
+                            Process {
+                                id: effectsSetter
+                                onExited: if (disp.effectsDirty) {
+                                    disp.effectsDirty = false;
+                                    disp.applyEffects();
+                                }
+                            }
+                            // ── remember the settings, and put them back after a restart or login ──
+                            // (written by applyEffects above)
+                            readonly property string statePath: Quickshell.env("HOME") + "/.local/state/quickshell/display.json"
+                            FileView {
+                                id: stateFile
+                                path: disp.statePath
+                                blockLoading: true
+                                printErrors: false
+                            }
+                            property bool restored: false
+
+                            // Read the real brightness (and whether there's a backlight at all)
+                            // at start and each time the popup opens, so the keys are picked up.
+                            readonly property bool shown: !!QsWindow.window && QsWindow.window.visible
+                            onShownChanged: if (shown)
+                                reader.running = true
+                            Process {
+                                id: reader
+                                running: true
+                                // prints e.g. "45" (percent), or nothing when there's no backlight
+                                command: ["sh", "-c", "brightnessctl -m -c backlight 2>/dev/null | head -n1 | cut -d, -f4 | tr -d %"]
+                                stdout: StdioCollector {
+                                    onStreamFinished: {
+                                        const v = parseInt(text.trim());
+                                        if (!disp.restored) {
+                                            // first read: decide the mode, then bring back the saved settings
+                                            disp.mode = isNaN(v) ? "software" : "backlight";
+                                            let saved = {};
+                                            try {
+                                                saved = JSON.parse(stateFile.text() || "{}");
+                                            } catch (e) {}
+                                            disp.nightOn = saved.nightOn === true;
+                                            disp.kelvin = saved.kelvin || 4000;
+                                            disp.filter = saved.filter || "none";
+                                            if (disp.mode === "software")
+                                                disp.brightness = saved.brightness || 100;
+                                            disp.restored = true;
+                                            disp.applyEffects();
+                                        }
+                                        if (disp.mode === "backlight" && !isNaN(v) && !brightSlider.pressed)
+                                            disp.brightness = v;
+                                    }
+                                }
+                            }
+
+                            // Laptop backlight: same one-at-a-time idea as above.
+                            property bool brightDirty: false
+                            function pushBrightness() {
+                                if (mode === "software") {
+                                    applyEffects();
+                                    return;
+                                }
+                                if (brightSetter.running) {
+                                    brightDirty = true;
+                                    return;
+                                }
+                                brightSetter.command = ["brightnessctl", "-q", "-c", "backlight", "set", brightness + "%"];
+                                brightSetter.running = true;
+                            }
+                            Process {
+                                id: brightSetter
+                                onExited: if (disp.brightDirty) {
+                                    disp.brightDirty = false;
+                                    disp.pushBrightness();
+                                }
+                            }
+
+                            function pushNight() {
+                                applyEffects();
+                            }
+                            // Picking the active filter again turns it off.
+                            function setFilter(name) {
+                                filter = filter === name ? "none" : name;
+                                applyEffects();
+                            }
+                            function reset() {
+                                brightness = 100;
+                                nightOn = false;
+                                filter = "none";
+                                if (mode === "backlight")
+                                    pushBrightness();
+                                applyEffects();
+                            }
+
+                            // ── header: title, and Reset on the right ──
+                            Item {
+                                width: parent.width
+                                height: 26
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Display"
+                                    color: Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 1.2
+                                    font.weight: 700
+                                    font.letterSpacing: Theme.letterSpacing
+                                }
+                                Chip {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    label: "Reset"
+                                    // full brightness, no tint, no filter
+                                    onClicked: disp.reset()
+                                }
+                            }
+
+                            // ── brightness ──
+                            Item {
+                                width: parent.width
+                                height: brightLabel.implicitHeight
+
+                                Text {
+                                    id: brightLabel
+                                    text: disp.mode === "backlight" ? "Brightness" : "Brightness (software)"
+                                    color: Theme.text
+                                    opacity: 0.6
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                    font.weight: 600
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    text: disp.brightness + "%"
+                                    color: Theme.yellow
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                    font.weight: 700
+                                }
+                            }
+                            Row {
+                                spacing: 6
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "brightness_low"
+                                    color: Theme.text
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                                HSlider {
+                                    id: brightSlider
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: disp.width - 2 * (Theme.iconSize + 6)
+                                    // never all the way to 0: a black screen is hard to fix by mouse
+                                    from: disp.mode === "backlight" ? 1 : 20
+                                    to: 100
+                                    stepSize: 1
+                                    tint: Theme.yellow
+                                    value: disp.brightness
+                                    onMoved: {
+                                        disp.brightness = Math.round(value);
+                                        disp.pushBrightness();
+                                    }
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "brightness_high"
+                                    color: Theme.yellow
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                            }
+
+                            // ── night light ──
+                            Item {
+                                width: parent.width
+                                height: 24
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Night light" + (disp.nightOn ? "  ·  " + disp.kelvin + " K" : "")
+                                    color: Theme.text
+                                    opacity: 0.6
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                    font.weight: 600
+                                }
+                                Chip {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    label: disp.nightOn ? "On" : "Off"
+                                    selected: disp.nightOn
+                                    tint: Theme.orange
+                                    onClicked: {
+                                        disp.nightOn = !disp.nightOn;
+                                        disp.pushNight();
+                                    }
+                                }
+                            }
+                            Row {
+                                spacing: 6
+                                // dimmed while off; dragging it turns night light on
+                                opacity: disp.nightOn ? 1 : 0.5
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: 150
+                                    }
+                                }
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "local_fire_department"
+                                    color: Theme.orange
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                                HSlider {
+                                    id: warmSlider
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: disp.width - 2 * (Theme.iconSize + 6)
+                                    // left = warm (2500 K), right = barely tinted (6000 K)
+                                    from: 2500
+                                    to: 6000
+                                    stepSize: 100
+                                    tint: Theme.orange
+                                    value: disp.kelvin
+                                    onMoved: {
+                                        disp.kelvin = Math.round(value);
+                                        disp.nightOn = true;
+                                        disp.pushNight();
+                                    }
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "ac_unit"
+                                    color: Theme.blue
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                            }
+
+                            // ── color filters: one at a time ──
+                            Text {
+                                text: "Color filter"
+                                color: Theme.text
+                                opacity: 0.6
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.85
+                                font.weight: 600
+                            }
+                            Grid {
+                                width: parent.width
+                                columns: 2
+                                spacing: 6
+
+                                Repeater {
+                                    model: [
+                                        {
+                                            "id": "invert",
+                                            "label": "Invert"
+                                        },
+                                        {
+                                            "id": "grayscale",
+                                            "label": "Grayscale"
+                                        },
+                                        {
+                                            "id": "sepia",
+                                            "label": "Sepia"
+                                        },
+                                        {
+                                            "id": "contrast",
+                                            "label": "Contrast"
+                                        }
+                                    ]
+
+                                    Chip {
+                                        required property var modelData
+                                        width: (disp.width - 6) / 2   // two per row, same size
+                                        label: modelData.label
+                                        selected: disp.filter === modelData.id
+                                        tint: Theme.magenta
+                                        onClicked: disp.setFilter(modelData.id)
+                                    }
+                                }
+                            }
+                        }
                     }
+
+                    // ── Bluetooth ──
+                    // In the bar: just the icon, no pill. Click it for the device list.
+                    Widget {
+                        anchors.verticalCenter: parent.verticalCenter
+                        // bluetooth_searching (the one with waves) while something is still connecting
+                        icon: !btList.powered ? "bluetooth_disabled" : btList.anyConnected ? "bluetooth_connected" : btList.anyConnecting ? "bluetooth_searching" : "bluetooth"
+
+                        Column {
+                            id: btList
+                            spacing: 4
+
+                            readonly property var adapter: Bluetooth.defaultAdapter
+                            readonly property bool powered: !!adapter && adapter.enabled
+                            // "Connected" here means actually usable (see ready() below), not just
+                            // "BlueZ has a radio link".
+                            readonly property bool anyConnected: Bluetooth.devices.values.some(d => ready(d))
+                            readonly property bool anyConnecting: Bluetooth.devices.values.some(d => d.state === BluetoothDeviceState.Connecting || (d.connected && !ready(d)))
+
+                            // ── When is a device really connected? ──
+                            // BlueZ (and so Quickshell) flips a device to "Connected" as soon as the
+                            // Bluetooth link is up. For headphones and speakers the audio part (A2DP)
+                            // takes a few more seconds; that's the gap you saw with the AirPods.
+                            // WirePlumber only creates the device's audio node once audio is ready,
+                            // and names it after the MAC address with _ for : (from WirePlumber's
+                            // monitor-utils.lua: "bluez_output.C0_1E_7C_D0_1C_84.1", or
+                            // "bluez_input..." for a mic). So an audio device counts as connected
+                            // once a node with its address exists.
+                            // Mice, keyboards, phones etc. have no node; for them BlueZ's
+                            // "Connected" is used as-is.
+                            readonly property var btNodeNames: Pipewire.nodes.values.filter(n => n.name.startsWith("bluez_")).map(n => n.name)
+                            function isAudio(device) {
+                                return device.icon.startsWith("audio");
+                            }
+                            function hasNode(device) {
+                                const key = device.address.replace(/:/g, "_");
+                                return btNodeNames.some(n => n.includes(key));
+                            }
+                            // Safety net: if an audio device is linked but never gets a node (say
+                            // it only connected for something other than audio), call it connected
+                            // after 15 s anyway instead of saying "Connecting..." forever.
+                            property var linkedSince: ({})  // address -> time BlueZ said Connected
+                            property double now: Date.now()
+                            function ready(device) {
+                                if (device.state !== BluetoothDeviceState.Connected)
+                                    return false;
+                                if (!isAudio(device) || hasNode(device))
+                                    return true;
+                                const t = linkedSince[device.address];
+                                return t !== undefined && now - t >= 15000;
+                            }
+                            Timer {
+                                // only ticks while an audio device is linked but has no node yet
+                                running: Bluetooth.devices.values.some(d => d.connected && btList.isAudio(d) && !btList.hasNode(d))
+                                interval: 1000
+                                repeat: true
+                                triggeredOnStart: true
+                                onTriggered: {
+                                    btList.now = Date.now();
+                                    const next = {};
+                                    for (const d of Bluetooth.devices.values)
+                                        if (d.connected)
+                                            next[d.address] = btList.linkedSince[d.address] ?? btList.now;
+                                    btList.linkedSince = next; // reassign so bindings notice
+                                }
+                            }
+
+                            // Devices that have a name (or that you've paired): connected first, then
+                            // paired, then A to Z. Nameless ones are usually random nearby gadgets.
+                            readonly property var devices: Bluetooth.devices.values.filter(d => d.paired || d.deviceName !== "").sort((a, b) => (b.connected - a.connected) || (b.paired - a.paired) || a.name.localeCompare(b.name))
+
+                            // Like the network list, the open drop-down is remembered here, not in the
+                            // rows: the list re-sorts when a device connects, and rows can be rebuilt.
+                            property var active: null       // the device whose drop-down is open
+                            property var pairingDevice: null // a new device we're pairing, to connect once paired
+                            property var failedDevice: null  // shows "Pairing failed" for a few seconds
+
+                            function toggle(device) {
+                                active = active === device ? null : device;
+                            }
+                            // Status shown next to each device.
+                            function stateText(device) {
+                                if (device.state === BluetoothDeviceState.Connected)
+                                    return ready(device) ? "Connected" : "Connecting...";
+                                if (device.state === BluetoothDeviceState.Connecting)
+                                    return "Connecting...";
+                                if (device.state === BluetoothDeviceState.Disconnecting)
+                                    return "Disconnecting...";
+                                if (device.pairing)
+                                    return "Pairing...";
+                                if (device === failedDevice)
+                                    return "Pairing failed";
+                                return device.paired ? "Not connected" : "New";
+                            }
+                            function busy(device) {
+                                return device.pairing || device.state === BluetoothDeviceState.Connecting || device.state === BluetoothDeviceState.Disconnecting;
+                            }
+                            function connectOrDisconnect(device) {
+                                if (busy(device))
+                                    return;
+                                if (device.connected) {
+                                    device.disconnect();
+                                } else if (!device.paired) {
+                                    // never paired: pair first; the Connections below connects afterwards
+                                    device.trusted = true;      // lets it reconnect by itself next time
+                                    failedDevice = null;
+                                    pairingDevice = device;
+                                    device.pair();
+                                } else {
+                                    device.connect();
+                                }
+                            }
+                            // Material Symbols icon for the kind of device (BlueZ gives freedesktop icon names).
+                            function glyph(device) {
+                                const i = device.icon;
+                                if (i.startsWith("audio-head"))
+                                    return "headphones";
+                                if (i.startsWith("audio"))
+                                    return "speaker";
+                                if (i === "input-mouse")
+                                    return "mouse";
+                                if (i === "input-keyboard")
+                                    return "keyboard";
+                                if (i === "input-gaming")
+                                    return "sports_esports";
+                                if (i === "phone")
+                                    return "smartphone";
+                                if (i === "computer")
+                                    return "computer";
+                                return "bluetooth";
+                            }
+
+                            Connections {
+                                target: btList.pairingDevice
+                                function onPairedChanged() {
+                                    const device = btList.pairingDevice;
+                                    btList.pairingDevice = null;
+                                    pairCheck.stop();
+                                    if (device.paired && !device.connected)
+                                        device.connect();
+                                }
+                                // The pairing attempt ended. If it isn't paired a moment later
+                                // (BlueZ can report "paired" just after), it failed.
+                                function onPairingChanged() {
+                                    if (!btList.pairingDevice.pairing && !btList.pairingDevice.paired)
+                                        pairCheck.restart();
+                                }
+                            }
+                            Timer {
+                                id: pairCheck
+                                interval: 1500
+                                onTriggered: {
+                                    const device = btList.pairingDevice;
+                                    if (!device || device.paired)
+                                        return;
+                                    btList.pairingDevice = null;
+                                    btList.failedDevice = device;
+                                    failedReset.restart();
+                                }
+                            }
+                            // "Pairing failed" goes back to "New" after 4 s
+                            Timer {
+                                id: failedReset
+                                interval: 4000
+                                onTriggered: btList.failedDevice = null
+                            }
+
+                            // Look for nearby devices only while this popup is open (and Bluetooth is on).
+                            Binding {
+                                when: btList.powered
+                                target: btList.adapter
+                                property: "discovering"
+                                value: !!QsWindow.window && QsWindow.window.visible
+                            }
+
+                            // header: title on the left, on/off switch on the right
+                            Item {
+                                width: 280
+                                height: 26
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Bluetooth"
+                                    color: Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 1.2
+                                    font.weight: 700
+                                    font.letterSpacing: Theme.letterSpacing
+                                }
+                                Rectangle {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: !!btList.adapter
+                                    width: btPowerLabel.implicitWidth + 24
+                                    height: 24
+                                    radius: height / 2
+                                    color: btList.powered ? Theme.accent : btPowerMouse.containsMouse ? Theme.pill : "transparent"
+                                    border.width: 1
+                                    border.color: btList.powered ? Theme.accent : Theme.pill
+                                    scale: btPowerMouse.pressed ? 0.85 : 1
+
+                                    Behavior on color {
+                                        ColorAnimation {
+                                            duration: 120
+                                        }
+                                    }
+                                    Behavior on scale {
+                                        NumberAnimation {
+                                            duration: 120
+                                            easing.type: Easing.OutCubic
+                                        }
+                                    }
+
+                                    Text {
+                                        id: btPowerLabel
+                                        anchors.centerIn: parent
+                                        text: btList.powered ? "On" : "Off"
+                                        color: btList.powered ? Theme.bg : Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.9
+                                        font.weight: 700
+                                    }
+                                    MouseArea {
+                                        id: btPowerMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: btList.adapter.enabled = !btList.adapter.enabled
+                                    }
+                                }
+                            }
+
+                            // what to show when there's no list
+                            Text {
+                                width: 280
+                                wrapMode: Text.Wrap
+                                visible: text !== ""
+                                text: {
+                                    if (!btList.adapter)
+                                        return "No Bluetooth adapter found.";
+                                    if (!btList.powered)
+                                        return "Bluetooth is off.";
+                                    if (btList.devices.length === 0)
+                                        return btList.adapter.discovering ? "Searching for devices..." : "No devices found.";
+                                    return "";
+                                }
+                                color: Theme.text
+                                opacity: 0.6
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize
+                            }
+
+                            // "Devices", with "Searching..." on the right while it scans
+                            Item {
+                                width: 280
+                                height: devicesLabel.implicitHeight
+                                visible: btList.powered && btList.devices.length > 0
+
+                                Text {
+                                    id: devicesLabel
+                                    text: "Devices"
+                                    color: Theme.text
+                                    opacity: 0.6
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                    font.weight: 600
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    visible: !!btList.adapter && btList.adapter.discovering
+                                    text: "Searching..."
+                                    color: Theme.accent
+                                    opacity: 0.8
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                }
+                            }
+
+                            Repeater {
+                                // ScriptModel only builds rows for new devices instead of rebuilding them all.
+                                model: ScriptModel {
+                                    values: btList.powered ? btList.devices : []
+                                }
+
+                                Rectangle {
+                                    id: btRow
+                                    required property var modelData
+                                    readonly property var device: modelData
+                                    readonly property bool expanded: btList.active === device
+                                    readonly property bool ready: btList.ready(device)  // really connected
+
+                                    width: 280
+                                    height: btHeader.height + btDrop.height
+                                    radius: Theme.radius
+                                    color: btHeaderMouse.containsMouse || expanded ? Theme.pill : "transparent"
+                                    clip: true
+
+                                    Behavior on color {
+                                        ColorAnimation {
+                                            duration: 120
+                                        }
+                                    }
+
+                                    // ── the row itself: icon, name, status ──
+                                    Item {
+                                        id: btHeader
+                                        width: parent.width
+                                        height: 30
+                                        scale: btHeaderMouse.pressed ? 0.85 : 1
+
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 120
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Text {
+                                            id: btGlyph
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: 10
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: btList.glyph(btRow.device)
+                                            color: btRow.ready ? Theme.accent : Theme.text
+                                            font.family: Theme.iconFont
+                                            font.pixelSize: Theme.iconSize
+                                            font.variableAxes: Theme.iconAxes
+                                        }
+                                        Text {
+                                            anchors {
+                                                left: btGlyph.right
+                                                right: btStatus.left
+                                                leftMargin: 8
+                                                rightMargin: 8
+                                                verticalCenter: parent.verticalCenter
+                                            }
+                                            text: btRow.device.name
+                                            elide: Text.ElideRight
+                                            color: btRow.ready ? Theme.accent : Theme.text
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize
+                                            font.weight: btRow.ready ? 700 : 500
+                                            font.letterSpacing: Theme.letterSpacing
+                                        }
+                                        // per-device status (and battery, when the device reports it)
+                                        Text {
+                                            id: btStatus
+                                            anchors {
+                                                right: parent.right
+                                                rightMargin: 10
+                                                verticalCenter: parent.verticalCenter
+                                            }
+                                            text: btList.stateText(btRow.device) + (btRow.device.batteryAvailable ? "  ·  " + Math.round(btRow.device.battery * 100) + "%" : "")
+                                            color: btRow.ready ? Theme.green : btRow.device === btList.failedDevice ? Theme.red : btRow.device.connected ? Theme.yellow : Theme.text
+                                            opacity: btRow.device.connected || btRow.device === btList.failedDevice ? 1 : 0.6
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.85
+                                        }
+                                        MouseArea {
+                                            id: btHeaderMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: btList.toggle(btRow.device)
+                                        }
+                                    }
+
+                                    // ── the drop-down: Connect / Disconnect, glides open over 500 ms ──
+                                    Item {
+                                        id: btDrop
+                                        y: btHeader.height
+                                        width: parent.width
+                                        height: btRow.expanded ? btDropContent.implicitHeight + 10 : 0
+                                        clip: true
+
+                                        Behavior on height {
+                                            NumberAnimation {
+                                                duration: 500
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Column {
+                                            id: btDropContent
+                                            x: 10
+                                            width: parent.width - 20
+                                            spacing: 6
+
+                                            Rectangle {
+                                                id: btAction
+                                                // red "Disconnect" when connected, green "Connect" otherwise
+                                                readonly property bool disconnecting: btRow.device.connected
+                                                readonly property color tint: disconnecting ? Theme.red : Theme.green
+                                                readonly property bool busy: btList.busy(btRow.device)
+
+                                                width: parent.width
+                                                height: 26
+                                                radius: height / 2
+                                                color: btActionMouse.containsMouse && !busy ? tint : Theme.bg
+                                                opacity: busy ? 0.5 : 1
+                                                scale: btActionMouse.pressed && !busy ? 0.85 : 1
+
+                                                Behavior on color {
+                                                    ColorAnimation {
+                                                        duration: 120
+                                                    }
+                                                }
+                                                Behavior on scale {
+                                                    NumberAnimation {
+                                                        duration: 120
+                                                        easing.type: Easing.OutCubic
+                                                    }
+                                                }
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    // while it's working, show what it's doing instead
+                                                    text: btAction.busy ? btList.stateText(btRow.device) : btAction.disconnecting ? "Disconnect" : "Connect"
+                                                    color: btActionMouse.containsMouse && !btAction.busy ? Theme.bg : btAction.tint
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize
+                                                    font.weight: 600
+                                                }
+                                                MouseArea {
+                                                    id: btActionMouse
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: btAction.busy ? Qt.ArrowCursor : Qt.PointingHandCursor
+                                                    onClicked: btList.connectOrDisconnect(btRow.device)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Widget {
                         padding: 16
                         button: Item {
@@ -1522,852 +2368,8 @@ in
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Theme.spacing
 
-                    // ── Display: brightness, night light, color filters ──
-                    // Icon only, like Bluetooth. The icon shows what's on: a filter, night
-                    // light, or plain brightness.
-                    Widget {
+                    Weather {
                         anchors.verticalCenter: parent.verticalCenter
-                        icon: {
-                            if (disp.filter === "invert")
-                                return "invert_colors";
-                            if (disp.filter === "grayscale")
-                                return "filter_b_and_w";
-                            if (disp.filter === "sepia")
-                                return "filter_vintage";
-                            if (disp.filter === "contrast")
-                                return "contrast";
-                            return disp.nightOn ? "nightlight" : "brightness_6";
-                        }
-
-                        Column {
-                            id: disp
-                            spacing: 8
-                            width: 280
-
-                            // ── state ──
-                            // "backlight": a laptop screen; brightness is set for real with
-                            //              brightnessctl (the panel actually dims).
-                            // "software":  no backlight (a desktop monitor), so it's dimmed by
-                            //              Hyprland's screen shader instead, like night light.
-                            property string mode: "backlight"
-                            property int brightness: 100     // percent
-                            property bool nightOn: false
-                            property int kelvin: 4000        // night light warmth: lower = warmer
-                            property string filter: "none"   // none / invert / grayscale / sepia / contrast
-
-                            // ── How night light, software dimming and the filters work ──
-                            // All three are one screen shader: a tiny GPU program Hyprland runs
-                            // over the finished picture of the whole screen. Whenever something
-                            // changes, a new shader is written with the settings baked in and
-                            // Hyprland is told to use it. When everything is off there's no
-                            // shader at all, so it costs nothing.
-                            // (This used to go through hyprsunset, which needs the GPU driver to
-                            // support Hyprland's color-matrix feature. NVIDIA's doesn't reliably,
-                            // which is why night light and software brightness did nothing.)
-
-                            // Night light color: how much red / green / blue light to keep at a
-                            // given temperature (Tanner Helland's well-known approximation of a
-                            // black body's color; 6500 K is about white).
-                            function tint(k) {
-                                const t = k / 100;
-                                const clamp = v => Math.max(0, Math.min(255, v)) / 255;
-                                const r = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592);
-                                const g = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661 : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
-                                const b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
-                                return [clamp(r), clamp(g), clamp(b)];
-                            }
-                            // The GLSL for the current settings, or "" when nothing is on.
-                            function shaderSource() {
-                                const dim = mode === "software" && brightness < 100;
-                                if (!nightOn && !dim && filter === "none")
-                                    return "";
-                                const f = n => n.toFixed(4);
-                                const lines = [];
-                                if (filter === "invert")
-                                    lines.push("col = 1.0 - col;");
-                                else if (filter === "grayscale")
-                                    lines.push("col = vec3(dot(col, vec3(0.2126, 0.7152, 0.0722)));");
-                                else if (filter === "sepia")
-                                    lines.push("col = min(vec3(dot(col, vec3(0.393, 0.769, 0.189)), dot(col, vec3(0.349, 0.686, 0.168)), dot(col, vec3(0.272, 0.534, 0.131))), vec3(1.0));");
-                                else if (filter === "contrast")
-                                    lines.push("col = clamp((col - 0.5) * 1.35 + 0.5, 0.0, 1.0);");
-                                if (nightOn) {
-                                    const c = tint(kelvin);
-                                    lines.push("col *= vec3(" + f(c[0]) + ", " + f(c[1]) + ", " + f(c[2]) + ");");
-                                }
-                                if (dim)
-                                    lines.push("col *= " + f(brightness / 100) + ";");
-                                return ["#version 300 es", "precision highp float;", "in vec2 v_texcoord;", "uniform sampler2D tex;", "layout(location = 0) out vec4 fragColor;", "void main() {", "    vec4 c = texture(tex, v_texcoord);", "    vec3 col = c.rgb;"].concat(lines.map(l => "    " + l)).concat(["    fragColor = vec4(col, c.a);", "}", ""]).join("\n");
-                            }
-
-                            // Writes the shader and switches Hyprland to it. One change at a time:
-                            // while Hyprland is busy with one, newer changes wait, and only the
-                            // latest is sent. (Before, every click went out at once and Hyprland
-                            // worked through the backlog, which is why filters came in bursts.)
-                            // the shader files live in RAM (XDG_RUNTIME_DIR) and are gone after a reboot
-                            readonly property string runDir: Quickshell.env("XDG_RUNTIME_DIR") + "/quickshell-display"
-                            property int shaderSlot: 0       // rotates between 3 file names so Hyprland sees a new path
-                            property bool effectsDirty: false
-                            function applyEffects() {
-                                if (!restored)
-                                    return;
-                                if (effectsSetter.running) {
-                                    effectsDirty = true;
-                                    return;
-                                }
-                                const src = shaderSource();
-                                let path = "";
-                                if (src !== "") {
-                                    shaderSlot = (shaderSlot + 1) % 3;
-                                    path = runDir + "/effect-" + shaderSlot + ".frag";
-                                }
-                                const state = JSON.stringify({
-                                    "brightness": mode === "software" ? brightness : 100,
-                                    "nightOn": nightOn,
-                                    "kelvin": kelvin,
-                                    "filter": filter
-                                });
-                                // $1 folder, $2 shader file ("" = none), $3 shader text, $4 settings file, $5 settings
-                                // Why dim_strength: changing only the shader makes Hyprland redraw just the
-                                // parts of the screen that change, and it keeps 2-3 screen buffers, so old
-                                // and new frames alternate for a while: the flicker, and filters that take
-                                // a while to go away. Setting any window-look option (here dim_strength,
-                                // to the value it already has) makes Hyprland redraw the whole screen for
-                                // the next frames, which gets every buffer up to date. Done twice, a moment
-                                // apart, to cover all of them. (Hyprland does the same "3 full frames"
-                                // trick itself when a monitor is plugged in.)
-                                effectsSetter.command = ["sh", "-c", "mkdir -p \"$1\" \"$(dirname \"$4\")\"; printf '%s' \"$5\" > \"$4\"; [ -n \"$2\" ] && printf '%s' \"$3\" > \"$2\"; keep='dim_strength = hl.get_config(\"decoration.dim_strength\")'; hyprctl eval \"hl.config({ decoration = { screen_shader = \\\"$2\\\", $keep } })\"; sleep 0.05; exec hyprctl eval \"hl.config({ decoration = { $keep } })\"", "sh", runDir, path, src, statePath, state];
-                                effectsSetter.running = true;
-                            }
-                            Process {
-                                id: effectsSetter
-                                onExited: if (disp.effectsDirty) {
-                                    disp.effectsDirty = false;
-                                    disp.applyEffects();
-                                }
-                            }
-                            // ── remember the settings, and put them back after a restart or login ──
-                            // (written by applyEffects above)
-                            readonly property string statePath: Quickshell.env("HOME") + "/.local/state/quickshell/display.json"
-                            FileView {
-                                id: stateFile
-                                path: disp.statePath
-                                blockLoading: true
-                                printErrors: false
-                            }
-                            property bool restored: false
-
-                            // Read the real brightness (and whether there's a backlight at all)
-                            // at start and each time the popup opens, so the keys are picked up.
-                            readonly property bool shown: !!QsWindow.window && QsWindow.window.visible
-                            onShownChanged: if (shown)
-                                reader.running = true
-                            Process {
-                                id: reader
-                                running: true
-                                // prints e.g. "45" (percent), or nothing when there's no backlight
-                                command: ["sh", "-c", "brightnessctl -m -c backlight 2>/dev/null | head -n1 | cut -d, -f4 | tr -d %"]
-                                stdout: StdioCollector {
-                                    onStreamFinished: {
-                                        const v = parseInt(text.trim());
-                                        if (!disp.restored) {
-                                            // first read: decide the mode, then bring back the saved settings
-                                            disp.mode = isNaN(v) ? "software" : "backlight";
-                                            let saved = {};
-                                            try {
-                                                saved = JSON.parse(stateFile.text() || "{}");
-                                            } catch (e) {}
-                                            disp.nightOn = saved.nightOn === true;
-                                            disp.kelvin = saved.kelvin || 4000;
-                                            disp.filter = saved.filter || "none";
-                                            if (disp.mode === "software")
-                                                disp.brightness = saved.brightness || 100;
-                                            disp.restored = true;
-                                            disp.applyEffects();
-                                        }
-                                        if (disp.mode === "backlight" && !isNaN(v) && !brightSlider.pressed)
-                                            disp.brightness = v;
-                                    }
-                                }
-                            }
-
-                            // Laptop backlight: same one-at-a-time idea as above.
-                            property bool brightDirty: false
-                            function pushBrightness() {
-                                if (mode === "software") {
-                                    applyEffects();
-                                    return;
-                                }
-                                if (brightSetter.running) {
-                                    brightDirty = true;
-                                    return;
-                                }
-                                brightSetter.command = ["brightnessctl", "-q", "-c", "backlight", "set", brightness + "%"];
-                                brightSetter.running = true;
-                            }
-                            Process {
-                                id: brightSetter
-                                onExited: if (disp.brightDirty) {
-                                    disp.brightDirty = false;
-                                    disp.pushBrightness();
-                                }
-                            }
-
-                            function pushNight() {
-                                applyEffects();
-                            }
-                            // Picking the active filter again turns it off.
-                            function setFilter(name) {
-                                filter = filter === name ? "none" : name;
-                                applyEffects();
-                            }
-                            function reset() {
-                                brightness = 100;
-                                nightOn = false;
-                                filter = "none";
-                                if (mode === "backlight")
-                                    pushBrightness();
-                                applyEffects();
-                            }
-
-                            // ── header: title, and Reset on the right ──
-                            Item {
-                                width: parent.width
-                                height: 26
-
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "Display"
-                                    color: Theme.text
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 1.2
-                                    font.weight: 700
-                                    font.letterSpacing: Theme.letterSpacing
-                                }
-                                Chip {
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    label: "Reset"
-                                    // full brightness, no tint, no filter
-                                    onClicked: disp.reset()
-                                }
-                            }
-
-                            // ── brightness ──
-                            Item {
-                                width: parent.width
-                                height: brightLabel.implicitHeight
-
-                                Text {
-                                    id: brightLabel
-                                    text: disp.mode === "backlight" ? "Brightness" : "Brightness (software)"
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
-                                    font.weight: 600
-                                }
-                                Text {
-                                    anchors.right: parent.right
-                                    text: disp.brightness + "%"
-                                    color: Theme.yellow
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
-                                    font.weight: 700
-                                }
-                            }
-                            Row {
-                                spacing: 6
-
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "brightness_low"
-                                    color: Theme.text
-                                    font.family: Theme.iconFont
-                                    font.pixelSize: Theme.iconSize
-                                    font.variableAxes: Theme.iconAxes
-                                }
-                                HSlider {
-                                    id: brightSlider
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: disp.width - 2 * (Theme.iconSize + 6)
-                                    // never all the way to 0: a black screen is hard to fix by mouse
-                                    from: disp.mode === "backlight" ? 1 : 20
-                                    to: 100
-                                    stepSize: 1
-                                    tint: Theme.yellow
-                                    value: disp.brightness
-                                    onMoved: {
-                                        disp.brightness = Math.round(value);
-                                        disp.pushBrightness();
-                                    }
-                                }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "brightness_high"
-                                    color: Theme.yellow
-                                    font.family: Theme.iconFont
-                                    font.pixelSize: Theme.iconSize
-                                    font.variableAxes: Theme.iconAxes
-                                }
-                            }
-
-                            // ── night light ──
-                            Item {
-                                width: parent.width
-                                height: 24
-
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "Night light" + (disp.nightOn ? "  ·  " + disp.kelvin + " K" : "")
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
-                                    font.weight: 600
-                                }
-                                Chip {
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    label: disp.nightOn ? "On" : "Off"
-                                    selected: disp.nightOn
-                                    tint: Theme.orange
-                                    onClicked: {
-                                        disp.nightOn = !disp.nightOn;
-                                        disp.pushNight();
-                                    }
-                                }
-                            }
-                            Row {
-                                spacing: 6
-                                // dimmed while off; dragging it turns night light on
-                                opacity: disp.nightOn ? 1 : 0.5
-
-                                Behavior on opacity {
-                                    NumberAnimation {
-                                        duration: 150
-                                    }
-                                }
-
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "local_fire_department"
-                                    color: Theme.orange
-                                    font.family: Theme.iconFont
-                                    font.pixelSize: Theme.iconSize
-                                    font.variableAxes: Theme.iconAxes
-                                }
-                                HSlider {
-                                    id: warmSlider
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: disp.width - 2 * (Theme.iconSize + 6)
-                                    // left = warm (2500 K), right = barely tinted (6000 K)
-                                    from: 2500
-                                    to: 6000
-                                    stepSize: 100
-                                    tint: Theme.orange
-                                    value: disp.kelvin
-                                    onMoved: {
-                                        disp.kelvin = Math.round(value);
-                                        disp.nightOn = true;
-                                        disp.pushNight();
-                                    }
-                                }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "ac_unit"
-                                    color: Theme.blue
-                                    font.family: Theme.iconFont
-                                    font.pixelSize: Theme.iconSize
-                                    font.variableAxes: Theme.iconAxes
-                                }
-                            }
-
-                            // ── color filters: one at a time ──
-                            Text {
-                                text: "Color filter"
-                                color: Theme.text
-                                opacity: 0.6
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize * 0.85
-                                font.weight: 600
-                            }
-                            Grid {
-                                width: parent.width
-                                columns: 2
-                                spacing: 6
-
-                                Repeater {
-                                    model: [
-                                        {
-                                            "id": "invert",
-                                            "label": "Invert"
-                                        },
-                                        {
-                                            "id": "grayscale",
-                                            "label": "Grayscale"
-                                        },
-                                        {
-                                            "id": "sepia",
-                                            "label": "Sepia"
-                                        },
-                                        {
-                                            "id": "contrast",
-                                            "label": "Contrast"
-                                        }
-                                    ]
-
-                                    Chip {
-                                        required property var modelData
-                                        width: (disp.width - 6) / 2   // two per row, same size
-                                        label: modelData.label
-                                        selected: disp.filter === modelData.id
-                                        tint: Theme.magenta
-                                        onClicked: disp.setFilter(modelData.id)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ── Bluetooth ──
-                    // In the bar: just the icon, no pill. Click it for the device list.
-                    Widget {
-                        anchors.verticalCenter: parent.verticalCenter
-                        // bluetooth_searching (the one with waves) while something is still connecting
-                        icon: !btList.powered ? "bluetooth_disabled" : btList.anyConnected ? "bluetooth_connected" : btList.anyConnecting ? "bluetooth_searching" : "bluetooth"
-
-                        Column {
-                            id: btList
-                            spacing: 4
-
-                            readonly property var adapter: Bluetooth.defaultAdapter
-                            readonly property bool powered: !!adapter && adapter.enabled
-                            // "Connected" here means actually usable (see ready() below), not just
-                            // "BlueZ has a radio link".
-                            readonly property bool anyConnected: Bluetooth.devices.values.some(d => ready(d))
-                            readonly property bool anyConnecting: Bluetooth.devices.values.some(d => d.state === BluetoothDeviceState.Connecting || (d.connected && !ready(d)))
-
-                            // ── When is a device really connected? ──
-                            // BlueZ (and so Quickshell) flips a device to "Connected" as soon as the
-                            // Bluetooth link is up. For headphones and speakers the audio part (A2DP)
-                            // takes a few more seconds; that's the gap you saw with the AirPods.
-                            // WirePlumber only creates the device's audio node once audio is ready,
-                            // and names it after the MAC address with _ for : (from WirePlumber's
-                            // monitor-utils.lua: "bluez_output.C0_1E_7C_D0_1C_84.1", or
-                            // "bluez_input..." for a mic). So an audio device counts as connected
-                            // once a node with its address exists.
-                            // Mice, keyboards, phones etc. have no node; for them BlueZ's
-                            // "Connected" is used as-is.
-                            readonly property var btNodeNames: Pipewire.nodes.values.filter(n => n.name.startsWith("bluez_")).map(n => n.name)
-                            function isAudio(device) {
-                                return device.icon.startsWith("audio");
-                            }
-                            function hasNode(device) {
-                                const key = device.address.replace(/:/g, "_");
-                                return btNodeNames.some(n => n.includes(key));
-                            }
-                            // Safety net: if an audio device is linked but never gets a node (say
-                            // it only connected for something other than audio), call it connected
-                            // after 15 s anyway instead of saying "Connecting..." forever.
-                            property var linkedSince: ({})  // address -> time BlueZ said Connected
-                            property double now: Date.now()
-                            function ready(device) {
-                                if (device.state !== BluetoothDeviceState.Connected)
-                                    return false;
-                                if (!isAudio(device) || hasNode(device))
-                                    return true;
-                                const t = linkedSince[device.address];
-                                return t !== undefined && now - t >= 15000;
-                            }
-                            Timer {
-                                // only ticks while an audio device is linked but has no node yet
-                                running: Bluetooth.devices.values.some(d => d.connected && btList.isAudio(d) && !btList.hasNode(d))
-                                interval: 1000
-                                repeat: true
-                                triggeredOnStart: true
-                                onTriggered: {
-                                    btList.now = Date.now();
-                                    const next = {};
-                                    for (const d of Bluetooth.devices.values)
-                                        if (d.connected)
-                                            next[d.address] = btList.linkedSince[d.address] ?? btList.now;
-                                    btList.linkedSince = next; // reassign so bindings notice
-                                }
-                            }
-
-                            // Devices that have a name (or that you've paired): connected first, then
-                            // paired, then A to Z. Nameless ones are usually random nearby gadgets.
-                            readonly property var devices: Bluetooth.devices.values.filter(d => d.paired || d.deviceName !== "").sort((a, b) => (b.connected - a.connected) || (b.paired - a.paired) || a.name.localeCompare(b.name))
-
-                            // Like the network list, the open drop-down is remembered here, not in the
-                            // rows: the list re-sorts when a device connects, and rows can be rebuilt.
-                            property var active: null       // the device whose drop-down is open
-                            property var pairingDevice: null // a new device we're pairing, to connect once paired
-                            property var failedDevice: null  // shows "Pairing failed" for a few seconds
-
-                            function toggle(device) {
-                                active = active === device ? null : device;
-                            }
-                            // Status shown next to each device.
-                            function stateText(device) {
-                                if (device.state === BluetoothDeviceState.Connected)
-                                    return ready(device) ? "Connected" : "Connecting...";
-                                if (device.state === BluetoothDeviceState.Connecting)
-                                    return "Connecting...";
-                                if (device.state === BluetoothDeviceState.Disconnecting)
-                                    return "Disconnecting...";
-                                if (device.pairing)
-                                    return "Pairing...";
-                                if (device === failedDevice)
-                                    return "Pairing failed";
-                                return device.paired ? "Not connected" : "New";
-                            }
-                            function busy(device) {
-                                return device.pairing || device.state === BluetoothDeviceState.Connecting || device.state === BluetoothDeviceState.Disconnecting;
-                            }
-                            function connectOrDisconnect(device) {
-                                if (busy(device))
-                                    return;
-                                if (device.connected) {
-                                    device.disconnect();
-                                } else if (!device.paired) {
-                                    // never paired: pair first; the Connections below connects afterwards
-                                    device.trusted = true;      // lets it reconnect by itself next time
-                                    failedDevice = null;
-                                    pairingDevice = device;
-                                    device.pair();
-                                } else {
-                                    device.connect();
-                                }
-                            }
-                            // Material Symbols icon for the kind of device (BlueZ gives freedesktop icon names).
-                            function glyph(device) {
-                                const i = device.icon;
-                                if (i.startsWith("audio-head"))
-                                    return "headphones";
-                                if (i.startsWith("audio"))
-                                    return "speaker";
-                                if (i === "input-mouse")
-                                    return "mouse";
-                                if (i === "input-keyboard")
-                                    return "keyboard";
-                                if (i === "input-gaming")
-                                    return "sports_esports";
-                                if (i === "phone")
-                                    return "smartphone";
-                                if (i === "computer")
-                                    return "computer";
-                                return "bluetooth";
-                            }
-
-                            Connections {
-                                target: btList.pairingDevice
-                                function onPairedChanged() {
-                                    const device = btList.pairingDevice;
-                                    btList.pairingDevice = null;
-                                    pairCheck.stop();
-                                    if (device.paired && !device.connected)
-                                        device.connect();
-                                }
-                                // The pairing attempt ended. If it isn't paired a moment later
-                                // (BlueZ can report "paired" just after), it failed.
-                                function onPairingChanged() {
-                                    if (!btList.pairingDevice.pairing && !btList.pairingDevice.paired)
-                                        pairCheck.restart();
-                                }
-                            }
-                            Timer {
-                                id: pairCheck
-                                interval: 1500
-                                onTriggered: {
-                                    const device = btList.pairingDevice;
-                                    if (!device || device.paired)
-                                        return;
-                                    btList.pairingDevice = null;
-                                    btList.failedDevice = device;
-                                    failedReset.restart();
-                                }
-                            }
-                            // "Pairing failed" goes back to "New" after 4 s
-                            Timer {
-                                id: failedReset
-                                interval: 4000
-                                onTriggered: btList.failedDevice = null
-                            }
-
-                            // Look for nearby devices only while this popup is open (and Bluetooth is on).
-                            Binding {
-                                when: btList.powered
-                                target: btList.adapter
-                                property: "discovering"
-                                value: !!QsWindow.window && QsWindow.window.visible
-                            }
-
-                            // header: title on the left, on/off switch on the right
-                            Item {
-                                width: 280
-                                height: 26
-
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "Bluetooth"
-                                    color: Theme.text
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 1.2
-                                    font.weight: 700
-                                    font.letterSpacing: Theme.letterSpacing
-                                }
-                                Rectangle {
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    visible: !!btList.adapter
-                                    width: btPowerLabel.implicitWidth + 24
-                                    height: 24
-                                    radius: height / 2
-                                    color: btList.powered ? Theme.accent : btPowerMouse.containsMouse ? Theme.pill : "transparent"
-                                    border.width: 1
-                                    border.color: btList.powered ? Theme.accent : Theme.pill
-                                    scale: btPowerMouse.pressed ? 0.85 : 1
-
-                                    Behavior on color {
-                                        ColorAnimation {
-                                            duration: 120
-                                        }
-                                    }
-                                    Behavior on scale {
-                                        NumberAnimation {
-                                            duration: 120
-                                            easing.type: Easing.OutCubic
-                                        }
-                                    }
-
-                                    Text {
-                                        id: btPowerLabel
-                                        anchors.centerIn: parent
-                                        text: btList.powered ? "On" : "Off"
-                                        color: btList.powered ? Theme.bg : Theme.text
-                                        font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 0.9
-                                        font.weight: 700
-                                    }
-                                    MouseArea {
-                                        id: btPowerMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: btList.adapter.enabled = !btList.adapter.enabled
-                                    }
-                                }
-                            }
-
-                            // what to show when there's no list
-                            Text {
-                                width: 280
-                                wrapMode: Text.Wrap
-                                visible: text !== ""
-                                text: {
-                                    if (!btList.adapter)
-                                        return "No Bluetooth adapter found.";
-                                    if (!btList.powered)
-                                        return "Bluetooth is off.";
-                                    if (btList.devices.length === 0)
-                                        return btList.adapter.discovering ? "Searching for devices..." : "No devices found.";
-                                    return "";
-                                }
-                                color: Theme.text
-                                opacity: 0.6
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize
-                            }
-
-                            // "Devices", with "Searching..." on the right while it scans
-                            Item {
-                                width: 280
-                                height: devicesLabel.implicitHeight
-                                visible: btList.powered && btList.devices.length > 0
-
-                                Text {
-                                    id: devicesLabel
-                                    text: "Devices"
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
-                                    font.weight: 600
-                                }
-                                Text {
-                                    anchors.right: parent.right
-                                    visible: !!btList.adapter && btList.adapter.discovering
-                                    text: "Searching..."
-                                    color: Theme.accent
-                                    opacity: 0.8
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
-                                }
-                            }
-
-                            Repeater {
-                                // ScriptModel only builds rows for new devices instead of rebuilding them all.
-                                model: ScriptModel {
-                                    values: btList.powered ? btList.devices : []
-                                }
-
-                                Rectangle {
-                                    id: btRow
-                                    required property var modelData
-                                    readonly property var device: modelData
-                                    readonly property bool expanded: btList.active === device
-                                    readonly property bool ready: btList.ready(device)  // really connected
-
-                                    width: 280
-                                    height: btHeader.height + btDrop.height
-                                    radius: Theme.radius
-                                    color: btHeaderMouse.containsMouse || expanded ? Theme.pill : "transparent"
-                                    clip: true
-
-                                    Behavior on color {
-                                        ColorAnimation {
-                                            duration: 120
-                                        }
-                                    }
-
-                                    // ── the row itself: icon, name, status ──
-                                    Item {
-                                        id: btHeader
-                                        width: parent.width
-                                        height: 30
-                                        scale: btHeaderMouse.pressed ? 0.85 : 1
-
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 120
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        Text {
-                                            id: btGlyph
-                                            anchors.left: parent.left
-                                            anchors.leftMargin: 10
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: btList.glyph(btRow.device)
-                                            color: btRow.ready ? Theme.accent : Theme.text
-                                            font.family: Theme.iconFont
-                                            font.pixelSize: Theme.iconSize
-                                            font.variableAxes: Theme.iconAxes
-                                        }
-                                        Text {
-                                            anchors {
-                                                left: btGlyph.right
-                                                right: btStatus.left
-                                                leftMargin: 8
-                                                rightMargin: 8
-                                                verticalCenter: parent.verticalCenter
-                                            }
-                                            text: btRow.device.name
-                                            elide: Text.ElideRight
-                                            color: btRow.ready ? Theme.accent : Theme.text
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize
-                                            font.weight: btRow.ready ? 700 : 500
-                                            font.letterSpacing: Theme.letterSpacing
-                                        }
-                                        // per-device status (and battery, when the device reports it)
-                                        Text {
-                                            id: btStatus
-                                            anchors {
-                                                right: parent.right
-                                                rightMargin: 10
-                                                verticalCenter: parent.verticalCenter
-                                            }
-                                            text: btList.stateText(btRow.device) + (btRow.device.batteryAvailable ? "  ·  " + Math.round(btRow.device.battery * 100) + "%" : "")
-                                            color: btRow.ready ? Theme.green : btRow.device === btList.failedDevice ? Theme.red : btRow.device.connected ? Theme.yellow : Theme.text
-                                            opacity: btRow.device.connected || btRow.device === btList.failedDevice ? 1 : 0.6
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize * 0.85
-                                        }
-                                        MouseArea {
-                                            id: btHeaderMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: btList.toggle(btRow.device)
-                                        }
-                                    }
-
-                                    // ── the drop-down: Connect / Disconnect, glides open over 500 ms ──
-                                    Item {
-                                        id: btDrop
-                                        y: btHeader.height
-                                        width: parent.width
-                                        height: btRow.expanded ? btDropContent.implicitHeight + 10 : 0
-                                        clip: true
-
-                                        Behavior on height {
-                                            NumberAnimation {
-                                                duration: 500
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        Column {
-                                            id: btDropContent
-                                            x: 10
-                                            width: parent.width - 20
-                                            spacing: 6
-
-                                            Rectangle {
-                                                id: btAction
-                                                // red "Disconnect" when connected, green "Connect" otherwise
-                                                readonly property bool disconnecting: btRow.device.connected
-                                                readonly property color tint: disconnecting ? Theme.red : Theme.green
-                                                readonly property bool busy: btList.busy(btRow.device)
-
-                                                width: parent.width
-                                                height: 26
-                                                radius: height / 2
-                                                color: btActionMouse.containsMouse && !busy ? tint : Theme.bg
-                                                opacity: busy ? 0.5 : 1
-                                                scale: btActionMouse.pressed && !busy ? 0.85 : 1
-
-                                                Behavior on color {
-                                                    ColorAnimation {
-                                                        duration: 120
-                                                    }
-                                                }
-                                                Behavior on scale {
-                                                    NumberAnimation {
-                                                        duration: 120
-                                                        easing.type: Easing.OutCubic
-                                                    }
-                                                }
-
-                                                Text {
-                                                    anchors.centerIn: parent
-                                                    // while it's working, show what it's doing instead
-                                                    text: btAction.busy ? btList.stateText(btRow.device) : btAction.disconnecting ? "Disconnect" : "Connect"
-                                                    color: btActionMouse.containsMouse && !btAction.busy ? Theme.bg : btAction.tint
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize
-                                                    font.weight: 600
-                                                }
-                                                MouseArea {
-                                                    id: btActionMouse
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    cursorShape: btAction.busy ? Qt.ArrowCursor : Qt.PointingHandCursor
-                                                    onClicked: btList.connectOrDisconnect(btRow.device)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
                     }
 
                     // ── Notification center ──
@@ -3880,6 +3882,8 @@ in
     Singleton {
         // true while fading out for Log out / Restart / Power off
         property bool leaving: false
+        // the bar widget whose popup is open (only one at a time; see Widget.qml)
+        property var openWidget: null
     }
   '';
 
@@ -4086,7 +4090,8 @@ in
     // The popup hangs off the bottom of the bar and curves into it, like it's
     // part of the bar, slides down when it opens, and slides back up into the
     // bar when it closes.
-    // Click to open, click again (or anywhere outside) to close.
+    // Click to open, click the same button again to close. A popup stays open while you
+    // use other apps; opening another widget closes it (one open at a time).
     //
     //   Widget {
     //       button: Image { width: 18; height: 18; source: "file:///home/garinh/Pictures/x.png" }
@@ -4130,9 +4135,12 @@ in
         implicitHeight: Theme.moduleHeight
 
         function openPopup() {
+            // one popup at a time: close whichever widget is open now (any monitor's bar)
+            if (Ui.openWidget && Ui.openWidget !== root)
+                Ui.openWidget.closePopup()
+            Ui.openWidget = root
             popup.visible = true
             root.open = true
-            grab.active = true
             // Opening: starts fast and settles (OutCubic), sliding down out of the bar.
             slide.duration = root.duration
             slide.easing.type = Easing.OutCubic
@@ -4145,6 +4153,8 @@ in
                 return
             root.open = false
             grab.active = false
+            if (Ui.openWidget === root)
+                Ui.openWidget = null
             // Closing: the same slide played backwards. The mirror of "starts fast and
             // settles" is "starts gently and speeds up", so it gets pulled back into
             // the bar. InQuad instead of InCubic so it reacts right away on click.
@@ -4161,22 +4171,19 @@ in
             onFinished: if (root.openness === 0) popup.visible = false
         }
 
-        // Click-outside-to-close. The popup used to take the pointer itself
-        // (grabFocus), but then Hyprland closes it instantly when you click away and
-        // there's no time to animate. Hyprland's focus grab only *tells* us about the
-        // outside click (onCleared) and leaves the window up, so we can slide it back
-        // into the bar first. Keyboard input still goes to the popup while it's active.
+        // Keyboard. A popup doesn't get typed keys on its own, so clicking inside one
+        // turns on Hyprland's focus grab for it (the bar is included, so its buttons keep
+        // working). The grab ends when you click outside; the popup just stays open
+        // without the keyboard until you click it again. Ending a grab never closes it.
+        // (Hyprland uses that first outside click to end the grab: it doesn't reach the
+        // app you clicked, so it can take a second click there.)
         HyprlandFocusGrab {
             id: grab
-            windows: [popup]
-            onCleared: {
-                root.clearedAt = Date.now()
-                root.closePopup()
-            }
+            windows: [popup, root.QsWindow.window]
         }
-        // When the outside click that closed it was on this same button, don't let
-        // that click reopen it straight away.
-        property double clearedAt: 0
+        // e.g. a monitor unplugged while its bar had the open popup
+        Component.onDestruction: if (Ui.openWidget === root)
+            Ui.openWidget = null
 
         // Log out / Restart / Power off: close, so the whole screen fades to black.
         // (Popups are drawn above everything else, even the black fade layer.)
@@ -4205,12 +4212,7 @@ in
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: {
-                if (root.open)
-                    root.closePopup()
-                else if (Date.now() - root.clearedAt > 300)
-                    root.openPopup()
-            }
+            onClicked: root.open ? root.closePopup() : root.openPopup()
         }
 
         // The default button: a Material Symbols icon, like IconButton.
@@ -4261,6 +4263,8 @@ in
                 grab.active = false
                 root.openness = 0
                 root.open = false
+                if (Ui.openWidget === root)
+                    Ui.openWidget = null
             }
 
             // The background: a box whose top corners flare outward into the bar.
@@ -4329,6 +4333,19 @@ in
                     width: popup.bodyWidth - root.padding * 2
                     height: popup.bodyHeight - root.padding * 2
                     opacity: root.openness
+                }
+            }
+
+            // Any press inside the popup takes the keyboard (see `grab` above). It sits
+            // on top but only notices the press and lets it through (accepted = false),
+            // so the buttons, lists and text boxes underneath still get it.
+            MouseArea {
+                anchors.fill: parent
+                z: 1000
+                onPressed: mouse => {
+                    if (root.open)
+                        grab.active = true
+                    mouse.accepted = false
                 }
             }
         }
