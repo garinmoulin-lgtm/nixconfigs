@@ -6365,6 +6365,14 @@ in
       -- --min-value=1 stops it at 1 instead of going fully black.
       hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd("brightnessctl -q -c backlight set 5%+"), { repeating = true, locked = true })
       hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("brightnessctl -q -c backlight --min-value=1 set 5%-"), { repeating = true, locked = true })
+      -- Media keys: keyboard media keys, and headphone buttons / AirPods taps (BlueZ turns
+      -- those into the same keys). playerctl sends them to the player you used last
+      -- (playerctld). Pause is its own key so a "pause" tap never starts playback.
+      hl.bind("XF86AudioPlay", hl.dsp.exec_cmd("playerctl play-pause"), { locked = true })
+      hl.bind("XF86AudioPause", hl.dsp.exec_cmd("playerctl pause"), { locked = true })
+      hl.bind("XF86AudioStop", hl.dsp.exec_cmd("playerctl stop"), { locked = true })
+      hl.bind("XF86AudioNext", hl.dsp.exec_cmd("playerctl next"), { locked = true })
+      hl.bind("XF86AudioPrev", hl.dsp.exec_cmd("playerctl previous"), { locked = true })
       hl.bind("SUPER + CTRL + Right", hl.dsp.window.move({ workspace = "+1" }))
       hl.bind("SUPER + CTRL + Left", hl.dsp.window.move({ workspace = -1 }))
 
