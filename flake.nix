@@ -26,6 +26,12 @@
       url = "github:jetm/mediatek-mt7927-dkms";
       flake = false;
     };
+    # Rosé Pine's GTK theme (not in nixpkgs), for the rose-pine theme in home.nix.
+    # Also just the repo's files.
+    rose-pine-gtk = {
+      url = "github:rose-pine/gtk";
+      flake = false;
+    };
   };
 
   outputs =

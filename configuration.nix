@@ -25,20 +25,33 @@ let
     }) normalUsers
   );
   mainUser = (lib.head normalUsers).name; # owns the shared wallpaper folder
-  # The same mouse cursor as your Hyprland: read from home.nix's home.pointerCursor
-  # (falls back to everforest-cursors if that isn't set).
-  hmCursor = config.home-manager.users.${mainUser}.home.pointerCursor or null;
-  greeterCursor =
-    if hmCursor != null then
-      {
-        inherit (hmCursor) name size package;
+  # The color themes, from home.nix (its themes block, handed out as my.themes).
+  # The login screen uses the one you picked in your session: the theme command writes
+  # its name, cursor and a copy of its wallpaper to /var/lib/greeter-theme (see `theme`
+  # in home.nix).
+  themes = config.home-manager.users.${mainUser}.my.themes;
+  greeterThemeDir = "/var/lib/greeter-theme";
+  # what the login screen's Theme.qml gets: { id: { bg, inner, pill, text, accent, yellow, red } }
+  greeterThemes = builtins.toJSON (
+    lib.mapAttrs (
+      _: t:
+      lib.mapAttrs (_: v: "#" + t.colors.${v}) {
+        bg = "bg";
+        inner = "surface";
+        pill = "overlay";
+        text = "fg";
+        accent = "accent";
+        yellow = "yellow";
+        red = "red";
       }
-    else
-      {
-        name = "everforest-cursors";
-        size = 24;
-        package = pkgs.everforest-cursors;
-      };
+    ) themes.themes
+  );
+  # Every theme's cursor, so the login screen can show whichever one is picked.
+  greeterCursors = pkgs.symlinkJoin {
+    name = "greeter-cursors";
+    paths = lib.unique (map (t: t.cursor.package) (lib.attrValues themes.themes));
+  };
+  defaultCursor = themes.themes.${themes.default}.cursor.name;
 in
 {
   imports = [
@@ -190,15 +203,25 @@ in
   # Your ~/Pictures/Wallpapers gets copied here by your session (home.nix), because the
   # login screen runs as the "greeter" user and can't see inside your home folder.
   # You own it; everyone can read it.
-  systemd.tmpfiles.rules = [ "d /var/lib/greeter-wallpapers 0755 ${mainUser} users -" ];
+  # /var/lib/greeter-theme: the theme you picked (name, cursor, wallpaper copy), written
+  # by the theme command in your session for the same reason. Also yours.
+  systemd.tmpfiles.rules = [
+    "d /var/lib/greeter-wallpapers 0755 ${mainUser} users -"
+    "d ${greeterThemeDir} 0755 ${mainUser} users -"
+  ];
 
   environment.etc."greetd/hyprland.lua".text = ''
     -- Hyprland for the login screen only. Your own config isn't used here.
 
-    -- your cursor (same theme and size as in your session)
-    hl.env("XCURSOR_THEME", "${greeterCursor.name}")
-    hl.env("XCURSOR_SIZE", "${toString greeterCursor.size}")
-    hl.env("XCURSOR_PATH", "${greeterCursor.package}/share/icons")
+    -- your cursor: the current theme's (the theme command writes its name here), at the
+    -- same size as in your session
+    local cursorFile = io.open("${greeterThemeDir}/cursor", "r")
+    local cursor = cursorFile and cursorFile:read("*l") or ""
+    if cursorFile then cursorFile:close() end
+    if cursor == "" then cursor = "${defaultCursor}" end
+    hl.env("XCURSOR_THEME", cursor)
+    hl.env("XCURSOR_SIZE", "24")
+    hl.env("XCURSOR_PATH", "${greeterCursors}/share/icons")
     hl.monitor({ output = "", mode = "highrr", position = "auto", scale = "auto" })
 
     hl.config({
@@ -258,16 +281,43 @@ in
 
       import QtQuick
       import Quickshell
+      import Quickshell.Io
 
-      // Everforest, the same colors as hyprlock and the bar.
+      // The theme you picked in your session (same colors as the bar), from
+      // ${greeterThemeDir}/state.json. Until there is one: the default theme.
       Singleton {
-          readonly property color bg: "#2d353b"
-          readonly property color inner: "#343f44"
-          readonly property color pill: "#3d484d"
-          readonly property color text: "#d3c6aa"
-          readonly property color green: "#a7c080"
-          readonly property color yellow: "#dbbc7f"
-          readonly property color red: "#e67e80"
+          id: theme
+
+          readonly property var themes: (${greeterThemes})
+          readonly property string defaultTheme: "${themes.default}"
+
+          // { theme, wallpaper, stamp }, written by the theme command in your session
+          property var saved: ({})
+          FileView {
+              path: "${greeterThemeDir}/state.json"
+              blockLoading: true
+              printErrors: false
+              onLoaded: {
+                  try {
+                      theme.saved = JSON.parse(text());
+                  } catch (e) {
+                      theme.saved = {};
+                  }
+              }
+          }
+          // the theme's wallpaper (a copy in ${greeterThemeDir}), and a stamp that
+          // changes whenever you switch themes (see restoreWallpaper in shell.qml)
+          readonly property string wallpaper: saved.wallpaper || ""
+          readonly property string stamp: saved.stamp || ""
+
+          readonly property var c: themes[saved.theme] || themes[defaultTheme]
+          readonly property color bg: c.bg
+          readonly property color inner: c.inner
+          readonly property color pill: c.pill
+          readonly property color text: c.text
+          readonly property color accent: c.accent
+          readonly property color yellow: c.yellow
+          readonly property color red: c.red
           readonly property string font: "SFMono Nerd Font"
           readonly property string iconFont: "Material Symbols Rounded"
       }
@@ -383,7 +433,7 @@ in
               Text {
                   anchors.verticalCenter: parent.verticalCenter
                   text: chip.icon
-                  color: chip.active ? Theme.green : chip.iconColor
+                  color: chip.active ? Theme.accent : chip.iconColor
                   font.family: Theme.iconFont
                   font.pixelSize: 18
               }
@@ -478,7 +528,7 @@ in
                           anchors.leftMargin: 12
                           anchors.verticalCenter: parent.verticalCenter
                           text: list.labelOf(row.modelData)
-                          color: row.index === list.current ? Theme.green : Theme.text
+                          color: row.index === list.current ? Theme.accent : Theme.text
                           font.family: Theme.font
                           font.pixelSize: 13
                           font.weight: row.index === list.current ? 700 : 500
@@ -489,7 +539,7 @@ in
                           anchors.verticalCenter: parent.verticalCenter
                           visible: row.index === list.current
                           text: "check"
-                          color: Theme.green
+                          color: Theme.accent
                           font.family: Theme.iconFont
                           font.pixelSize: 16
                       }
@@ -590,7 +640,7 @@ in
                               radius: 10
                               color: "transparent"
                               border.width: thumb.isCurrent ? 3 : 0
-                              border.color: Theme.green
+                              border.color: Theme.accent
                           }
                           MouseArea {
                               id: thumbMouse
@@ -805,7 +855,8 @@ in
           }
           function saveLast() {
               const wall = root.wallpaper.startsWith("/var/lib/greeter-wallpapers/") ? root.wallpaper.split("/").pop() : "";
-              lastFile.setText([root.user.name, root.session ? root.session.id : "", wall].join("\t") + "\n");
+              // 4th: which theme switch this screen has already seen (Theme.stamp)
+              lastFile.setText([root.user.name, root.session ? root.session.id : "", wall, Theme.stamp].join("\t") + "\n");
           }
           function restoreSession() {
               const u = root.users.findIndex(x => x.name === saved(0));
@@ -819,8 +870,11 @@ in
           }
           function restoreWallpaper() {
               const byName = n => root.wallpapers.find(p => p.split("/").pop() === n);
-              // the one you picked last time, else hk.png, else the first one, else the repo copy
-              root.wallpaper = byName(saved(2)) || byName("hk.png") || root.wallpapers[0] || root.fallbackWallpaper;
+              // Just switched themes in your session (a stamp this screen hasn't seen):
+              // the theme's wallpaper. Otherwise the one you picked here last time, else
+              // the theme's, else hk.png, else the first one, else the repo copy.
+              const themeIsNew = Theme.wallpaper !== "" && Theme.stamp !== saved(3);
+              root.wallpaper = (themeIsNew ? Theme.wallpaper : "") || byName(saved(2)) || Theme.wallpaper || byName("hk.png") || root.wallpapers[0] || root.fallbackWallpaper;
           }
 
           // ── list the installed Wayland sessions ──
@@ -1160,7 +1214,7 @@ in
                               color: Theme.inner
                               border.width: 3
                               // green normally, yellow while checking, red when it failed
-                              border.color: root.phase === "checking" ? Theme.yellow : root.phase === "failed" ? Theme.red : Theme.green
+                              border.color: root.phase === "checking" ? Theme.yellow : root.phase === "failed" ? Theme.red : Theme.accent
                               Behavior on border.color {
                                   ColorAnimation {
                                       duration: 200

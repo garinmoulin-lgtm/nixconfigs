@@ -16,6 +16,847 @@ let
     done
     exit 0
   ''} %t";
+
+  # ── The color themes ──
+  # Every part of the desktop with colors in it reads them from here: the bar
+  # (Quickshell), kitty, rofi, hyprlock, GTK and Qt apps, the mouse cursor, and the
+  # login screen (configuration.nix reads this as my.themes, see "Themes" near the
+  # end of this file).
+  #
+  # All of them get built, and the theme button on the bar (or `theme <id>` in a
+  # terminal) picks which one is showing. "Themes" near the end explains how.
+  #
+  # To add a theme: copy one of the blocks below, give it a new id, change what's in
+  # it, and add the id to `order`.
+  themes =
+    let
+      # Rosé Pine for GTK isn't in nixpkgs. It comes from the rose-pine-gtk flake input
+      # (rose-pine/gtk on GitHub, updated with `nix flake update`).
+      #  - GTK 3: the theme folder, with one fix. Its "dark" variant (gtk-dark.css) has
+      #    the colors flipped to light (rose-pine/gtk's README warns about it), and GTK
+      #    uses that variant whenever an app or the desktop asks for dark, which is
+      #    always here. So the dark variant is made the same as the normal (dark) one,
+      #    in both gtk-3.0 and gtk-3.20 (GTK 3.24 reads gtk-3.20).
+      #  - GTK 4: the repo has one .css per variant, but it's only colors for libadwaita
+      #    apps, not a whole theme. So it's kept outside the theme folder (in
+      #    share/rose-pine-gtk4) and only loaded through your gtk.css (gtk4Css below).
+      #    As the theme's gtk-4.0 it would strip plain GTK 4 apps of their styling.
+      rosePineGtk = pkgs.runCommand "rose-pine-gtk-theme" { } ''
+        mkdir -p $out/share/themes $out/share/rose-pine-gtk4
+        cp -r ${inputs.rose-pine-gtk}/gtk3/rose-pine-gtk $out/share/themes/
+        chmod -R u+w $out/share/themes/rose-pine-gtk
+        for d in gtk-3.0 gtk-3.20; do
+          cp $out/share/themes/rose-pine-gtk/$d/gtk.css $out/share/themes/rose-pine-gtk/$d/gtk-dark.css
+        done
+        cp ${inputs.rose-pine-gtk}/gtk4/rose-pine.css $out/share/rose-pine-gtk4/gtk.css
+      '';
+      # one build for Tokyo Night's GTK theme and its icons
+      tokyonightGtk = pkgs.tokyonight-gtk-theme.override {
+        colorVariants = [ "dark" ];
+        iconVariants = [ "Dark" ];
+      };
+    in
+    {
+      # The theme you get until you pick one (and if the one you picked is ever removed).
+      default = "everforest";
+
+      # Order in the bar's theme list.
+      order = [
+        "catppuccin-mocha"
+        "everforest"
+        "rose-pine"
+        "gruvbox"
+        "tokyo-night"
+      ];
+
+      # Each theme:
+      #   name, variant   what the theme list shows
+      #   colors          6-digit hex, no "#". By what they're used for:
+      #     bg            the bar, popups, terminal and window backgrounds
+      #     bgDim         darker than bg (shadows, Qt's "Dark")
+      #     surface       text fields, the login screen's password box
+      #     overlay       pills, hovered rows, buttons
+      #     midlight, light   lighter steps above overlay (Qt bevels)
+      #     dim           dimmed icons (muted volume, idle search box border)
+      #     border        inactive window border
+      #     fg, fgBright  text
+      #     subtle, placeholder, disabled   quieter text, from brighter to dimmer
+      #     red orange yellow green cyan blue magenta   the named colors
+      #     accent        selected / active things: chips, open tabs, the active border
+      #     link, linkVisited
+      #   gtk, icons, cursor   { name, package } for GTK apps and the mouse pointer
+      #   gtk4Css         (optional) the .css your GTK 4 gtk.css imports. Normally the
+      #                   theme's own gtk-4.0/gtk.css; Rosé Pine keeps its elsewhere
+      #   kitty           the terminal's colors, as published by the theme's authors
+      themes = {
+        # catppuccin.com, catppuccin/palette
+        catppuccin-mocha = {
+          name = "Catppuccin";
+          variant = "Mocha";
+          colors = {
+            bg = "1e1e2e"; # base
+            bgDim = "11111b"; # crust
+            surface = "181825"; # mantle
+            overlay = "313244"; # surface0
+            midlight = "45475a"; # surface1
+            light = "585b70"; # surface2
+            dim = "585b70"; # surface2
+            border = "45475a"; # surface1
+            fg = "cdd6f4"; # text
+            fgBright = "cdd6f4"; # text
+            subtle = "a6adc8"; # subtext0
+            placeholder = "7f849c"; # overlay1
+            disabled = "6c7086"; # overlay0
+            red = "f38ba8";
+            orange = "fab387"; # peach
+            yellow = "f9e2af";
+            green = "a6e3a1";
+            cyan = "94e2d5"; # teal
+            blue = "89b4fa";
+            magenta = "cba6f7"; # mauve
+            accent = "cba6f7"; # mauve
+            link = "89b4fa";
+            linkVisited = "cba6f7";
+          };
+          gtk = {
+            # nixpkgs patches the "+default" off the end of the name upstream builds
+            name = "catppuccin-mocha-mauve-standard";
+            package = pkgs.catppuccin-gtk.override {
+              variant = "mocha";
+              accents = [ "mauve" ];
+            };
+          };
+          icons = {
+            name = "Papirus-Dark"; # Papirus with Catppuccin-colored folders
+            package = pkgs.catppuccin-papirus-folders.override {
+              flavor = "mocha";
+              accent = "mauve";
+            };
+          };
+          cursor = {
+            name = "catppuccin-mocha-dark-cursors";
+            package = pkgs.catppuccin-cursors.mochaDark;
+          };
+          # catppuccin/kitty, themes/mocha.conf
+          kitty = ''
+            foreground #cdd6f4
+            background #1e1e2e
+            selection_foreground #1e1e2e
+            selection_background #f5e0dc
+            cursor #f5e0dc
+            cursor_text_color #1e1e2e
+            scrollbar_handle_color #9399b2
+            scrollbar_track_color #45475a
+            url_color #f5e0dc
+            active_border_color #b4befe
+            inactive_border_color #6c7086
+            bell_border_color #f9e2af
+            active_tab_foreground #11111b
+            active_tab_background #cba6f7
+            inactive_tab_foreground #cdd6f4
+            inactive_tab_background #181825
+            tab_bar_background #11111b
+            mark1_foreground #1e1e2e
+            mark1_background #b4befe
+            mark2_foreground #1e1e2e
+            mark2_background #cba6f7
+            mark3_foreground #1e1e2e
+            mark3_background #74c7ec
+            color0 #45475a
+            color8 #585b70
+            color1 #f38ba8
+            color9 #f38ba8
+            color2 #a6e3a1
+            color10 #a6e3a1
+            color3 #f9e2af
+            color11 #f9e2af
+            color4 #89b4fa
+            color12 #89b4fa
+            color5 #f5c2e7
+            color13 #f5c2e7
+            color6 #94e2d5
+            color14 #94e2d5
+            color7 #bac2de
+            color15 #a6adc8
+          '';
+        };
+
+        # sainnhe/everforest, dark, "hard" contrast
+        everforest = {
+          name = "Everforest";
+          variant = "Dark Hard";
+          colors = {
+            bg = "272e33"; # bg0
+            bgDim = "1e2326"; # bg_dim
+            surface = "2e383c"; # bg1
+            overlay = "374145"; # bg2
+            midlight = "414b50"; # bg3
+            light = "495156"; # bg4
+            dim = "4f5b58"; # bg5
+            border = "4f5b58"; # bg5
+            fg = "d3c6aa";
+            fgBright = "e6e2cc";
+            subtle = "9da9a0"; # grey2
+            placeholder = "859289"; # grey1
+            disabled = "7a8478"; # grey0
+            red = "e67e80";
+            orange = "e69875";
+            yellow = "dbbc7f";
+            green = "a7c080";
+            cyan = "83c092"; # aqua
+            blue = "7fbbb3";
+            magenta = "d699b6"; # purple
+            accent = "a7c080"; # green
+            link = "7fbbb3";
+            linkVisited = "d699b6";
+          };
+          gtk = {
+            name = "Everforest-Green-Dark";
+            package = pkgs.everforest-gtk-theme;
+          };
+          icons = {
+            name = "Everforest-Dark";
+            package = pkgs.everforest-gtk-theme;
+          };
+          cursor = {
+            name = "everforest-cursors";
+            package = pkgs.everforest-cursors;
+          };
+          # kovidgoyal/kitty-themes, everforest_dark_hard.conf
+          kitty = ''
+            foreground #d3c6aa
+            background #272e33
+            selection_foreground #9da9a0
+            selection_background #464e53
+            cursor #d3c6aa
+            cursor_text_color #2e383c
+            url_color #7fbbb3
+            active_border_color #a7c080
+            inactive_border_color #4f5b58
+            bell_border_color #e69875
+            visual_bell_color none
+            active_tab_background #272e33
+            active_tab_foreground #d3c6aa
+            inactive_tab_background #374145
+            inactive_tab_foreground #9da9a0
+            tab_bar_background #2e383c
+            tab_bar_margin_color none
+            mark1_foreground #272e33
+            mark1_background #7fbbb3
+            mark2_foreground #272e33
+            mark2_background #d3c6aa
+            mark3_foreground #272e33
+            mark3_background #d699b6
+            color0 #343f44
+            color8 #868d80
+            color1 #e67e80
+            color9 #e67e80
+            color2 #a7c080
+            color10 #a7c080
+            color3 #dbbc7f
+            color11 #dbbc7f
+            color4 #7fbbb3
+            color12 #7fbbb3
+            color5 #d699b6
+            color13 #d699b6
+            color6 #83c092
+            color14 #83c092
+            color7 #859289
+            color15 #9da9a0
+          '';
+        };
+
+        # rosepinetheme.com, main variant
+        rose-pine = {
+          name = "Rosé Pine";
+          variant = "Main";
+          colors = {
+            bg = "191724"; # base
+            bgDim = "191724"; # base (Rosé Pine has nothing darker)
+            surface = "1f1d2e"; # surface
+            overlay = "26233a"; # overlay
+            midlight = "403d52"; # highlight med
+            light = "524f67"; # highlight high
+            dim = "524f67"; # highlight high
+            border = "403d52"; # highlight med
+            fg = "e0def4"; # text
+            fgBright = "e0def4";
+            subtle = "908caa"; # subtle
+            placeholder = "6e6a86"; # muted
+            disabled = "6e6a86"; # muted
+            red = "eb6f92"; # love
+            orange = "ebbcba"; # rose
+            yellow = "f6c177"; # gold
+            # Rosé Pine has 6 colors for these 7 names. Pine (its "green") is a dark teal
+            # that's hard to read as text on the bar, so green and cyan are both foam,
+            # and pine is blue.
+            green = "9ccfd8"; # foam
+            cyan = "9ccfd8"; # foam
+            blue = "31748f"; # pine
+            magenta = "c4a7e7"; # iris
+            accent = "c4a7e7"; # iris
+            link = "9ccfd8"; # foam
+            linkVisited = "c4a7e7"; # iris
+          };
+          gtk = {
+            name = "rose-pine-gtk";
+            package = rosePineGtk;
+          };
+          icons = {
+            name = "rose-pine";
+            package = pkgs.rose-pine-icon-theme;
+          };
+          cursor = {
+            name = "BreezeX-RosePine-Linux";
+            package = pkgs.rose-pine-cursor;
+          };
+          gtk4Css = "${rosePineGtk}/share/rose-pine-gtk4/gtk.css";
+          # rose-pine/kitty, dist/rose-pine.conf
+          kitty = ''
+            foreground #e0def4
+            background #191724
+            selection_foreground #e0def4
+            selection_background #403d52
+            cursor #524f67
+            cursor_text_color #e0def4
+            url_color #c4a7e7
+            active_tab_foreground #e0def4
+            active_tab_background #26233a
+            inactive_tab_foreground #6e6a86
+            inactive_tab_background #191724
+            active_border_color #31748f
+            inactive_border_color #403d52
+            color0 #26233a
+            color8 #6e6a86
+            color1 #eb6f92
+            color9 #eb6f92
+            color2 #31748f
+            color10 #31748f
+            color3 #f6c177
+            color11 #f6c177
+            color4 #9ccfd8
+            color12 #9ccfd8
+            color5 #c4a7e7
+            color13 #c4a7e7
+            color6 #ebbcba
+            color14 #ebbcba
+            color7 #e0def4
+            color15 #e0def4
+          '';
+        };
+
+        # morhetz/gruvbox, dark, "hard" contrast
+        gruvbox = {
+          name = "Gruvbox";
+          variant = "Dark Hard";
+          colors = {
+            bg = "1d2021"; # dark0_hard
+            bgDim = "1d2021";
+            surface = "282828"; # dark0
+            overlay = "3c3836"; # dark1
+            midlight = "504945"; # dark2
+            light = "665c54"; # dark3
+            dim = "665c54"; # dark3
+            border = "504945"; # dark2
+            fg = "ebdbb2"; # light1
+            fgBright = "fbf1c7"; # light0
+            subtle = "a89984"; # light4
+            placeholder = "928374"; # gray
+            disabled = "7c6f64"; # dark4
+            red = "fb4934"; # bright_red
+            orange = "fe8019"; # bright_orange
+            yellow = "fabd2f"; # bright_yellow
+            green = "b8bb26"; # bright_green
+            cyan = "8ec07c"; # bright_aqua
+            blue = "83a598"; # bright_blue
+            magenta = "d3869b"; # bright_purple
+            accent = "fe8019"; # bright_orange
+            link = "83a598";
+            linkVisited = "d3869b";
+          };
+          gtk = {
+            name = "Gruvbox-Dark";
+            package = pkgs.gruvbox-gtk-theme.override { colorVariants = [ "dark" ]; };
+          };
+          icons = {
+            name = "Gruvbox-Plus-Dark";
+            package = pkgs.gruvbox-plus-icons;
+          };
+          cursor = {
+            name = "Capitaine Cursors (Gruvbox)";
+            package = pkgs.capitaine-cursors-themed;
+          };
+          # kovidgoyal/kitty-themes, gruvbox-dark-hard.conf
+          kitty = ''
+            selection_foreground #ebdbb2
+            selection_background #d65d0e
+            background #1d2021
+            foreground #ebdbb2
+            color0 #3c3836
+            color1 #cc241d
+            color2 #98971a
+            color3 #d79921
+            color4 #458588
+            color5 #b16286
+            color6 #689d6a
+            color7 #a89984
+            color8 #928374
+            color9 #fb4934
+            color10 #b8bb26
+            color11 #fabd2f
+            color12 #83a598
+            color13 #d3869b
+            color14 #8ec07c
+            color15 #fbf1c7
+            cursor #bdae93
+            cursor_text_color #665c54
+            url_color #458588
+            active_tab_foreground #eeeeee
+            active_tab_background #d65d0e
+            inactive_tab_foreground #ebdbb2
+            inactive_tab_background #171a1a
+          '';
+        };
+
+        # folke/tokyonight.nvim, "night" style
+        tokyo-night = {
+          name = "Tokyo Night";
+          variant = "Night";
+          colors = {
+            bg = "1a1b26"; # bg
+            bgDim = "16161e"; # bg_dark
+            surface = "16161e"; # bg_dark
+            overlay = "292e42"; # bg_highlight
+            midlight = "3b4261"; # fg_gutter
+            light = "414868"; # terminal_black
+            dim = "545c7e"; # dark3
+            border = "3b4261"; # fg_gutter
+            fg = "c0caf5";
+            fgBright = "c0caf5";
+            subtle = "a9b1d6"; # fg_dark
+            placeholder = "565f89"; # comment
+            disabled = "545c7e"; # dark3
+            red = "f7768e";
+            orange = "ff9e64";
+            yellow = "e0af68";
+            green = "9ece6a";
+            cyan = "7dcfff";
+            blue = "7aa2f7";
+            magenta = "bb9af7";
+            accent = "7aa2f7"; # blue
+            link = "7aa2f7";
+            linkVisited = "bb9af7";
+          };
+          gtk = {
+            name = "Tokyonight-Dark";
+            package = tokyonightGtk;
+          };
+          icons = {
+            name = "Tokyonight-Dark";
+            package = tokyonightGtk;
+          };
+          cursor = {
+            # no Tokyo Night cursor exists; Palenight is the closest of the Capitaine set
+            name = "Capitaine Cursors (Palenight)";
+            package = pkgs.capitaine-cursors-themed;
+          };
+          # folke/tokyonight.nvim, extras/kitty/tokyonight_night.conf
+          kitty = ''
+            background #1a1b26
+            foreground #c0caf5
+            selection_background #283457
+            selection_foreground #c0caf5
+            url_color #73daca
+            cursor #c0caf5
+            cursor_text_color #1a1b26
+            active_tab_background #7aa2f7
+            active_tab_foreground #16161e
+            inactive_tab_background #292e42
+            inactive_tab_foreground #545c7e
+            active_border_color #7aa2f7
+            inactive_border_color #292e42
+            color0 #15161e
+            color1 #f7768e
+            color2 #9ece6a
+            color3 #e0af68
+            color4 #7aa2f7
+            color5 #bb9af7
+            color6 #7dcfff
+            color7 #a9b1d6
+            color8 #414868
+            color9 #ff899d
+            color10 #9fe044
+            color11 #faba4a
+            color12 #8db0ff
+            color13 #c7a9ff
+            color14 #a4daff
+            color15 #c0caf5
+            color16 #ff9e64
+            color17 #db4b4b
+          '';
+        };
+      };
+    };
+
+  # ── Themes ──
+  # The themes themselves (colors, GTK/icon/cursor packages, kitty colors) are
+  # above. Here every theme gets one folder in the Nix store with its file for
+  # each app, and ~/.local/state/theme/current points at the folder of the theme
+  # you picked. The apps read their colors through that link, so switching themes
+  # is just pointing it somewhere else. See "Themes" near the end of this file.
+  themeState = "${config.home.homeDirectory}/.local/state/theme";
+  themeCmd = "${themeSwitch}/bin/theme";
+
+  # ── Wallpaper animation ──
+  # How awww changes the wallpaper: when you switch themes, and at login. The theme
+  # command and the awww service both use these, and they're in your session's
+  # environment too, so `awww img <picture>` in a terminal animates the same way.
+  # AWWW_TRANSITION can be: simple fade left right top bottom wipe wave grow center
+  # any outer random none (`man awww-img` has what each one does)
+  awwwTransition = {
+    AWWW_TRANSITION = "grow"; # a circle that grows...
+    AWWW_TRANSITION_POS = "center"; # ...out from the middle of the screen
+    AWWW_TRANSITION_DURATION = "1.5"; # seconds
+    AWWW_TRANSITION_FPS = "240"; # frames per second; your monitor's refresh rate
+  };
+
+  mkThemeDir =
+    id: t:
+    let
+      c = t.colors;
+      hex = name: "#${c.${name}}";
+      argb = name: "#ff${c.${name}}";
+      # Qt's palette roles, in the order qt6ct wants them: WindowText, Button, Light,
+      # Midlight, Dark, Mid, Text, BrightText, ButtonText, Base, Window, Shadow,
+      # Highlight, HighlightedText, Link, LinkVisited, AlternateBase, NoRole,
+      # ToolTipBase, ToolTipText, PlaceholderText
+      qtRoles =
+        text:
+        lib.concatMapStringsSep ", " argb [
+          text
+          "overlay"
+          "light"
+          "midlight"
+          "bgDim"
+          "surface"
+          text
+          "fgBright"
+          text
+          "surface"
+          "bg"
+          "bgDim"
+          "accent"
+          "bg"
+          "link"
+          "linkVisited"
+          "overlay"
+        ]
+        + ", #ff000000, "
+        + lib.concatMapStringsSep ", " argb [
+          "bg"
+          "fg"
+          "placeholder"
+        ];
+      gtkIni = ''
+        [Settings]
+        gtk-application-prefer-dark-theme=true
+        gtk-cursor-theme-name=${t.cursor.name}
+        gtk-cursor-theme-size=24
+        gtk-font-name=SFProText Nerd Font 11
+        gtk-icon-theme-name=${t.icons.name}
+        gtk-theme-name=${t.gtk.name}
+      '';
+    in
+    pkgs.linkFarm "theme-${id}" {
+      "kitty.conf" = pkgs.writeText "kitty.conf" t.kitty;
+
+      # the color variables that home.nix's rofi theme uses (@background, ...)
+      "rofi.rasi" = pkgs.writeText "rofi.rasi" ''
+        * {
+            background: ${hex "bg"};
+            background-alt: ${hex "overlay"};
+            foreground: ${hex "fg"};
+            selected: ${hex "accent"};
+            active: ${hex "cyan"};
+            urgent: ${hex "red"};
+            placeholder-fg: ${hex "placeholder"};
+        }
+      '';
+
+      "qt6ct.conf" = pkgs.writeText "qt6ct.conf" ''
+        [ColorScheme]
+        active_colors=${qtRoles "fg"}
+        inactive_colors=${qtRoles "fg"}
+        disabled_colors=${qtRoles "disabled"}
+      '';
+
+      # hyprpolkitagent and other hyprtoolkit apps
+      "hyprtoolkit.conf" = pkgs.writeText "hyprtoolkit.conf" (
+        lib.hm.generators.toHyprconf {
+          attrs = {
+            background = "0xFF${lib.toUpper c.bg}";
+            base = "0xFF${lib.toUpper c.overlay}";
+            accent = "0xFF${lib.toUpper c.accent}";
+            font_family = "SFProText Nerd Font";
+            font_family_monospace = "SFMono Nerd Font";
+          };
+        }
+      );
+
+      # Lock screen. Measured from the reference screenshot and scaled to 1920x1080.
+      "hyprlock.conf" = pkgs.writeText "hyprlock.conf" (
+        lib.hm.generators.toHyprconf {
+          importantPrefixes = [
+            "$"
+            "monitor"
+          ];
+          attrs = {
+            general.hide_cursor = false; # cursor is visible in the reference
+
+            background = [
+              {
+                monitor = "";
+                path = "${themeState}/wallpaper"; # the theme's wallpaper
+                blur_passes = 3;
+              }
+            ];
+
+            # Clock: 07:44 — ink ~238x64px, centered 74px above screen center
+            label = [
+              {
+                monitor = "";
+                text = "$TIME";
+                color = "rgb(${c.fg})";
+                font_size = 64;
+                font_family = "SFMono Nerd Font";
+                position = "0, 74";
+                halign = "center";
+                valign = "center";
+              }
+            ];
+
+            # Password pill: ~225x56px, centered 27px below screen center
+            input-field = [
+              {
+                monitor = "";
+                size = "200, 50";
+                position = "0, -20";
+                halign = "center";
+                valign = "center";
+                rounding = -1; # full pill
+                outline_thickness = 3;
+                outer_color = "rgb(${c.accent})";
+                inner_color = "rgb(${c.surface})";
+                font_color = "rgb(${c.fg})";
+                font_family = "SFMono Nerd Font";
+                placeholder_text = "<i>Input Password...</i>";
+                fade_on_empty = false;
+                dots_center = true;
+                check_color = "rgb(${c.yellow})";
+                fail_color = "rgb(${c.red})";
+                dots_size = 0.33; # 0.2–0.8, fraction of the field height
+                dots_spacing = 0.15; # 0.0–1.0, gap between dots, relative to dot size
+              }
+            ];
+          };
+        }
+      );
+
+      # read by hyprland.lua when Hyprland starts or reloads its config
+      "hyprland.lua" = pkgs.writeText "hyprland-theme.lua" ''
+        return {
+            active_border = "rgba(${c.accent}ee)",
+            inactive_border = "rgba(${c.border}99)",
+        }
+      '';
+
+      "gtk-3.0.ini" = pkgs.writeText "gtk-3.0.ini" gtkIni;
+      "gtk-4.0.ini" = pkgs.writeText "gtk-4.0.ini" gtkIni;
+      # libadwaita apps ignore gtk-theme-name but do load your own gtk.css, so the
+      # theme comes in from there (the same thing home-manager's gtk4.theme does)
+      "gtk-4.0.css" = pkgs.writeText "gtk-4.0.css" ''
+        @import url("file://${t.gtk4Css or "${t.gtk.package}/share/themes/${t.gtk.name}/gtk-4.0/gtk.css"}");
+      '';
+      # ~/.icons/default/index.theme: the cursor apps use when they aren't told one
+      "cursor.theme" = pkgs.writeText "cursor.theme" ''
+        [Icon Theme]
+        Name=Default
+        Inherits=${t.cursor.name}
+      '';
+      # read by uwsm at login (see uwsm/env below), so the session starts with it
+      "session.env" = pkgs.writeText "session.env" ''
+        export XCURSOR_THEME=${lib.escapeShellArg t.cursor.name}
+      '';
+      # for the theme command
+      "env" = pkgs.writeText "theme.env" ''
+        THEME_NAME=${lib.escapeShellArg t.name}
+        THEME_VARIANT=${lib.escapeShellArg t.variant}
+        GTK_THEME_NAME=${lib.escapeShellArg t.gtk.name}
+        ICON_THEME=${lib.escapeShellArg t.icons.name}
+        CURSOR_THEME=${lib.escapeShellArg t.cursor.name}
+      '';
+    };
+  themeDirs = lib.genAttrs themes.order (id: mkThemeDir id themes.themes.${id});
+  # what Theme.qml gets: names and colors, with the "#"
+  qsThemes = lib.mapAttrs (id: t: {
+    inherit (t) name variant;
+    colors = lib.mapAttrs (_: v: "#" + v) t.colors;
+  }) themes.themes;
+
+  # `theme`: lists the themes, or switches to one. The bar's theme button runs it.
+  #   theme                 which one is on, and the list
+  #   theme <id>            switch (e.g. theme rose-pine)
+  # Switching points ~/.local/state/theme/current at the theme's folder, picks its
+  # wallpaper, and tells what's running now: kitty reloads its colors, the cursor and
+  # the wallpaper change, GTK gets the new theme name. Quickshell watches
+  # ~/.local/state/theme/name and recolors the bar by itself.
+  themeSwitch = pkgs.writeShellApplication {
+    name = "theme";
+    runtimeEnv = awwwTransition; # the wallpaper animation
+    runtimeInputs = with pkgs; [
+      coreutils
+      findutils
+      diffutils
+      procps
+      dconf
+      systemd
+      awww
+    ];
+    text = ''
+      state="$HOME/.local/state/theme"
+      greeter=/var/lib/greeter-theme   # read by the login screen (configuration.nix)
+      default=${themes.default}
+      ids="${lib.concatStringsSep " " themes.order}"
+      # set by sourcing a theme's env file
+      THEME_NAME="" THEME_VARIANT="" GTK_THEME_NAME="" ICON_THEME="" CURSOR_THEME=""
+
+      dir_for() {
+        case "''${1-}" in
+      ${lib.concatMapStrings (id: "    ${id}) echo ${themeDirs.${id}} ;;\n") themes.order}    *) return 1 ;;
+        esac
+      }
+      current() {
+        local t
+        t=$(cat "$state/name" 2>/dev/null || true)
+        if dir_for "$t" >/dev/null; then echo "$t"; else echo "$default"; fi
+      }
+      # ln + mv, so the link is swapped in one step and never missing
+      relink() {
+        ln -sfn "$1" "$2.new"
+        mv -T "$2.new" "$2"
+      }
+      # point state/current at this build's folder for the theme
+      use() {
+        mkdir -p "$state"
+        relink "$(dir_for "$1")" "$state/current"
+        # only written when it changes: Quickshell reloads the bar's colors on a write
+        [ "$(cat "$state/name" 2>/dev/null || true)" = "$1" ] || printf '%s\n' "$1" >"$state/name"
+      }
+      # The theme's wallpaper: the first picture (A to Z) in ~/Pictures/Wallpapers/<id>/,
+      # or ~/Pictures/Wallpapers/hk.png if that folder is empty or missing.
+      wallpaper_for() {
+        local f
+        f=$(find "$HOME/Pictures/Wallpapers/$1" -maxdepth 1 -type f \
+          \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.gif' \) \
+          2>/dev/null | LC_ALL=C sort | head -n 1) || true # no folder yet is fine
+        echo "''${f:-$HOME/Pictures/Wallpapers/hk.png}"
+      }
+      use_wallpaper() {
+        local f
+        f=$(wallpaper_for "$1")
+        [ "$(readlink "$state/wallpaper" 2>/dev/null || true)" = "$f" ] || relink "$f" "$state/wallpaper"
+      }
+      # The login screen runs as its own user and can't look in your home folder, so
+      # it gets the theme name, cursor and a copy of the wallpaper in /var/lib/greeter-theme.
+      sync_greeter() {
+        [ -d "$greeter" ] && [ -w "$greeter" ] || return 0
+        local id src ext dst="" stamp=""
+        id=$(current)
+        # shellcheck disable=SC1091
+        . "$state/current/env"
+        printf '%s\n' "$CURSOR_THEME" >"$greeter/cursor.new" && mv -f "$greeter/cursor.new" "$greeter/cursor"
+        src=$(readlink -f "$state/wallpaper" || true)
+        if [ -f "$src" ]; then
+          ext="''${src##*.}"
+          dst="$greeter/wallpaper.$ext"
+          cmp -s "$src" "$dst" || { cp -f "$src" "$dst.new" && mv -f "$dst.new" "$dst"; }
+          stamp="$id:$(basename "$src"):$(stat -c %Y "$src")"
+        fi
+        for old in "$greeter"/wallpaper.*; do
+          [ -e "$old" ] && [ "$old" != "$dst" ] && rm -f "$old"
+        done
+        # a new stamp means "you switched themes": the login screen then shows the
+        # theme's wallpaper, even if you'd picked another one there before
+        printf '{"theme":"%s","wallpaper":"%s","stamp":"%s"}\n' "$id" "$dst" "$stamp" >"$greeter/state.json.new"
+        mv -f "$greeter/state.json.new" "$greeter/state.json"
+      }
+      # GTK apps that are open follow the GNOME settings (dconf)
+      tell_gtk() {
+        # shellcheck disable=SC1091
+        . "$state/current/env"
+        dconf write /org/gnome/desktop/interface/gtk-theme "'$GTK_THEME_NAME'" || true
+        dconf write /org/gnome/desktop/interface/icon-theme "'$ICON_THEME'" || true
+        dconf write /org/gnome/desktop/interface/cursor-theme "'$CURSOR_THEME'" || true
+        dconf write /org/gnome/desktop/interface/color-scheme "'prefer-dark'" || true
+      }
+      # everything already running in your session
+      tell_session() {
+        # shellcheck disable=SC1091
+        . "$state/current/env"
+        if [ -n "''${HYPRLAND_INSTANCE_SIGNATURE-}" ]; then
+          hyprctl setcursor "$CURSOR_THEME" 24 >/dev/null || true
+          # and for apps Hyprland starts from now on
+          hyprctl eval "hl.env(\"XCURSOR_THEME\", \"$CURSOR_THEME\")" >/dev/null || true
+        fi
+        systemctl --user set-environment XCURSOR_THEME="$CURSOR_THEME" || true
+        # kitty rereads its config (and so the colors) on SIGUSR1. On NixOS the
+        # process is called .kitty-wrapped.
+        pkill -USR1 -x kitty || true
+        pkill -USR1 -x .kitty-wrapped || true
+        awww img "$state/wallpaper" >/dev/null 2>&1 || true
+        systemctl --user start --no-block rofi-wallpaper.service || true
+      }
+
+      case "''${1-}" in
+        "")
+          now=$(current)
+          for id in $ids; do
+            # shellcheck disable=SC1090,SC1091
+            name=$(. "$(dir_for "$id")/env"; echo "$THEME_NAME $THEME_VARIANT")
+            if [ "$id" = "$now" ]; then mark="*"; else mark=" "; fi
+            printf '%s %-17s %s\n' "$mark" "$id" "$name"
+          done
+          ;;
+        -h | --help)
+          echo "usage: theme [${lib.concatStringsSep "|" themes.order}]"
+          ;;
+        --refresh)
+          # home-manager runs this on every rebuild: the theme folders get new store
+          # paths, so the link is pointed at this build's copy of the same theme
+          use "$(current)"
+          [ -e "$state/wallpaper" ] || use_wallpaper "$(current)"
+          ;;
+        --login)
+          # at login (theme-session service): pick up new pictures in the folder too
+          use "$(current)"
+          use_wallpaper "$(current)"
+          tell_gtk
+          sync_greeter
+          ;;
+        *)
+          if ! dir_for "$1" >/dev/null; then
+            echo "theme: no theme called '$1'. These exist: $ids" >&2
+            exit 1
+          fi
+          use "$1"
+          use_wallpaper "$1"
+          tell_gtk
+          tell_session
+          sync_greeter
+          ;;
+      esac
+    '';
+  };
 in
 {
   home.username = "garinh";
@@ -328,6 +1169,9 @@ in
             function move(from, to) {
                 if (from === to)
                     return;
+                // your own order from here on: the sort chip goes off
+                queueSort = "";
+                unsortedIds = [];
                 send(["playlist-move", from, to > from ? to + 1 : to]);
             }
             // Sort the whole queue by "album", "artist" or "title" (the song that's
@@ -335,6 +1179,75 @@ in
             // then moves entries into place one by one, top to bottom, with the same
             // playlist-move that drag-to-reorder uses. Songs that aren't in the library
             // (so have no tags) go to the end.
+            //
+            // The queue sort is a mode, like the library's: the chip stays lit while it's on,
+            // songs you add get sorted in, and clicking the lit chip again turns it off and
+            // puts the queue back the way it was before (songs added since go at the end).
+            // Dragging a song turns it off too, keeping the order you made.
+            property string queueSort: ""     // "", "album", "artist" or "title"
+            property var unsortedIds: []      // mpv entry ids in the order from before the sort
+            property var sortedIds: ({})      // ids the sort has seen (id -> true)
+            property var expectIds: null      // the order our moves will end on; null = not busy
+            function setQueueSort(by) {
+                if (by === queueSort) {
+                    // off: back to the old order, then anything newer as it is now
+                    const ids = queue.map(e => e.id);
+                    const old = unsortedIds.filter(id => ids.includes(id));
+                    const order = old.concat(ids.filter(id => !old.includes(id)));
+                    queueSort = "";
+                    unsortedIds = [];
+                    applyOrder(order.map(id => queue.find(e => e.id === id)));
+                    return;
+                }
+                if (queueSort === "")
+                    unsortedIds = queue.map(e => e.id);
+                queueSort = by;
+                sortQueue(by);
+            }
+            onQueueChanged: {
+                if (expectIds !== null) {
+                    // our own moves are still arriving one by one; wait for the last
+                    if (queue.map(e => e.id).join() !== expectIds.join())
+                        return;
+                    expectIds = null;
+                }
+                checkSort();
+            }
+            function checkSort() {
+                if (queueSort === "")
+                    return;
+                // songs added while sorted: remember them for "off", and sort them in
+                const fresh = queue.filter(e => !sortedIds[e.id]);
+                if (fresh.length > 0) {
+                    unsortedIds = unsortedIds.concat(fresh.map(e => e.id));
+                    sortQueue(queueSort);
+                }
+            }
+            Timer {
+                // in case mpv never reports the exact order we expected
+                running: music.expectIds !== null
+                interval: 2000
+                onTriggered: {
+                    music.expectIds = null;
+                    music.checkSort();
+                }
+            }
+            // Move entries so the queue ends up in `wanted` order, top to bottom, with the
+            // same playlist-move that drag-to-reorder uses.
+            function applyOrder(wanted) {
+                const now = queue.slice();      // mirror of mpv's list as the moves happen
+                let moved = false;
+                for (let i = 0; i < wanted.length; i++) {
+                    const from = now.indexOf(wanted[i]);
+                    if (from === i || from < 0)
+                        continue;
+                    send(["playlist-move", from, i]);   // lands in front of slot i, i.e. at i
+                    now.splice(i, 0, now.splice(from, 1)[0]);
+                    moved = true;
+                }
+                if (moved)
+                    expectIds = now.map(e => e.id);
+            }
             function sortQueue(by) {
                 const key = e => {
                     const s = byPath[e.filename];
@@ -357,14 +1270,11 @@ in
                     return 0;
                 };
                 const wanted = queue.slice().sort(cmp);
-                const now = queue.slice();      // mirror of mpv's list as the moves happen
-                for (let i = 0; i < wanted.length; i++) {
-                    const from = now.indexOf(wanted[i]);
-                    if (from === i)
-                        continue;
-                    send(["playlist-move", from, i]);   // lands in front of slot i, i.e. at i
-                    now.splice(i, 0, now.splice(from, 1)[0]);
-                }
+                const seen = {};
+                for (const e of queue)
+                    seen[e.id] = true;
+                sortedIds = seen;
+                applyOrder(wanted);
             }
             // empties the queue except the song that's playing
             function clearQueue() {
@@ -388,6 +1298,7 @@ in
                         artist: f[3],
                         album: f[4],
                         length: Number(f[5]),
+                        added: Number(f[1]),      // the file's modified time, for "Recently added"
                         // a file:// URL; each folder name is escaped so spaces and # work
                         cover: f[6] ? "file://" + f[6].split("/").map(encodeURIComponent).join("/") : ""
                     };
@@ -1208,135 +2119,71 @@ in
                                 }
                             }
 
-                            Repeater {
-                                // ScriptModel only builds rows for new devices instead of rebuilding them all.
-                                model: ScriptModel {
-                                    values: btList.powered ? btList.devices : []
+                            // Scrolls once the list is taller than 360 px (lots of devices or networks around).
+                            Flickable {
+                                id: btScroll
+                                width: 280
+                                height: Math.min(contentHeight, 360)
+                                contentHeight: btRows.implicitHeight
+                                visible: btRows.implicitHeight > 0
+                                clip: true
+                                boundsBehavior: Flickable.StopAtBounds
+                                ScrollBar.vertical: ThinScrollBar {}
+
+                                // Scrolls just enough to show all of `row` (used while a row's drop-down opens).
+                                function show(row) {
+                                    if (row.y + row.height > contentY + height)
+                                        contentY = Math.min(row.y + row.height, contentHeight) - height;
+                                    if (row.y < contentY)
+                                        contentY = row.y;
                                 }
 
-                                Rectangle {
-                                    id: btRow
-                                    required property var modelData
-                                    readonly property var device: modelData
-                                    readonly property bool expanded: btList.active === device
-                                    readonly property bool ready: btList.ready(device)  // really connected
+                                Column {
+                                    id: btRows
+                                    width: btScroll.width
+                                    spacing: 4
 
-                                    width: 280
-                                    height: btHeader.height + btDrop.height
-                                    radius: Theme.radius
-                                    color: btHeaderMouse.containsMouse || expanded ? Theme.pill : "transparent"
-                                    clip: true
-
-                                    Behavior on color {
-                                        ColorAnimation {
-                                            duration: 120
+                                    Repeater {
+                                        // ScriptModel only builds rows for new devices instead of rebuilding them all.
+                                        model: ScriptModel {
+                                            values: btList.powered ? btList.devices : []
                                         }
-                                    }
 
-                                    // ── the row itself: icon, name, status ──
-                                    Item {
-                                        id: btHeader
-                                        width: parent.width
-                                        height: 30
-                                        scale: btHeaderMouse.pressed ? 0.85 : 1
+                                        Rectangle {
+                                            id: btRow
+                                            required property var modelData
+                                            readonly property var device: modelData
+                                            readonly property bool expanded: btList.active === device
+                                            readonly property bool ready: btList.ready(device)  // really connected
+                                            // keep it in view while its drop-down glides open
+                                            onHeightChanged: if (expanded)
+                                                btScroll.show(btRow)
 
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 120
-                                                easing.type: Easing.OutCubic
+                                            width: 280
+                                            height: btHeader.height + btDrop.height
+                                            radius: Theme.radius
+                                            // a device that shows up fades in instead of popping in
+                                            NumberAnimation on opacity {
+                                                from: 0
+                                                to: 1
+                                                duration: 200
                                             }
-                                        }
+                                            color: btHeaderMouse.containsMouse || expanded ? Theme.pill : "transparent"
+                                            clip: true
 
-                                        Text {
-                                            id: btGlyph
-                                            anchors.left: parent.left
-                                            anchors.leftMargin: 10
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: btList.glyph(btRow.device)
-                                            color: btRow.ready ? Theme.accent : Theme.text
-                                            font.family: Theme.iconFont
-                                            font.pixelSize: Theme.iconSize
-                                            font.variableAxes: Theme.iconAxes
-                                        }
-                                        Text {
-                                            anchors {
-                                                left: btGlyph.right
-                                                right: btStatus.left
-                                                leftMargin: 8
-                                                rightMargin: 8
-                                                verticalCenter: parent.verticalCenter
-                                            }
-                                            text: btRow.device.name
-                                            elide: Text.ElideRight
-                                            color: btRow.ready ? Theme.accent : Theme.text
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize
-                                            font.weight: btRow.ready ? 700 : 500
-                                            font.letterSpacing: Theme.letterSpacing
-                                        }
-                                        // per-device status (and battery, when the device reports it)
-                                        Text {
-                                            id: btStatus
-                                            anchors {
-                                                right: parent.right
-                                                rightMargin: 10
-                                                verticalCenter: parent.verticalCenter
-                                            }
-                                            text: btList.stateText(btRow.device) + (btRow.device.batteryAvailable ? "  ·  " + Math.round(btRow.device.battery * 100) + "%" : "")
-                                            color: btRow.ready ? Theme.green : btRow.device === btList.failedDevice ? Theme.red : btRow.device.connected ? Theme.yellow : Theme.text
-                                            opacity: btRow.device.connected || btRow.device === btList.failedDevice ? 1 : 0.6
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize * 0.85
-                                        }
-                                        MouseArea {
-                                            id: btHeaderMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: btList.toggle(btRow.device)
-                                        }
-                                    }
-
-                                    // ── the drop-down: Connect / Disconnect, glides open over 500 ms ──
-                                    Item {
-                                        id: btDrop
-                                        y: btHeader.height
-                                        width: parent.width
-                                        height: btRow.expanded ? btDropContent.implicitHeight + 10 : 0
-                                        clip: true
-
-                                        Behavior on height {
-                                            NumberAnimation {
-                                                duration: 500
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        Column {
-                                            id: btDropContent
-                                            x: 10
-                                            width: parent.width - 20
-                                            spacing: 6
-
-                                            Rectangle {
-                                                id: btAction
-                                                // red "Disconnect" when connected, green "Connect" otherwise
-                                                readonly property bool disconnecting: btRow.device.connected
-                                                readonly property color tint: disconnecting ? Theme.red : Theme.green
-                                                readonly property bool busy: btList.busy(btRow.device)
-
-                                                width: parent.width
-                                                height: 26
-                                                radius: height / 2
-                                                color: btActionMouse.containsMouse && !busy ? tint : Theme.bg
-                                                opacity: busy ? 0.5 : 1
-                                                scale: btActionMouse.pressed && !busy ? 0.85 : 1
-
-                                                Behavior on color {
-                                                    ColorAnimation {
-                                                        duration: 120
-                                                    }
+                                            Behavior on color {
+                                                ColorAnimation {
+                                                    duration: 120
                                                 }
+                                            }
+
+                                            // ── the row itself: icon, name, status ──
+                                            Item {
+                                                id: btHeader
+                                                width: parent.width
+                                                height: 30
+                                                scale: btHeaderMouse.pressed ? 0.85 : 1
+
                                                 Behavior on scale {
                                                     NumberAnimation {
                                                         duration: 120
@@ -1345,25 +2192,290 @@ in
                                                 }
 
                                                 Text {
-                                                    anchors.centerIn: parent
-                                                    // while it's working, show what it's doing instead
-                                                    text: btAction.busy ? btList.stateText(btRow.device) : btAction.disconnecting ? "Disconnect" : "Connect"
-                                                    color: btActionMouse.containsMouse && !btAction.busy ? Theme.bg : btAction.tint
+                                                    id: btGlyph
+                                                    anchors.left: parent.left
+                                                    anchors.leftMargin: 10
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: btList.glyph(btRow.device)
+                                                    color: btRow.ready ? Theme.accent : Theme.text
+                                                    font.family: Theme.iconFont
+                                                    font.pixelSize: Theme.iconSize
+                                                    font.variableAxes: Theme.iconAxes
+                                                }
+                                                Text {
+                                                    anchors {
+                                                        left: btGlyph.right
+                                                        right: btStatus.left
+                                                        leftMargin: 8
+                                                        rightMargin: 8
+                                                        verticalCenter: parent.verticalCenter
+                                                    }
+                                                    text: btRow.device.name
+                                                    elide: Text.ElideRight
+                                                    color: btRow.ready ? Theme.accent : Theme.text
                                                     font.family: Theme.font
                                                     font.pixelSize: Theme.textSize
-                                                    font.weight: 600
+                                                    font.weight: btRow.ready ? 700 : 500
+                                                    font.letterSpacing: Theme.letterSpacing
+                                                }
+                                                // per-device status (and battery, when the device reports it)
+                                                Text {
+                                                    id: btStatus
+                                                    anchors {
+                                                        right: parent.right
+                                                        rightMargin: 10
+                                                        verticalCenter: parent.verticalCenter
+                                                    }
+                                                    text: btList.stateText(btRow.device) + (btRow.device.batteryAvailable ? "  ·  " + Math.round(btRow.device.battery * 100) + "%" : "")
+                                                    color: btRow.ready ? Theme.green : btRow.device === btList.failedDevice ? Theme.red : btRow.device.connected ? Theme.yellow : Theme.text
+                                                    opacity: btRow.device.connected || btRow.device === btList.failedDevice ? 1 : 0.6
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize * 0.85
                                                 }
                                                 MouseArea {
-                                                    id: btActionMouse
+                                                    id: btHeaderMouse
                                                     anchors.fill: parent
                                                     hoverEnabled: true
-                                                    cursorShape: btAction.busy ? Qt.ArrowCursor : Qt.PointingHandCursor
-                                                    onClicked: btList.connectOrDisconnect(btRow.device)
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: btList.toggle(btRow.device)
+                                                }
+                                            }
+
+                                            // ── the drop-down: Connect / Disconnect, glides open over 500 ms ──
+                                            Item {
+                                                id: btDrop
+                                                y: btHeader.height
+                                                width: parent.width
+                                                height: btRow.expanded ? btDropContent.implicitHeight + 10 : 0
+                                                clip: true
+
+                                                Behavior on height {
+                                                    NumberAnimation {
+                                                        duration: 500
+                                                        easing.type: Easing.OutCubic
+                                                    }
+                                                }
+
+                                                Column {
+                                                    id: btDropContent
+                                                    x: 10
+                                                    width: parent.width - 20
+                                                    spacing: 6
+
+                                                    Rectangle {
+                                                        id: btAction
+                                                        // red "Disconnect" when connected, green "Connect" otherwise
+                                                        readonly property bool disconnecting: btRow.device.connected
+                                                        readonly property color tint: disconnecting ? Theme.red : Theme.green
+                                                        readonly property bool busy: btList.busy(btRow.device)
+
+                                                        width: parent.width
+                                                        height: 26
+                                                        radius: height / 2
+                                                        color: btActionMouse.containsMouse && !busy ? tint : Theme.bg
+                                                        opacity: busy ? 0.5 : 1
+                                                        scale: btActionMouse.pressed && !busy ? 0.85 : 1
+
+                                                        Behavior on color {
+                                                            ColorAnimation {
+                                                                duration: 120
+                                                            }
+                                                        }
+                                                        Behavior on scale {
+                                                            NumberAnimation {
+                                                                duration: 120
+                                                                easing.type: Easing.OutCubic
+                                                            }
+                                                        }
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            // while it's working, show what it's doing instead
+                                                            text: btAction.busy ? btList.stateText(btRow.device) : btAction.disconnecting ? "Disconnect" : "Connect"
+                                                            color: btActionMouse.containsMouse && !btAction.busy ? Theme.bg : btAction.tint
+                                                            font.family: Theme.font
+                                                            font.pixelSize: Theme.textSize
+                                                            font.weight: 600
+                                                        }
+                                                        MouseArea {
+                                                            id: btActionMouse
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            cursorShape: btAction.busy ? Qt.ArrowCursor : Qt.PointingHandCursor
+                                                            onClicked: btList.connectOrDisconnect(btRow.device)
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+
+                    // ── Theme: the color themes (the themes block at the top of home.nix) ──
+                    // Icon only, like Bluetooth. Each row shows that theme's own colors;
+                    // click one to switch. The bar fades over, and the theme command does
+                    // the rest (see "Themes" in home.nix). The popup stays open, so you
+                    // can try a few.
+                    Widget {
+                        anchors.verticalCenter: parent.verticalCenter
+                        icon: "palette"
+
+                        Column {
+                            id: themeList
+                            spacing: 4
+                            width: 280
+
+                            Item {
+                                width: parent.width
+                                height: 26
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Theme"
+                                    color: Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 1.2
+                                    font.weight: 700
+                                    font.letterSpacing: Theme.letterSpacing
+                                }
+                            }
+
+                            Repeater {
+                                model: Theme.order
+
+                                Rectangle {
+                                    id: themeRow
+                                    required property string modelData
+                                    readonly property var info: Theme.themes[modelData]
+                                    readonly property var colors: info.colors
+                                    readonly property bool selected: Theme.current === modelData
+
+                                    width: themeList.width
+                                    height: 44
+                                    radius: Theme.radius
+                                    color: themeMouse.containsMouse || selected ? Theme.pill : "transparent"
+
+                                    Behavior on color {
+                                        ColorAnimation {
+                                            duration: 120
+                                        }
+                                    }
+
+                                    Item {
+                                        anchors.fill: parent
+                                        scale: themeMouse.pressed ? 0.85 : 1
+
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 120
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        // a little preview: the theme's background with its colors on it
+                                        Rectangle {
+                                            id: themePreview
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: 8
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 64
+                                            height: 28
+                                            radius: 6
+                                            color: themeRow.colors.bg
+                                            border.width: 1
+                                            border.color: themeRow.colors.overlay
+
+                                            Row {
+                                                anchors.centerIn: parent
+                                                spacing: 3
+
+                                                Repeater {
+                                                    model: ["red", "yellow", "green", "blue", "magenta"]
+
+                                                    Rectangle {
+                                                        required property string modelData
+                                                        width: 8
+                                                        height: 8
+                                                        radius: 4
+                                                        color: themeRow.colors[modelData]
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Column {
+                                            anchors {
+                                                left: themePreview.right
+                                                right: themeCheck.left
+                                                leftMargin: 10
+                                                rightMargin: 8
+                                                verticalCenter: parent.verticalCenter
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: themeRow.info.name
+                                                elide: Text.ElideRight
+                                                color: themeRow.selected ? Theme.accent : Theme.text
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize
+                                                font.weight: themeRow.selected ? 700 : 500
+                                                font.letterSpacing: Theme.letterSpacing
+                                            }
+                                            Text {
+                                                width: parent.width
+                                                text: themeRow.info.variant
+                                                elide: Text.ElideRight
+                                                color: Theme.text
+                                                opacity: 0.6
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize * 0.85
+                                            }
+                                        }
+                                        Text {
+                                            id: themeCheck
+                                            anchors.right: parent.right
+                                            anchors.rightMargin: 10
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "check"
+                                            opacity: themeRow.selected ? 1 : 0
+                                            color: Theme.accent
+                                            font.family: Theme.iconFont
+                                            font.pixelSize: Theme.iconSize
+                                            font.variableAxes: Theme.iconAxes
+
+                                            Behavior on opacity {
+                                                NumberAnimation {
+                                                    duration: 120
+                                                }
+                                            }
+                                        }
+                                    }
+                                    MouseArea {
+                                        id: themeMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: Theme.set(themeRow.modelData)
+                                    }
+                                }
+                            }
+
+                            // where this theme's wallpaper comes from
+                            Text {
+                                width: themeList.width
+                                topPadding: 4
+                                leftPadding: 8
+                                rightPadding: 8
+                                wrapMode: Text.Wrap
+                                text: "Wallpaper: the first picture in\n~/Pictures/Wallpapers/" + Theme.current + "/"
+                                color: Theme.text
+                                opacity: 0.6
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.85
                             }
                         }
                     }
@@ -1514,15 +2626,73 @@ in
                                 onViewChanged: pick = null
                                 onTabChanged: pick = null
 
+                                // ── sorting the library (the sort button next to Songs/Artists/Albums) ──
+                                // One choice for song lists and one for artist/album lists. "" is the
+                                // default: songs in library order (artist, album, then track order),
+                                // artists and albums A to Z. Clicking the lit choice again goes back
+                                // to the default.
+                                property string songSort: ""
+                                property string groupSort: ""
+                                property bool sortOpen: false        // the list of choices is showing
+                                readonly property var songSorts: [
+                                    { id: "az", name: "A–Z" },
+                                    { id: "za", name: "Z–A" },
+                                    { id: "artist", name: "Artist" },
+                                    { id: "album", name: "Album" },
+                                    { id: "short", name: "Shortest" },
+                                    { id: "long", name: "Longest" },
+                                    { id: "recent", name: "Recently added" },
+                                    { id: "oldest", name: "Oldest added" }
+                                ]
+                                readonly property var groupSorts: [
+                                    { id: "za", name: "Z–A" },
+                                    { id: "most", name: "Most songs" },
+                                    { id: "long", name: "Longest" },
+                                    { id: "recent", name: "Recently added" }
+                                ]
+                                // which list the sort button is about right now
+                                readonly property bool sortingGroups: view !== "songs" && !pick
+                                readonly property string activeSort: sortingGroups ? groupSort : songSort
+                                function pickSort(id) {
+                                    if (sortingGroups)
+                                        groupSort = groupSort === id ? "" : id;
+                                    else
+                                        songSort = songSort === id ? "" : id;
+                                }
+                                // A to Z, ignoring upper/lower case (Qt's JavaScript ignores
+                                // localeCompare's options, so the case is folded by hand). Empty
+                                // tags go last.
+                                function byText(a, b) {
+                                    return (a || "￿").toLowerCase().localeCompare((b || "￿").toLowerCase());
+                                }
+                                function songName(s) {
+                                    return s.title || s.path.split("/").pop();
+                                }
+                                function sortSongs(list, by) {
+                                    const cmp = {
+                                        az: (a, b) => byText(songName(a), songName(b)),
+                                        za: (a, b) => byText(songName(b), songName(a)),
+                                        artist: (a, b) => byText(a.artist, b.artist) || byText(a.album, b.album) || byText(a.path, b.path),
+                                        album: (a, b) => byText(a.album, b.album) || byText(a.path, b.path),
+                                        short: (a, b) => a.length - b.length,
+                                        long: (a, b) => b.length - a.length,
+                                        recent: (a, b) => b.added - a.added,
+                                        oldest: (a, b) => a.added - b.added
+                                    }[by];
+                                    return cmp ? list.slice().sort(cmp) : list;
+                                }
+
                                 // the songs listed: the open artist/album, or the library narrowed
-                                // down by the search box
+                                // down by the search box, in the chosen order
                                 readonly property var results: {
-                                    if (pick)
-                                        return pick.songs;
-                                    const q = search.text.toLowerCase();
-                                    if (q === "")
-                                        return music.songs;
-                                    return music.songs.filter(s => (s.title + " " + s.artist + " " + s.album).toLowerCase().includes(q));
+                                    let list;
+                                    if (pick) {
+                                        list = pick.songs;
+                                    } else {
+                                        const q = search.text.toLowerCase();
+                                        list = q === "" ? music.songs : music.songs.filter(s => (s.title + " " + s.artist + " " + s.album).toLowerCase().includes(q));
+                                    }
+                                    return sortSongs(list, songSort);
                                 }
                                 // artists or albums, each with its songs (in library order:
                                 // artist, album, then file name, so albums keep track order)
@@ -1541,19 +2711,28 @@ in
                                                 name: name,
                                                 artist: s.artist,
                                                 cover: "",
-                                                songs: []
+                                                songs: [],
+                                                length: 0,      // all its songs together, in seconds
+                                                added: 0        // its newest song's time
                                             };
                                             list.push(g);
                                         }
                                         g.songs.push(s);
+                                        g.length += s.length || 0;
+                                        g.added = Math.max(g.added, s.added || 0);
                                         if (g.cover === "" && s.cover !== "")
                                             g.cover = s.cover;
                                     }
                                     const q = search.text.toLowerCase();
                                     const shown = q === "" ? list : list.filter(g => (g.name + " " + g.artist).toLowerCase().includes(q));
-                                    return shown.sort((a, b) => a.name.localeCompare(b.name, undefined, {
-                                            sensitivity: "base"
-                                        }));
+                                    const az = (a, b) => byText(a.name, b.name);
+                                    const cmp = {
+                                        za: (a, b) => byText(b.name, a.name),
+                                        most: (a, b) => (b.songs.length - a.songs.length) || az(a, b),
+                                        long: (a, b) => (b.length - a.length) || az(a, b),
+                                        recent: (a, b) => (b.added - a.added) || az(a, b)
+                                    }[groupSort] || az;
+                                    return shown.sort(cmp);
                                 }
 
                                 // seconds -> "m:ss"
@@ -1677,30 +2856,63 @@ in
                                     }
                                 }
 
-                                // ── Songs / Artists / Albums ──
-                                Row {
+                                // ── Songs / Artists / Albums, and the sort button ──
+                                Item {
                                     visible: lib.tab === "library" && !lib.pick
-                                    spacing: 4
-                                    Repeater {
-                                        model: [
-                                            {
-                                                id: "songs",
-                                                name: "Songs"
-                                            },
-                                            {
-                                                id: "artists",
-                                                name: "Artists"
-                                            },
-                                            {
-                                                id: "albums",
-                                                name: "Albums"
+                                    width: parent.width
+                                    height: 28
+
+                                    Row {
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 4
+                                        Repeater {
+                                            model: [
+                                                {
+                                                    id: "songs",
+                                                    name: "Songs"
+                                                },
+                                                {
+                                                    id: "artists",
+                                                    name: "Artists"
+                                                },
+                                                {
+                                                    id: "albums",
+                                                    name: "Albums"
+                                                }
+                                            ]
+                                            Chip {
+                                                required property var modelData
+                                                label: modelData.name
+                                                selected: lib.view === modelData.id   // Songs, to start with
+                                                onClicked: lib.view = modelData.id
                                             }
-                                        ]
-                                        Chip {
-                                            required property var modelData
-                                            label: modelData.name
-                                            selected: lib.view === modelData.id
-                                            onClicked: lib.view = modelData.id
+                                        }
+                                    }
+
+                                    // the sort button: lit while a sort other than the default is on,
+                                    // with its name next to it
+                                    Row {
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 2
+
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: {
+                                                const all = lib.sortingGroups ? lib.groupSorts : lib.songSorts;
+                                                const s = all.find(x => x.id === lib.activeSort);
+                                                return s ? s.name : "";
+                                            }
+                                            color: Theme.accent
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.85
+                                            font.weight: 600
+                                        }
+                                        IconButton {
+                                            icon: "sort"
+                                            iconColor: lib.sortOpen || lib.activeSort !== "" ? Theme.accent : Theme.text
+                                            onClicked: lib.sortOpen = !lib.sortOpen
                                         }
                                     }
                                 }
@@ -1745,10 +2957,38 @@ in
                                     }
                                     IconButton {
                                         id: pickPlay
-                                        anchors.right: parent.right
+                                        anchors.right: pickSort.left
                                         anchors.verticalCenter: parent.verticalCenter
                                         icon: "play_circle"
                                         onClicked: music.playAll(lib.results)
+                                    }
+                                    // an artist's songs can be sorted too (an album keeps its track order)
+                                    IconButton {
+                                        id: pickSort
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: !!lib.pick && lib.pick.kind === "artists"
+                                        width: visible ? implicitWidth : 0
+                                        icon: "sort"
+                                        iconColor: lib.sortOpen || lib.songSort !== "" ? Theme.accent : Theme.text
+                                        onClicked: lib.sortOpen = !lib.sortOpen
+                                    }
+                                }
+
+                                // ── the sort choices (open with the sort button) ──
+                                Flow {
+                                    visible: lib.sortOpen && lib.tab === "library" && (!lib.pick || lib.pick.kind === "artists")
+                                    width: parent.width
+                                    spacing: 4
+
+                                    Repeater {
+                                        model: lib.sortingGroups ? lib.groupSorts : lib.songSorts
+                                        Chip {
+                                            required property var modelData
+                                            label: modelData.name
+                                            selected: lib.activeSort === modelData.id
+                                            onClicked: lib.pickSort(modelData.id)   // again = back to the default
+                                        }
                                     }
                                 }
 
@@ -1783,7 +3023,10 @@ in
                                         Chip {
                                             required property var modelData
                                             label: modelData.name
-                                            onClicked: music.sortQueue(modelData.id)
+                                            // lit while the queue is kept sorted this way; click it
+                                            // again to put the queue back how it was
+                                            selected: music.queueSort === modelData.id
+                                            onClicked: music.setQueueSort(modelData.id)
                                         }
                                     }
                                 }
@@ -2777,6 +4020,8 @@ in
                                 visible: count > 0
                                 clip: true
                                 spacing: 6
+                                boundsBehavior: Flickable.StopAtBounds
+                                ScrollBar.vertical: ThinScrollBar {}
 
                                 // newest first; ScriptModel keeps existing cards when one is added
                                 model: ScriptModel {
@@ -3205,8 +4450,14 @@ in
                             spacing: 4
 
                             // Every network from every device (Wi-Fi and wired): connected first,
-                            // then strongest signal. Wired networks have no signalStrength, hence ?? 0.
-                            readonly property var networks: [].concat(...Networking.devices.values.map(d => d.networks.values)).sort((a, b) => (b.connected - a.connected) || ((b.signalStrength ?? 0) - (a.signalStrength ?? 0)))
+                            // then strongest signal, then A to Z. Signal is counted in steps of 25%,
+                            // not to the exact percent: it wobbles all the time, and sorting on the
+                            // exact number kept reshuffling the rows. Wired networks have no
+                            // signalStrength, hence ?? 0.
+                            function bars(n) {
+                                return Math.round((n.signalStrength ?? 0) * 4);
+                            }
+                            readonly property var networks: [].concat(...Networking.devices.values.map(d => d.networks.values)).sort((a, b) => (b.connected - a.connected) || (bars(b) - bars(a)) || a.name.localeCompare(b.name))
 
                             // ── The connect flow, for one network at a time ──
                             // It lives here and not in the rows: the list re-sorts whenever a network
@@ -3311,171 +4562,73 @@ in
                                 font.weight: 600
                             }
 
-                            Repeater {
-                                // ScriptModel only creates rows for networks that are new, instead of
-                                // rebuilding every row each time the list changes.
-                                model: ScriptModel {
-                                    values: netList.networks
+                            // Scrolls once the list is taller than 360 px (lots of devices or networks around).
+                            Flickable {
+                                id: netScroll
+                                width: 280
+                                height: Math.min(contentHeight, 360)
+                                contentHeight: netRows.implicitHeight
+                                visible: netRows.implicitHeight > 0
+                                clip: true
+                                boundsBehavior: Flickable.StopAtBounds
+                                ScrollBar.vertical: ThinScrollBar {}
+
+                                // Scrolls just enough to show all of `row` (used while a row's drop-down opens).
+                                function show(row) {
+                                    if (row.y + row.height > contentY + height)
+                                        contentY = Math.min(row.y + row.height, contentHeight) - height;
+                                    if (row.y < contentY)
+                                        contentY = row.y;
                                 }
 
-                                Rectangle {
-                                    id: netRow
-                                    required property var modelData
-                                    readonly property var network: modelData
-                                    readonly property bool isWifi: netList.isWifi(network)
-                                    readonly property string phase: netList.active === network ? netList.phase : "idle"
-                                    readonly property bool expanded: phase !== "idle"
+                                Column {
+                                    id: netRows
+                                    width: netScroll.width
+                                    spacing: 4
 
-                                    width: 280
-                                    height: header.height + drop.height
-                                    radius: Theme.radius
-                                    color: headerMouse.containsMouse || expanded ? Theme.pill : "transparent"
-                                    clip: true
-
-                                    Behavior on color {
-                                        ColorAnimation {
-                                            duration: 120
+                                    Repeater {
+                                        // ScriptModel only creates rows for networks that are new, instead of
+                                        // rebuilding every row each time the list changes.
+                                        model: ScriptModel {
+                                            values: netList.networks
                                         }
-                                    }
 
-                                    // ── the row itself ──
-                                    Item {
-                                        id: header
-                                        width: parent.width
-                                        height: 28
-                                        scale: headerMouse.pressed ? 0.85 : 1
+                                        Rectangle {
+                                            id: netRow
+                                            required property var modelData
+                                            readonly property var network: modelData
+                                            readonly property bool isWifi: netList.isWifi(network)
+                                            readonly property string phase: netList.active === network ? netList.phase : "idle"
+                                            readonly property bool expanded: phase !== "idle"
+                                            // keep it in view while its drop-down glides open
+                                            onHeightChanged: if (expanded)
+                                                netScroll.show(netRow)
 
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 120
-                                                easing.type: Easing.OutCubic
+                                            width: 280
+                                            height: header.height + drop.height
+                                            radius: Theme.radius
+                                            // a network that shows up fades in instead of popping in
+                                            NumberAnimation on opacity {
+                                                from: 0
+                                                to: 1
+                                                duration: 200
                                             }
-                                        }
+                                            color: headerMouse.containsMouse || expanded ? Theme.pill : "transparent"
+                                            clip: true
 
-                                        Text {
-                                            anchors {
-                                                left: parent.left
-                                                right: strength.left
-                                                leftMargin: 10
-                                                rightMargin: 8
-                                                verticalCenter: parent.verticalCenter
-                                            }
-                                            text: netRow.network.name
-                                            elide: Text.ElideRight
-                                            color: netRow.network.connected ? Theme.accent : Theme.text
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize
-                                            font.weight: netRow.network.connected ? 700 : 500
-                                            font.letterSpacing: Theme.letterSpacing
-                                        }
-                                        Text {
-                                            id: strength
-                                            anchors {
-                                                right: parent.right
-                                                rightMargin: 10
-                                                verticalCenter: parent.verticalCenter
-                                            }
-                                            text: netRow.isWifi ? Math.round(netRow.network.signalStrength * 100) + "%" : "wired"
-                                            color: Theme.text
-                                            opacity: 0.6
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize * 0.85
-                                        }
-                                        MouseArea {
-                                            id: headerMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: netList.toggle(netRow.network)
-                                        }
-                                    }
-
-                                    // ── the drop-down: glides open over 500 ms ──
-                                    Item {
-                                        id: drop
-                                        y: header.height
-                                        width: parent.width
-                                        height: netRow.expanded ? dropContent.implicitHeight + 10 : 0
-                                        clip: true
-
-                                        Behavior on height {
-                                            NumberAnimation {
-                                                duration: 500
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        Column {
-                                            id: dropContent
-                                            x: 10
-                                            width: parent.width - 20
-                                            spacing: 6
-
-                                            Text {
-                                                visible: netRow.phase === "prompt"
-                                                text: "Enter password:"
-                                                color: Theme.text
-                                                font.family: Theme.font
-                                                font.pixelSize: Theme.textSize * 0.9
-                                            }
-                                            TextField {
-                                                id: passwordField
-                                                visible: netRow.phase === "prompt"
-                                                width: parent.width
-                                                text: netList.password
-                                                onTextEdited: netList.password = text
-                                                onAccepted: netList.submit()       // Enter
-                                                onVisibleChanged: if (visible)
-                                                    forceActiveFocus()
-                                                echoMode: TextInput.Password      // letters show as dots
-                                                color: Theme.text
-                                                font.family: Theme.font
-                                                font.pixelSize: Theme.textSize
-                                                leftPadding: 12
-                                                rightPadding: 12
-                                                background: Rectangle {
-                                                    radius: height / 2                // fully rounded ends
-                                                    color: Theme.bg
-                                                    border.width: 1
-                                                    border.color: passwordField.activeFocus ? Theme.accent : Theme.pillIcon
+                                            Behavior on color {
+                                                ColorAnimation {
+                                                    duration: 120
                                                 }
                                             }
-                                            Text {
-                                                visible: netRow.phase === "connecting"
-                                                text: "Attempting to connect..."
-                                                color: Theme.text
-                                                font.family: Theme.font
-                                                font.pixelSize: Theme.textSize * 0.9
-                                            }
-                                            Text {
-                                                visible: netRow.phase === "success"
-                                                text: "Connected Successfully."
-                                                color: Theme.green
-                                                font.family: Theme.font
-                                                font.pixelSize: Theme.textSize * 0.9
-                                            }
-                                            Text {
-                                                visible: netRow.phase === "failed"
-                                                text: netList.usedPassword ? "Incorrect Password." : "Could not connect."
-                                                color: Theme.red
-                                                font.family: Theme.font
-                                                font.pixelSize: Theme.textSize * 0.9
-                                            }
 
-                                            // Disconnect, shown once connected
-                                            Rectangle {
-                                                visible: netRow.phase === "success" || netRow.phase === "connected"
+                                            // ── the row itself ──
+                                            Item {
+                                                id: header
                                                 width: parent.width
-                                                height: 26
-                                                radius: height / 2
-                                                color: disconnectMouse.containsMouse ? Theme.red : Theme.bg
-                                                scale: disconnectMouse.pressed ? 0.85 : 1
+                                                height: 28
+                                                scale: headerMouse.pressed ? 0.85 : 1
 
-                                                Behavior on color {
-                                                    ColorAnimation {
-                                                        duration: 120
-                                                    }
-                                                }
                                                 Behavior on scale {
                                                     NumberAnimation {
                                                         duration: 120
@@ -3484,19 +4637,152 @@ in
                                                 }
 
                                                 Text {
-                                                    anchors.centerIn: parent
-                                                    text: "Disconnect"
-                                                    color: disconnectMouse.containsMouse ? Theme.bg : Theme.red
+                                                    anchors {
+                                                        left: parent.left
+                                                        right: strength.left
+                                                        leftMargin: 10
+                                                        rightMargin: 8
+                                                        verticalCenter: parent.verticalCenter
+                                                    }
+                                                    text: netRow.network.name
+                                                    elide: Text.ElideRight
+                                                    color: netRow.network.connected ? Theme.accent : Theme.text
                                                     font.family: Theme.font
                                                     font.pixelSize: Theme.textSize
-                                                    font.weight: 600
+                                                    font.weight: netRow.network.connected ? 700 : 500
+                                                    font.letterSpacing: Theme.letterSpacing
+                                                }
+                                                Text {
+                                                    id: strength
+                                                    anchors {
+                                                        right: parent.right
+                                                        rightMargin: 10
+                                                        verticalCenter: parent.verticalCenter
+                                                    }
+                                                    text: netRow.isWifi ? Math.round(netRow.network.signalStrength * 100) + "%" : "wired"
+                                                    color: Theme.text
+                                                    opacity: 0.6
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize * 0.85
                                                 }
                                                 MouseArea {
-                                                    id: disconnectMouse
+                                                    id: headerMouse
                                                     anchors.fill: parent
                                                     hoverEnabled: true
                                                     cursorShape: Qt.PointingHandCursor
-                                                    onClicked: netList.disconnectActive()
+                                                    onClicked: netList.toggle(netRow.network)
+                                                }
+                                            }
+
+                                            // ── the drop-down: glides open over 500 ms ──
+                                            Item {
+                                                id: drop
+                                                y: header.height
+                                                width: parent.width
+                                                height: netRow.expanded ? dropContent.implicitHeight + 10 : 0
+                                                clip: true
+
+                                                Behavior on height {
+                                                    NumberAnimation {
+                                                        duration: 500
+                                                        easing.type: Easing.OutCubic
+                                                    }
+                                                }
+
+                                                Column {
+                                                    id: dropContent
+                                                    x: 10
+                                                    width: parent.width - 20
+                                                    spacing: 6
+
+                                                    Text {
+                                                        visible: netRow.phase === "prompt"
+                                                        text: "Enter password:"
+                                                        color: Theme.text
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.9
+                                                    }
+                                                    TextField {
+                                                        id: passwordField
+                                                        visible: netRow.phase === "prompt"
+                                                        width: parent.width
+                                                        text: netList.password
+                                                        onTextEdited: netList.password = text
+                                                        onAccepted: netList.submit()       // Enter
+                                                        onVisibleChanged: if (visible)
+                                                            forceActiveFocus()
+                                                        echoMode: TextInput.Password      // letters show as dots
+                                                        color: Theme.text
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize
+                                                        leftPadding: 12
+                                                        rightPadding: 12
+                                                        background: Rectangle {
+                                                            radius: height / 2                // fully rounded ends
+                                                            color: Theme.bg
+                                                            border.width: 1
+                                                            border.color: passwordField.activeFocus ? Theme.accent : Theme.pillIcon
+                                                        }
+                                                    }
+                                                    Text {
+                                                        visible: netRow.phase === "connecting"
+                                                        text: "Attempting to connect..."
+                                                        color: Theme.text
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.9
+                                                    }
+                                                    Text {
+                                                        visible: netRow.phase === "success"
+                                                        text: "Connected Successfully."
+                                                        color: Theme.green
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.9
+                                                    }
+                                                    Text {
+                                                        visible: netRow.phase === "failed"
+                                                        text: netList.usedPassword ? "Incorrect Password." : "Could not connect."
+                                                        color: Theme.red
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.9
+                                                    }
+
+                                                    // Disconnect, shown once connected
+                                                    Rectangle {
+                                                        visible: netRow.phase === "success" || netRow.phase === "connected"
+                                                        width: parent.width
+                                                        height: 26
+                                                        radius: height / 2
+                                                        color: disconnectMouse.containsMouse ? Theme.red : Theme.bg
+                                                        scale: disconnectMouse.pressed ? 0.85 : 1
+
+                                                        Behavior on color {
+                                                            ColorAnimation {
+                                                                duration: 120
+                                                            }
+                                                        }
+                                                        Behavior on scale {
+                                                            NumberAnimation {
+                                                                duration: 120
+                                                                easing.type: Easing.OutCubic
+                                                            }
+                                                        }
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: "Disconnect"
+                                                            color: disconnectMouse.containsMouse ? Theme.bg : Theme.red
+                                                            font.family: Theme.font
+                                                            font.pixelSize: Theme.textSize
+                                                            font.weight: 600
+                                                        }
+                                                        MouseArea {
+                                                            id: disconnectMouse
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onClicked: netList.disconnectActive()
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -4366,22 +5652,76 @@ in
 
     import QtQuick
     import Quickshell
+    import Quickshell.Io
 
-    // Everforest dark (medium), from sainnhe/everforest
+    // The bar's colors, from the theme you picked (the themes block at the top of home.nix has all of them).
+    // `current` follows ~/.local/state/theme/name, which the theme command writes, so
+    // switching from a terminal recolors the bar too. Colors fade over `fade` ms.
     Singleton {
-        property color bg: "#2d353b"        // bg0
-        property color pill: "#3d484d"      // bg2
-        property color pillIcon: "#56635f"  // bg5
-        // Theme colors
-        property color text: "#d3c6aa"      // fg
-        property color red: "#e67e80"
-        property color green: "#a7c080"
-        property color blue: "#7fbbb3"
-        property color yellow: "#dbbc7f"
-        property color magenta: "#d699b6"   // everforest calls it purple
-        property color cyan: "#83c092"      // everforest calls it aqua
-        property color orange: "#e69875"
-        property color accent: green
+        id: theme
+
+        // every theme: { id: { name, variant, colors: { bg, fg, accent, ... } } }
+        readonly property var themes: (${builtins.toJSON qsThemes})
+        readonly property var order: ${builtins.toJSON themes.order}
+        readonly property string defaultTheme: "${themes.default}"
+        readonly property string themeCommand: "${themeCmd}"
+        // where your wallpapers for each theme go: <this>/<id>/
+        readonly property string wallpaperDir: Quickshell.env("HOME") + "/Pictures/Wallpapers"
+
+        property string current: defaultTheme
+        readonly property var c: (themes[current] || themes[defaultTheme]).colors
+        property int fade: 350
+        // no fading while starting up (the saved theme is loaded right away instead)
+        property bool ready: false
+        Component.onCompleted: Qt.callLater(() => theme.ready = true)
+
+        // Switch to another theme: the bar right away, everything else through `theme`.
+        function set(id) {
+            if (!themes[id] || id === current)
+                return;
+            current = id;
+            Quickshell.execDetached([themeCommand, id]);
+        }
+
+        FileView {
+            id: nameFile
+            path: Quickshell.env("HOME") + "/.local/state/theme/name"
+            blockLoading: true      // so the first frame already has the right colors
+            watchChanges: true
+            printErrors: false
+            onFileChanged: reload()
+            onLoaded: {
+                const id = text().trim();
+                if (theme.themes[id])
+                    theme.current = id;
+            }
+        }
+
+        property color bg: c.bg
+        property color pill: c.overlay
+        property color pillIcon: c.dim
+        property color text: c.fg
+        property color red: c.red
+        property color green: c.green
+        property color blue: c.blue
+        property color yellow: c.yellow
+        property color magenta: c.magenta
+        property color cyan: c.cyan
+        property color orange: c.orange
+        property color accent: c.accent
+
+        Behavior on bg { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+        Behavior on pill { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+        Behavior on pillIcon { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+        Behavior on text { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+        Behavior on red { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+        Behavior on green { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+        Behavior on blue { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+        Behavior on yellow { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+        Behavior on magenta { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+        Behavior on cyan { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+        Behavior on orange { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+        Behavior on accent { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
 
         property int barHeight: 38
         property int moduleHeight: 26
@@ -4440,6 +5780,16 @@ in
         property int cornerRadius: 14  // roundness of the popup's two bottom corners
         property int duration: 350       // slide-down (open) time in ms
         property int closeDuration: 260  // slide-up (close) time in ms; closing a bit faster feels snappier
+        property int headroom: 240       // extra (empty, click-through) window height, so new rows fit
+
+        // The popup window's height. See implicitHeight in the PopupWindow below.
+        property real windowHeight: 0
+        function fitWindow() {
+            const bar = root.QsWindow.window;
+            // never taller than the screen below the bar, or Hyprland would move it
+            const room = bar && bar.screen ? bar.screen.height - bar.height : 100000;
+            windowHeight = Math.max(popup.bodyHeight, Math.min(popup.bodyHeight + headroom, room));
+        }
 
         // true while the popup is open (or opening)
         property bool open: false
@@ -4458,6 +5808,7 @@ in
             if (Ui.openWidget && Ui.openWidget !== root)
                 Ui.openWidget.closePopup()
             Ui.openWidget = root
+            root.fitWindow()
             popup.visible = true
             root.open = true
             grabBar = false
@@ -4581,7 +5932,29 @@ in
             readonly property real bodyWidth: root.popupWidth > 0 ? root.popupWidth : Math.ceil(area.childrenRect.width + root.padding * 2)
             readonly property real bodyHeight: root.popupHeight > 0 ? root.popupHeight : Math.ceil(area.childrenRect.height + root.padding * 2)
             implicitWidth: bodyWidth + root.curve * 2
-            implicitHeight: bodyHeight
+            // The window is made taller than the content (by root.headroom) and doesn't
+            // shrink while it's open. Resizing a popup window makes it flash for a frame,
+            // which is what happened every time Bluetooth or Wi-Fi found something and the
+            // list got a row longer. Now only the shape inside grows; the window stays.
+            implicitHeight: Math.max(1, root.windowHeight)
+            onBodyHeightChanged: if (root.open && bodyHeight > root.windowHeight)
+                root.fitWindow()
+            // Clicks only land on the shape. The empty part of the window below it lets
+            // them through, as if the popup weren't there.
+            mask: Region {
+                item: shape
+            }
+
+            // The height the shape shows. It follows bodyHeight, and glides there when
+            // the content grows or shrinks while the popup is open (a row appearing).
+            property real shownHeight: bodyHeight
+            Behavior on shownHeight {
+                enabled: root.open && root.openness === 1
+                NumberAnimation {
+                    duration: 200
+                    easing.type: Easing.OutCubic
+                }
+            }
 
             color: "transparent"    // the shape below is what you see
             visible: false          // starts closed
@@ -4605,7 +5978,7 @@ in
             Shape {
                 id: shape
                 width: popup.implicitWidth
-                height: root.openness * popup.bodyHeight      // grows down as it opens
+                height: root.openness * popup.shownHeight     // grows down as it opens
                 visible: height > 0.5
                 preferredRendererType: Shape.CurveRenderer    // smooth, anti-aliased curves
 
@@ -4658,8 +6031,9 @@ in
                 Item {
                     id: area
                     x: root.padding
-                    // Rides on the bottom edge, so the content slides down out of the bar.
-                    y: parent.height - popup.bodyHeight + root.padding
+                    // Slides down out of the bar while opening. Once open it stays put, and
+                    // the shape grows or shrinks underneath when the content does.
+                    y: (root.openness - 1) * popup.shownHeight + root.padding
                     width: popup.bodyWidth - root.padding * 2
                     height: popup.bodyHeight - root.padding * 2
                     opacity: root.openness
@@ -5747,6 +7121,29 @@ in
     }
   '';
 
+  # The scroll bar for long lists in the popups (Bluetooth, Wi-Fi, notifications):
+  # a thin pill on the right, hidden when everything fits, faint until you scroll or
+  # point at it. Drag it, or scroll with the wheel anywhere over the list.
+  xdg.configFile."quickshell/ThinScrollBar.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+
+    ScrollBar {
+        id: bar
+        contentItem: Rectangle {
+            implicitWidth: 4
+            radius: 2
+            color: Theme.pillIcon
+            opacity: bar.size < 1 ? (bar.active || bar.hovered ? 1 : 0.4) : 0
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: 200
+                }
+            }
+        }
+    }
+  '';
+
   xdg.configFile."quickshell/IconButton.qml".text = ''
     import QtQuick
 
@@ -6186,6 +7583,13 @@ in
     # looks when this isn't set; without it Qt can't load your zone (time.timeZone in
     # configuration.nix) and warns "Unable to determine system time zone".
     TZDIR = "/etc/zoneinfo";
+    # the wallpaper animation (awwwTransition at the top of this file)
+    inherit (awwwTransition)
+      AWWW_TRANSITION
+      AWWW_TRANSITION_POS
+      AWWW_TRANSITION_DURATION
+      AWWW_TRANSITION_FPS
+      ;
   };
   # The bar is a systemd service, so give it TZDIR directly too.
   systemd.user.services.quickshell.Service.Environment = [
@@ -6199,7 +7603,12 @@ in
   # Wait (up to 2 s) until the login fade has covered the screen, so the bar doesn't
   # pop in before the fade (see fade.qml). Same for the wallpaper below.
   systemd.user.services.quickshell.Service.ExecStartPre = "${waitForFade}";
-  xdg.configFile."uwsm/env".source = "${config.home.sessionVariablesPackage}/etc/profile.d/hm-session-vars.sh";
+  # uwsm sources this before starting Hyprland: home-manager's session variables, then
+  # the theme's (XCURSOR_THEME), so the session starts with the theme's cursor.
+  xdg.configFile."uwsm/env".text = ''
+    . "${config.home.sessionVariablesPackage}/etc/profile.d/hm-session-vars.sh"
+    if [ -r "${themeState}/current/session.env" ]; then . "${themeState}/current/session.env"; fi
+  '';
 
   # ── Autostart, as services (were hl.exec_cmd lines in the Hyprland config) ──
   # Wallpaper: home-manager's awww module runs awww-daemon with the session.
@@ -6212,12 +7621,15 @@ in
     Unit.ConditionEnvironment = lib.mkForce "";
     Service.RestartSec = lib.mkForce 2;
     Service.ExecStartPre = "${waitForFade}";
+    # the wallpaper animation (awwwTransition at the top of this file)
+    Service.Environment = lib.mapAttrsToList (n: v: "${n}=${v}") awwwTransition;
     # Set the picture every time the daemon (re)starts. awww answers a moment after it
     # starts, so keep trying for up to ~10 s.
     Service.ExecStartPost = toString (
       pkgs.writeShellScript "awww-wallpaper" ''
         for _ in $(${pkgs.coreutils}/bin/seq 50); do
-          ${pkgs.awww}/bin/awww img ${config.home.homeDirectory}/Pictures/Wallpapers/hk.png && exit 0
+          # the theme's wallpaper (a link the theme command keeps up to date)
+          ${pkgs.awww}/bin/awww img ${themeState}/wallpaper && exit 0
           ${pkgs.coreutils}/bin/sleep 0.2
         done
         exit 1
@@ -6277,12 +7689,11 @@ in
   # wants a code confirmed, blueman shows the dialog. The bar's widget does the rest.
   services.blueman-applet.enable = true;
 
-  programs.hyprtoolkit.settings = {
-    background = "0xFF2D353B"; # your Theme.bg (everforest bg0)
-    base = "0xFF3D484D"; # your Theme.pill (bg2)
-    accent = "0xFFA7C080"; # your Theme.accent (green)
-    font_family = "SFProText Nerd Font";
-    font_family_monospace = "SFMono Nerd Font";
+  # hyprtoolkit's colors (and fonts) come from the theme: see "hyprtoolkit.conf" in
+  # mkThemeDir at the top of this file.
+  xdg.configFile."hypr/hyprtoolkit.conf" = {
+    source = config.lib.file.mkOutOfStoreSymlink "${themeState}/current/hyprtoolkit.conf";
+    force = true;
   };
 
   # ── Qt theming (polkit agent, pavucontrol-qt, any Qt app) ──
@@ -6296,7 +7707,7 @@ in
       Appearance = {
         style = "Fusion";
         custom_palette = true;
-        color_scheme_path = "${config.xdg.configHome}/qt6ct/colors/everforest.conf";
+        color_scheme_path = "${themeState}/current/qt6ct.conf"; # the theme's colors
       };
       Fonts = {
         general = ''"SFProText Nerd Font,11"'';
@@ -6307,7 +7718,7 @@ in
       Appearance = {
         style = "Fusion";
         custom_palette = true;
-        color_scheme_path = "${config.xdg.configHome}/qt6ct/colors/everforest.conf";
+        color_scheme_path = "${themeState}/current/qt6ct.conf"; # the theme's colors
       };
       Fonts = {
         general = ''"SFProText Nerd Font,11"'';
@@ -6318,16 +7729,8 @@ in
   xdg.configFile."qt5ct/qt5ct.conf".force = true;
   xdg.configFile."qt6ct/qt6ct.conf".force = true;
 
-  # Everforest dark (medium) as a qt6ct color scheme. One color per Qt palette role, in order:
-  # WindowText, Button, Light, Midlight, Dark, Mid, Text, BrightText, ButtonText, Base, Window,
-  # Shadow, Highlight, HighlightedText, Link, LinkVisited, AlternateBase, NoRole,
-  # ToolTipBase, ToolTipText, PlaceholderText
-  xdg.configFile."qt6ct/colors/everforest.conf".text = ''
-    [ColorScheme]
-    active_colors=#ffd3c6aa, #ff3d484d, #ff4f585e, #ff475258, #ff232a2e, #ff343f44, #ffd3c6aa, #ffe6e2cc, #ffd3c6aa, #ff343f44, #ff2d353b, #ff232a2e, #ffa7c080, #ff2d353b, #ff7fbbb3, #ffd699b6, #ff3d484d, #ff000000, #ff2d353b, #ffd3c6aa, #ff859289
-    inactive_colors=#ffd3c6aa, #ff3d484d, #ff4f585e, #ff475258, #ff232a2e, #ff343f44, #ffd3c6aa, #ffe6e2cc, #ffd3c6aa, #ff343f44, #ff2d353b, #ff232a2e, #ffa7c080, #ff2d353b, #ff7fbbb3, #ffd699b6, #ff3d484d, #ff000000, #ff2d353b, #ffd3c6aa, #ff859289
-    disabled_colors=#ff7a8478, #ff3d484d, #ff4f585e, #ff475258, #ff232a2e, #ff343f44, #ff7a8478, #ffe6e2cc, #ff7a8478, #ff343f44, #ff2d353b, #ff232a2e, #ffa7c080, #ff2d353b, #ff7fbbb3, #ffd699b6, #ff3d484d, #ff000000, #ff2d353b, #ffd3c6aa, #ff859289
-  '';
+  # The Qt colors themselves are made per theme ("qt6ct.conf" in mkThemeDir). Qt apps
+  # read them when they start.
 
   wayland.windowManager.hyprland = {
     enable = true;
@@ -6345,6 +7748,16 @@ in
       -- Fixed: env vars now actually applied via hl.env(); blur config consolidated into one block
 
       ---@module 'hl'
+
+      -- Colors from the theme you picked (see "Themes" in home.nix). If that file is
+      -- missing, the default theme's colors.
+      local okTheme, theme = pcall(dofile, os.getenv("HOME") .. "/.local/state/theme/current/hyprland.lua")
+      if not okTheme or type(theme) ~= "table" then
+          theme = {
+              active_border = "rgba(${themes.themes.${themes.default}.colors.accent}ee)",
+              inactive_border = "rgba(${themes.themes.${themes.default}.colors.border}99)",
+          }
+      end
 
       hl.monitor({
           output   = "", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
@@ -6441,8 +7854,9 @@ in
               gaps_in = 4,
               gaps_out = 8,
               border_size = 0,
-              ["col.active_border"]   = "rgba(a7c080ee)", -- everforest green
-              ["col.inactive_border"] = "rgba(56635f99)", -- everforest bg5
+              -- from the theme (~/.local/state/theme/current/hyprland.lua); only drawn if border_size > 0
+              ["col.active_border"]   = theme.active_border,
+              ["col.inactive_border"] = theme.inactive_border,
               resize_on_border = true,
               extend_border_grab_area = 20,  -- pixels of grab area beyond the visible border
               hover_icon_on_border = true,
@@ -6580,18 +7994,14 @@ in
     theme = lib.mkForce (
       let
         inherit (config.lib.formats.rasi) mkLiteral;
-        # a small square copy of hk.png, made by the rofi-wallpaper service below
+        # a small square copy of the theme's wallpaper, made by the rofi-wallpaper service below
         wallpaper = "${config.home.homeDirectory}/.cache/rofi/wallpaper.png";
       in
       {
-        # Everforest dark (medium)
+        # The colors (@background, @foreground, @selected, ...) come from the theme
+        # ("rofi.rasi" in mkThemeDir). rofi reads them every time it opens.
+        "@import" = "${themeState}/current/rofi.rasi";
         "*" = {
-          background = mkLiteral "#2d353b";
-          background-alt = mkLiteral "#3d484d";
-          foreground = mkLiteral "#d3c6aa";
-          selected = mkLiteral "#a7c080";
-          active = mkLiteral "#83c092";
-          urgent = mkLiteral "#e67e80";
           font = "SFMono Nerd Font Semi-Bold 11";
           border-radius = mkLiteral "8px";
         };
@@ -6663,7 +8073,7 @@ in
           text-color = mkLiteral "inherit";
           cursor = mkLiteral "text";
           placeholder = "Search apps";
-          placeholder-color = mkLiteral "#859289";
+          placeholder-color = mkLiteral "@placeholder-fg";
         };
         "listview" = {
           columns = 1;
@@ -6726,21 +8136,22 @@ in
 
   # ── The picture for rofi, made ahead of time ──
   # rofi has no background daemon: it starts fresh each time you open it, and decoding
-  # the full-size hk.png (4288 x 2848, 12 MB) took long enough to see the square pop in.
+  # the full-size wallpaper (hk.png is 4288 x 2848, 12 MB) took long enough to see the square pop in.
   # So this keeps a small 828 x 828 copy (2x the 414 px square, sharp on HiDPI) in
   # ~/.cache/rofi, cut from the middle of the picture. It's about 20x faster to load.
-  # Made at login and again whenever hk.png changes.
+  # Made at login, when you switch themes, and whenever the theme's wallpaper changes.
   systemd.user.services.rofi-wallpaper = {
     Unit.Description = "Square copy of the wallpaper for rofi";
     Service = {
       Type = "oneshot";
       ExecStart = toString (
         pkgs.writeShellScript "rofi-wallpaper" ''
-          src="$HOME/Pictures/Wallpapers/hk.png"
+          src=$(${pkgs.coreutils}/bin/readlink -f "$HOME/.local/state/theme/wallpaper")
           out="$HOME/.cache/rofi/wallpaper.png"
           [ -f "$src" ] || exit 0
           ${pkgs.coreutils}/bin/mkdir -p "$HOME/.cache/rofi"
-          ${pkgs.imagemagick}/bin/magick "$src" -resize 828x828^ -gravity center -extent 828x828 -strip "$out.new.png" \
+          # [0]: just the first frame, in case it's a GIF
+          ${pkgs.imagemagick}/bin/magick "$src[0]" -resize 828x828^ -gravity center -extent 828x828 -strip "$out.new.png" \
             && ${pkgs.coreutils}/bin/mv "$out.new.png" "$out"
         ''
       );
@@ -6748,8 +8159,8 @@ in
     Install.WantedBy = [ "default.target" ];
   };
   systemd.user.paths.rofi-wallpaper = {
-    Unit.Description = "Watch hk.png for rofi";
-    Path.PathChanged = "%h/Pictures/Wallpapers/hk.png";
+    Unit.Description = "Watch the theme's wallpaper for rofi";
+    Path.PathChanged = "%h/.local/state/theme/wallpaper";
     Install.WantedBy = [ "default.target" ];
   };
 
@@ -6891,89 +8302,109 @@ in
       sync_to_monitor = "no";
       confirm_os_window_close = 0;
       cursor_trail_start_threshold = 0;
-      # Everforest dark (medium), same values as kitty-themes' everforest_dark_medium
-      foreground = "#d3c6aa";
-      background = "#2d353b";
-      selection_foreground = "#9da9a0";
-      selection_background = "#505a60";
-      cursor = "#d3c6aa";
-      cursor_text_color = "#343f44";
-      url_color = "#7fbbb3";
-      active_border_color = "#a7c080";
-      inactive_border_color = "#56635f";
-      bell_border_color = "#e69875";
       wayland_titlebar_color = "system";
-      active_tab_foreground = "#d3c6aa";
-      active_tab_background = "#2d353b";
-      inactive_tab_foreground = "#9da9a0";
-      inactive_tab_background = "#3d484d";
-      tab_bar_background = "#343f44";
-      mark1_foreground = "#2d353b";
-      mark1_background = "#7fbbb3";
-      mark2_foreground = "#2d353b";
-      mark2_background = "#d3c6aa";
-      mark3_foreground = "#2d353b";
-      mark3_background = "#d699b6";
-      color0 = "#343f44";
-      color8 = "#868d80";
-      color1 = "#e67e80";
-      color9 = "#e67e80";
-      color2 = "#a7c080";
-      color10 = "#a7c080";
-      color3 = "#dbbc7f";
-      color11 = "#dbbc7f";
-      color4 = "#7fbbb3";
-      color12 = "#7fbbb3";
-      color5 = "#d699b6";
-      color13 = "#d699b6";
-      color6 = "#83c092";
-      color14 = "#83c092";
-      color7 = "#859289";
-      color15 = "#9da9a0";
     };
+    # The colors come from the theme ("kitty.conf" in mkThemeDir). `theme` sends kitty
+    # SIGUSR1 after switching, which makes open windows reread this and recolor.
+    extraConfig = ''
+      include ${themeState}/current/kitty.conf
+    '';
   };
   # kitty rewrites kitty.conf itself (e.g. the font/theme kittens), turning HM's
   # symlink into a regular file; force lets HM replace it
   xdg.configFile."kitty/kitty.conf".force = true;
 
+  # ── Themes ──
+  # Five themes (the themes block at the top), all built ahead of time. Pick one with the palette
+  # button on the bar, or in a terminal:  theme  (lists them)  /  theme rose-pine
+  #
+  # How it fits together, since NixOS itself can't change after it's built:
+  #  - every theme's files (kitty colors, rofi colors, hyprlock.conf, ...) are made by
+  #    mkThemeDir and kept in the Nix store, one folder per theme
+  #  - the apps' config files point at ~/.local/state/theme/current/<file>
+  #  - ~/.local/state/theme/current is a link to one theme's folder. That link (and
+  #    ~/.local/state/theme/name) is the only thing that changes when you switch.
+  #  - the theme's wallpaper: ~/.local/state/theme/wallpaper links to the first picture
+  #    in ~/Pictures/Wallpapers/<theme id>/ (hk.png if that folder's empty)
+  # Nothing to set up: the link gets made on the next rebuild, pointing at the
+  # default theme (`default` in the themes block).
+  # Hands the themes to configuration.nix, for the login screen. It reads them as
+  # config.home-manager.users.<you>.my.themes. Your home-manager settings can be read
+  # from configuration.nix like any other option, so the themes are made into one:
+  # `my.themes`, declared right here (the imports line) and set to the themes block.
+  imports = [
+    {
+      options.my.themes = lib.mkOption {
+        type = lib.types.raw;
+        readOnly = true;
+        description = "The color themes (the themes block in home.nix), for configuration.nix.";
+      };
+    }
+  ];
+  my.themes = themes;
+
+  home.packages = [
+    themeSwitch
+  ]
+  # every theme's GTK theme, icons and cursor, so they're there when you switch
+  ++ lib.unique (
+    lib.concatMap (t: [
+      t.gtk.package
+      t.icons.package
+      t.cursor.package
+    ]) (lib.attrValues themes.themes)
+  );
+  # Each rebuild makes new copies of the theme folders, so point the link at this
+  # build's copy of the theme you're using (and make it the first time).
+  home.activation.theme = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+    run ${themeCmd} --refresh
+  '';
+  # At login: tell GTK (dconf) and the login screen which theme is on, and pick up
+  # pictures you've added to the theme's wallpaper folder.
+  systemd.user.services.theme-session = {
+    Unit = {
+      Description = "Apply the current theme for this session";
+      After = [ "graphical-session-pre.target" ];
+      PartOf = [ "graphical-session.target" ];
+      Before = [ "awww.service" ];
+    };
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${themeCmd} --login";
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
+  };
+
+  # GTK: home-manager still does the fonts. The theme, icons and cursor come from
+  # the theme you picked: settings.ini (GTK 3 and 4) and GTK 4's gtk.css are links to
+  # that theme's files, and `theme` also sets them in dconf so open GTK 3 apps switch.
   gtk = {
     enable = true;
-    theme = {
-      # the package builds every accent; Green matches Theme.qml's accent
-      name = "Everforest-Green-Dark";
-      package = pkgs.everforest-gtk-theme;
-    };
-    iconTheme = {
-      name = "Everforest-Dark"; # icons ship in the same package
-      package = pkgs.everforest-gtk-theme;
-    };
-    gtk4.theme = config.gtk.theme;
-
     font = {
       name = "SFProText Nerd Font";
       size = 11;
     };
-
-    gtk3.extraConfig = {
-      gtk-application-prefer-dark-theme = true;
-    };
-
-    gtk4.extraConfig = {
-      gtk-application-prefer-dark-theme = true;
-    };
+  };
+  xdg.configFile."gtk-3.0/settings.ini" = {
+    source = lib.mkForce (config.lib.file.mkOutOfStoreSymlink "${themeState}/current/gtk-3.0.ini");
+    force = true;
+  };
+  xdg.configFile."gtk-4.0/settings.ini" = {
+    source = lib.mkForce (config.lib.file.mkOutOfStoreSymlink "${themeState}/current/gtk-4.0.ini");
+    force = true;
+  };
+  xdg.configFile."gtk-4.0/gtk.css" = {
+    source = lib.mkForce (config.lib.file.mkOutOfStoreSymlink "${themeState}/current/gtk-4.0.css");
+    force = true;
   };
 
-  home.pointerCursor = {
-    enable = true;
-    gtk.enable = true;
-    x11.enable = true;
-    name = "everforest-cursors";
-    package = pkgs.everforest-cursors;
-  };
-
-  gtk.cursorTheme = {
-    name = "everforest-cursors";
-    package = pkgs.everforest-cursors;
+  # Mouse cursor: the theme's. At login uwsm reads XCURSOR_THEME from the theme
+  # (see uwsm/env), apps that look for the "default" cursor get it from
+  # ~/.icons/default, and `theme` changes Hyprland's right away (hyprctl setcursor).
+  home.sessionVariables.XCURSOR_SIZE = "24";
+  home.file.".icons/default/index.theme" = {
+    source = config.lib.file.mkOutOfStoreSymlink "${themeState}/current/cursor.theme";
+    force = true;
   };
 
   programs.bash = {
@@ -6997,64 +8428,11 @@ in
     '';
   };
 
-  # Lock screen (launched from the waybar lock button)
-  # Measured from the reference screenshot and scaled to 1920x1080
-  programs.hyprlock = {
-    enable = true;
-    package = null; # hyprlock is installed system-wide in configuration.nix (needed for PAM)
-    # Everforest colors, written as rgb(hex)
-    settings = {
-      general = {
-        hide_cursor = false; # cursor is visible in the reference
-      };
-
-      background = [
-        {
-          monitor = "";
-          path = "${config.home.homeDirectory}/Pictures/Wallpapers/hk.png";
-          blur_passes = 3;
-        }
-      ];
-
-      # Clock: 07:44 — ink ~238x64px, centered 74px above screen center
-      label = [
-        {
-          monitor = "";
-          text = "$TIME";
-          color = "rgb(d3c6aa)"; # fg
-          font_size = 64;
-          font_family = "SFMono Nerd Font";
-          position = "0, 74";
-          halign = "center";
-          valign = "center";
-        }
-      ];
-
-      # Password pill: ~225x56px, centered 27px below screen center
-      input-field = [
-        {
-          monitor = "";
-          size = "200, 50";
-          position = "0, -20";
-          halign = "center";
-          valign = "center";
-          rounding = -1; # full pill
-          outline_thickness = 3;
-          outer_color = "rgb(a7c080)"; # green
-          inner_color = "rgb(343f44)"; # bg1
-          font_color = "rgb(d3c6aa)"; # fg
-          font_family = "SFMono Nerd Font";
-          placeholder_text = "<i>Input Password...</i>";
-          fade_on_empty = false;
-          dots_center = true;
-          check_color = "rgb(dbbc7f)"; # yellow
-          fail_color = "rgb(e67e80)"; # red
-          dots_size = 0.33; # 0.2–0.8, fraction of the field height
-          dots_spacing = 0.15; # 0.0–1.0, gap between dots, relative to dot size
-        }
-      ];
-    };
+  # Lock screen (the power menu's lock button). hyprlock is installed system-wide in
+  # configuration.nix (needed for PAM); its config is the theme's ("hyprlock.conf" in
+  # mkThemeDir, with the layout and the theme's colors and wallpaper).
+  xdg.configFile."hypr/hyprlock.conf" = {
+    source = config.lib.file.mkOutOfStoreSymlink "${themeState}/current/hyprlock.conf";
+    force = true;
   };
-  # replaces any hand-written ~/.config/hypr/hyprlock.conf instead of failing activation
-  xdg.configFile."hypr/hyprlock.conf".force = true;
 }
