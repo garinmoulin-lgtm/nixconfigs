@@ -6,6 +6,17 @@
   ...
 }:
 
+let
+  # Used by the wallpaper and bar services: wait (up to 2 s) until the login fade-in
+  # (fade.qml) has covered the screen. %t is XDG_RUNTIME_DIR.
+  waitForFade = "${pkgs.writeShellScript "wait-for-fade" ''
+    for _ in $(${pkgs.coreutils}/bin/seq 40); do
+      [ -e "$1/desktop-fade-up-$HYPRLAND_INSTANCE_SIGNATURE" ] && exit 0
+      ${pkgs.coreutils}/bin/sleep 0.05
+    done
+    exit 0
+  ''} %t";
+in
 {
   home.username = "garinh";
   home.homeDirectory = "/home/garinh";
@@ -139,8 +150,86 @@
     import Quickshell.Io
     import Quickshell.Widgets
     import Quickshell.Bluetooth
+    import Quickshell.Wayland
 
     ShellRoot {
+        // ── Fading out of the session ──
+        // Log out, Restart and Power off: black spreads out from the middle of every
+        // screen (CenterFade.qml), above everything, then the command runs. (Fading in at
+        // login is done by fade.qml, which Hyprland starts before anything else.)
+        Scope {
+            id: session
+
+            property var leaveCmd: null
+            property real cover: 0       // 0 = nothing, 1 = all black
+
+            NumberAnimation {
+                id: coverAnim
+                target: session
+                property: "cover"
+                from: 0
+                to: 1
+                duration: 700
+                easing.type: Easing.InOutCubic
+            }
+            // hide the mouse pointer so it isn't left floating on the black
+            function pointer(visible) {
+                Quickshell.execDetached(["hyprctl", "eval", "hl.config({ cursor = { invisible = " + !visible + " } })"]);
+            }
+            // fade to black, then run `cmd`
+            function leave(cmd) {
+                if (leaveCmd !== null)
+                    return;
+                leaveCmd = cmd;
+                Ui.leaving = true;   // every open widget popup slides shut (Widget.qml)
+                pointer(false);
+                coverAnim.start();
+                leaveTimer.start();
+            }
+            function logout() {
+                leave(["uwsm", "stop"]);
+            }
+            Timer {
+                id: leaveTimer
+                interval: 750      // just after the 700 ms fade
+                onTriggered: Quickshell.execDetached(session.leaveCmd)
+            }
+            // so the Super+Shift+E key can use it: quickshell ipc call session logout
+            IpcHandler {
+                target: "session"
+                function logout(): void {
+                    session.logout();
+                }
+            }
+
+            Variants {
+                model: Quickshell.screens
+
+                PanelWindow {
+                    required property var modelData
+                    screen: modelData
+                    anchors {
+                        top: true
+                        bottom: true
+                        left: true
+                        right: true
+                    }
+                    exclusionMode: ExclusionMode.Ignore
+                    WlrLayershell.layer: WlrLayer.Overlay
+                    WlrLayershell.namespace: "session-fade"
+                    color: "transparent"
+                    mask: Region {}                 // clicks go straight through
+                    visible: session.cover > 0      // only exists while fading out
+
+                    CenterFade {
+                        anchors.fill: parent
+                        mode: "cover"
+                        progress: session.cover
+                    }
+                }
+            }
+        }
+
         // ── Music player ──
         // The player is mpv, running in the background as its own service (see home.nix),
         // with the mpris plugin, so the media module picks it up like any other player.
@@ -392,6 +481,9 @@
 
                     Workspaces {
                         screen: bar.screen
+                    }
+                    Weather {
+                        anchors.verticalCenter: parent.verticalCenter
                     }
                     Widget {
                         padding: 16
@@ -1453,60 +1545,164 @@
                             width: 280
 
                             // ── state ──
-                            // "backlight": a laptop screen, set for real with brightnessctl.
-                            // "gamma": no backlight (desktop monitor), so dim it in software with
-                            //          hyprsunset instead. Looks the same, but the panel stays at
-                            //          full power.
+                            // "backlight": a laptop screen; brightness is set for real with
+                            //              brightnessctl (the panel actually dims).
+                            // "software":  no backlight (a desktop monitor), so it's dimmed by
+                            //              Hyprland's screen shader instead, like night light.
                             property string mode: "backlight"
                             property int brightness: 100     // percent
                             property bool nightOn: false
                             property int kelvin: 4000        // night light warmth: lower = warmer
                             property string filter: "none"   // none / invert / grayscale / sepia / contrast
-                            readonly property string shaderDir: Quickshell.env("HOME") + "/.config/hypr/shaders/"
 
-                            // Read the real values each time the popup opens, so keys or other
-                            // tools changing them are picked up.
+                            // ── How night light, software dimming and the filters work ──
+                            // All three are one screen shader: a tiny GPU program Hyprland runs
+                            // over the finished picture of the whole screen. Whenever something
+                            // changes, a new shader is written with the settings baked in and
+                            // Hyprland is told to use it. When everything is off there's no
+                            // shader at all, so it costs nothing.
+                            // (This used to go through hyprsunset, which needs the GPU driver to
+                            // support Hyprland's color-matrix feature. NVIDIA's doesn't reliably,
+                            // which is why night light and software brightness did nothing.)
+
+                            // Night light color: how much red / green / blue light to keep at a
+                            // given temperature (Tanner Helland's well-known approximation of a
+                            // black body's color; 6500 K is about white).
+                            function tint(k) {
+                                const t = k / 100;
+                                const clamp = v => Math.max(0, Math.min(255, v)) / 255;
+                                const r = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592);
+                                const g = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661 : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
+                                const b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
+                                return [clamp(r), clamp(g), clamp(b)];
+                            }
+                            // The GLSL for the current settings, or "" when nothing is on.
+                            function shaderSource() {
+                                const dim = mode === "software" && brightness < 100;
+                                if (!nightOn && !dim && filter === "none")
+                                    return "";
+                                const f = n => n.toFixed(4);
+                                const lines = [];
+                                if (filter === "invert")
+                                    lines.push("col = 1.0 - col;");
+                                else if (filter === "grayscale")
+                                    lines.push("col = vec3(dot(col, vec3(0.2126, 0.7152, 0.0722)));");
+                                else if (filter === "sepia")
+                                    lines.push("col = min(vec3(dot(col, vec3(0.393, 0.769, 0.189)), dot(col, vec3(0.349, 0.686, 0.168)), dot(col, vec3(0.272, 0.534, 0.131))), vec3(1.0));");
+                                else if (filter === "contrast")
+                                    lines.push("col = clamp((col - 0.5) * 1.35 + 0.5, 0.0, 1.0);");
+                                if (nightOn) {
+                                    const c = tint(kelvin);
+                                    lines.push("col *= vec3(" + f(c[0]) + ", " + f(c[1]) + ", " + f(c[2]) + ");");
+                                }
+                                if (dim)
+                                    lines.push("col *= " + f(brightness / 100) + ";");
+                                return ["#version 300 es", "precision highp float;", "in vec2 v_texcoord;", "uniform sampler2D tex;", "layout(location = 0) out vec4 fragColor;", "void main() {", "    vec4 c = texture(tex, v_texcoord);", "    vec3 col = c.rgb;"].concat(lines.map(l => "    " + l)).concat(["    fragColor = vec4(col, c.a);", "}", ""]).join("\n");
+                            }
+
+                            // Writes the shader and switches Hyprland to it. One change at a time:
+                            // while Hyprland is busy with one, newer changes wait, and only the
+                            // latest is sent. (Before, every click went out at once and Hyprland
+                            // worked through the backlog, which is why filters came in bursts.)
+                            // the shader files live in RAM (XDG_RUNTIME_DIR) and are gone after a reboot
+                            readonly property string runDir: Quickshell.env("XDG_RUNTIME_DIR") + "/quickshell-display"
+                            property int shaderSlot: 0       // rotates between 3 file names so Hyprland sees a new path
+                            property bool effectsDirty: false
+                            function applyEffects() {
+                                if (!restored)
+                                    return;
+                                if (effectsSetter.running) {
+                                    effectsDirty = true;
+                                    return;
+                                }
+                                const src = shaderSource();
+                                let path = "";
+                                if (src !== "") {
+                                    shaderSlot = (shaderSlot + 1) % 3;
+                                    path = runDir + "/effect-" + shaderSlot + ".frag";
+                                }
+                                const state = JSON.stringify({
+                                    "brightness": mode === "software" ? brightness : 100,
+                                    "nightOn": nightOn,
+                                    "kelvin": kelvin,
+                                    "filter": filter
+                                });
+                                // $1 folder, $2 shader file ("" = none), $3 shader text, $4 settings file, $5 settings
+                                // Why dim_strength: changing only the shader makes Hyprland redraw just the
+                                // parts of the screen that change, and it keeps 2-3 screen buffers, so old
+                                // and new frames alternate for a while: the flicker, and filters that take
+                                // a while to go away. Setting any window-look option (here dim_strength,
+                                // to the value it already has) makes Hyprland redraw the whole screen for
+                                // the next frames, which gets every buffer up to date. Done twice, a moment
+                                // apart, to cover all of them. (Hyprland does the same "3 full frames"
+                                // trick itself when a monitor is plugged in.)
+                                effectsSetter.command = ["sh", "-c", "mkdir -p \"$1\" \"$(dirname \"$4\")\"; printf '%s' \"$5\" > \"$4\"; [ -n \"$2\" ] && printf '%s' \"$3\" > \"$2\"; keep='dim_strength = hl.get_config(\"decoration.dim_strength\")'; hyprctl eval \"hl.config({ decoration = { screen_shader = \\\"$2\\\", $keep } })\"; sleep 0.05; exec hyprctl eval \"hl.config({ decoration = { $keep } })\"", "sh", runDir, path, src, statePath, state];
+                                effectsSetter.running = true;
+                            }
+                            Process {
+                                id: effectsSetter
+                                onExited: if (disp.effectsDirty) {
+                                    disp.effectsDirty = false;
+                                    disp.applyEffects();
+                                }
+                            }
+                            // ── remember the settings, and put them back after a restart or login ──
+                            // (written by applyEffects above)
+                            readonly property string statePath: Quickshell.env("HOME") + "/.local/state/quickshell/display.json"
+                            FileView {
+                                id: stateFile
+                                path: disp.statePath
+                                blockLoading: true
+                                printErrors: false
+                            }
+                            property bool restored: false
+
+                            // Read the real brightness (and whether there's a backlight at all)
+                            // at start and each time the popup opens, so the keys are picked up.
                             readonly property bool shown: !!QsWindow.window && QsWindow.window.visible
                             onShownChanged: if (shown)
                                 reader.running = true
-
                             Process {
                                 id: reader
                                 running: true
-                                // prints e.g. "backlight 45" (or "gamma 100.000000"), then "night false 4000"
-                                command: ["sh", "-c", "if out=$(brightnessctl -m -c backlight 2>/dev/null); then echo \"backlight $(echo \"$out\" | head -n1 | cut -d, -f4 | tr -d %)\"; else echo \"gamma $(hyprctl hyprsunset gamma 2>/dev/null)\"; fi; echo \"night $(hyprctl hyprsunset identity get 2>/dev/null) $(hyprctl hyprsunset temperature 2>/dev/null)\""]
+                                // prints e.g. "45" (percent), or nothing when there's no backlight
+                                command: ["sh", "-c", "brightnessctl -m -c backlight 2>/dev/null | head -n1 | cut -d, -f4 | tr -d %"]
                                 stdout: StdioCollector {
                                     onStreamFinished: {
-                                        for (const line of text.trim().split("\n")) {
-                                            const f = line.trim().split(/\s+/);
-                                            if (f[0] === "backlight" || f[0] === "gamma") {
-                                                disp.mode = f[0];
-                                                const v = parseFloat(f[1]);
-                                                if (!isNaN(v) && !brightSlider.pressed)
-                                                    disp.brightness = Math.round(v);
-                                            } else if (f[0] === "night" && (f[1] === "true" || f[1] === "false")) {
-                                                // identity = "no color change", so night light is off
-                                                disp.nightOn = f[1] === "false";
-                                                const k = parseInt(f[2]);
-                                                if (disp.nightOn && !isNaN(k) && !warmSlider.pressed)
-                                                    disp.kelvin = k;
-                                            }
+                                        const v = parseInt(text.trim());
+                                        if (!disp.restored) {
+                                            // first read: decide the mode, then bring back the saved settings
+                                            disp.mode = isNaN(v) ? "software" : "backlight";
+                                            let saved = {};
+                                            try {
+                                                saved = JSON.parse(stateFile.text() || "{}");
+                                            } catch (e) {}
+                                            disp.nightOn = saved.nightOn === true;
+                                            disp.kelvin = saved.kelvin || 4000;
+                                            disp.filter = saved.filter || "none";
+                                            if (disp.mode === "software")
+                                                disp.brightness = saved.brightness || 100;
+                                            disp.restored = true;
+                                            disp.applyEffects();
                                         }
+                                        if (disp.mode === "backlight" && !isNaN(v) && !brightSlider.pressed)
+                                            disp.brightness = v;
                                     }
                                 }
                             }
 
-                            // Sliders fire many times a second while dragging. Each setter runs
-                            // one command at a time: if you move again while it's still running,
-                            // it sends the newest value as soon as it's done. That keeps it
-                            // smooth without piling up hundreds of processes.
+                            // Laptop backlight: same one-at-a-time idea as above.
                             property bool brightDirty: false
                             function pushBrightness() {
+                                if (mode === "software") {
+                                    applyEffects();
+                                    return;
+                                }
                                 if (brightSetter.running) {
                                     brightDirty = true;
                                     return;
                                 }
-                                brightSetter.command = mode === "backlight" ? ["brightnessctl", "-q", "-c", "backlight", "set", brightness + "%"] : ["hyprctl", "hyprsunset", "gamma", String(brightness)];
+                                brightSetter.command = ["brightnessctl", "-q", "-c", "backlight", "set", brightness + "%"];
                                 brightSetter.running = true;
                             }
                             Process {
@@ -1517,31 +1713,21 @@
                                 }
                             }
 
-                            property bool sunDirty: false
                             function pushNight() {
-                                if (sunSetter.running) {
-                                    sunDirty = true;
-                                    return;
-                                }
-                                // "identity" = no tint at all; "temperature N" turns the tint on
-                                sunSetter.command = nightOn ? ["hyprctl", "hyprsunset", "temperature", String(kelvin)] : ["hyprctl", "hyprsunset", "identity"];
-                                sunSetter.running = true;
+                                applyEffects();
                             }
-                            Process {
-                                id: sunSetter
-                                onExited: if (disp.sunDirty) {
-                                    disp.sunDirty = false;
-                                    disp.pushNight();
-                                }
-                            }
-
-                            // Color filters are Hyprland screen shaders (the .frag files in
-                            // ~/.config/hypr/shaders). Setting decoration.screen_shader to ""
-                            // turns the filter off. Picking the active one again also turns it off.
+                            // Picking the active filter again turns it off.
                             function setFilter(name) {
                                 filter = filter === name ? "none" : name;
-                                const path = filter === "none" ? "" : shaderDir + filter + ".frag";
-                                Quickshell.execDetached(["hyprctl", "eval", "hl.config({ decoration = { screen_shader = \"" + path + "\" } })"]);
+                                applyEffects();
+                            }
+                            function reset() {
+                                brightness = 100;
+                                nightOn = false;
+                                filter = "none";
+                                if (mode === "backlight")
+                                    pushBrightness();
+                                applyEffects();
                             }
 
                             // ── header: title, and Reset on the right ──
@@ -1564,14 +1750,7 @@
                                     anchors.verticalCenter: parent.verticalCenter
                                     label: "Reset"
                                     // full brightness, no tint, no filter
-                                    onClicked: {
-                                        disp.brightness = 100;
-                                        disp.pushBrightness();
-                                        disp.nightOn = false;
-                                        disp.pushNight();
-                                        if (disp.filter !== "none")
-                                            disp.setFilter(disp.filter);
-                                    }
+                                    onClicked: disp.reset()
                                 }
                             }
 
@@ -3596,12 +3775,14 @@
                                     {
                                         icon: "restart_alt",
                                         name: "Restart",
-                                        cmd: ["systemctl", "reboot"]
+                                        cmd: ["systemctl", "reboot"],
+                                        fade: true
                                     },
                                     {
                                         icon: "power_settings_new",
                                         name: "Power off",
-                                        cmd: ["systemctl", "poweroff"]
+                                        cmd: ["systemctl", "poweroff"],
+                                        fade: true
                                     },
                                     {
                                         icon: "lock",
@@ -3611,13 +3792,14 @@
                                     {
                                         icon: "logout",
                                         name: "Log out",
-                                        cmd: ["uwsm", "stop"]
+                                        cmd: ["uwsm", "stop"],
+                                        fade: true
                                     }
                                 ]
 
                                 Rectangle {
                                     id: powerRow
-                                    required property var modelData        // { icon, name, cmd }
+                                    required property var modelData        // { icon, name, cmd, fade }
 
                                     width: 170
                                     height: 30
@@ -3668,7 +3850,8 @@
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: Quickshell.execDetached(powerRow.modelData.cmd)
+                                        // fade: true = fade the screen to black first (see `session` at the top)
+                                        onClicked: powerRow.modelData.fade ? session.leave(powerRow.modelData.cmd) : Quickshell.execDetached(powerRow.modelData.cmd)
                                     }
                                 }
                             }
@@ -3681,6 +3864,175 @@
                     anchors.bottom: parent.bottom
                     height: 3
                     color: Theme.bg
+                }
+            }
+        }
+    }
+  '';
+
+  # Shared state that every bar file can see (like Theme, but for "what's happening").
+  xdg.configFile."quickshell/Ui.qml".text = ''
+    pragma Singleton
+
+    import QtQuick
+    import Quickshell
+
+    Singleton {
+        // true while fading out for Log out / Restart / Power off
+        property bool leaving: false
+    }
+  '';
+
+  # The center-outward fade used for logging in and out (also a copy in the login screen).
+  xdg.configFile."quickshell/CenterFade.qml".text = ''
+    import QtQuick
+    import QtQuick.Shapes
+
+    // A full-screen fade that moves outward from the middle of the screen.
+    //   mode "cover":  progress 0 = nothing, 1 = all black. Black spreads out from the center.
+    //   mode "reveal": progress 0 = all black, 1 = nothing. The picture underneath opens up
+    //                  from the center outward.
+    // It's a radial gradient with a soft edge that travels from the center to past the corners.
+    Item {
+        id: fade
+
+        property string mode: "cover"
+        property real progress: 0
+
+        readonly property real soft: 0.3     // how wide the soft edge is (part of the radius)
+        readonly property real edge: -soft + progress * (1 + soft)
+        readonly property color inner: mode === "cover" ? "black" : "transparent"
+        readonly property color outer: mode === "cover" ? "transparent" : "black"
+
+        function clamp(v) {
+            return Math.max(0, Math.min(1, v));
+        }
+
+        // fully black / fully clear: a plain rectangle, or nothing
+        Rectangle {
+            anchors.fill: parent
+            color: "black"
+            visible: fade.mode === "cover" ? fade.progress >= 1 : fade.progress <= 0
+        }
+
+        Shape {
+            anchors.fill: parent
+            visible: fade.progress > 0 && fade.progress < 1
+
+        ShapePath {
+            strokeWidth: -1
+            strokeColor: "transparent"
+            fillGradient: RadialGradient {
+                centerX: fade.width / 2
+                centerY: fade.height / 2
+                focalX: fade.width / 2
+                focalY: fade.height / 2
+                // reaches the corners
+                centerRadius: Math.sqrt(fade.width * fade.width + fade.height * fade.height) / 2
+
+                GradientStop {
+                    position: 0
+                    color: fade.inner
+                }
+                GradientStop {
+                    position: fade.clamp(fade.edge)
+                    color: fade.inner
+                }
+                GradientStop {
+                    position: fade.clamp(fade.edge + fade.soft)
+                    color: fade.outer
+                }
+                GradientStop {
+                    position: 1
+                    color: fade.outer
+                }
+            }
+
+            startX: 0
+            startY: 0
+            PathLine { x: fade.width; y: 0 }
+            PathLine { x: fade.width; y: fade.height }
+            PathLine { x: 0; y: fade.height }
+            PathLine { x: 0; y: 0 }
+        }
+        }
+    }
+  '';
+  # The fade-in after you log in (started by Hyprland, see hyprland.start).
+  xdg.configFile."quickshell/fade.qml".text = ''
+    // Fades the desktop in after you log in: the screen starts black and the desktop
+    // opens up from the middle outward (CenterFade.qml).
+    //
+    // Hyprland starts this the moment it starts (hyprland.start in the Hyprland config),
+    // before the wallpaper and the bar. Those two wait until this has covered the screen
+    // (ExecStartPre on their services), so nothing pops in before the fade. It waits for
+    // the wallpaper (up to ~3 s) and a moment for the bar, fades, shows the mouse pointer
+    // again and quits.
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+    import Quickshell.Wayland
+
+    ShellRoot {
+        id: root
+
+        // tells the waiting services "the screen is covered" (one per Hyprland instance)
+        readonly property string marker: Quickshell.env("XDG_RUNTIME_DIR") + "/desktop-fade-up-" + Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE")
+        property real progress: 0      // 0 = black, 1 = desktop fully visible
+
+        Timer {
+            interval: 50               // first frame is up by now
+            running: true
+            onTriggered: Quickshell.execDetached(["${pkgs.coreutils}/bin/touch", root.marker])
+        }
+        // wallpaper up (awww answers with "image: ..."), then ~0.35 s for the bar to draw
+        Process {
+            running: true
+            command: ["sh", "-c", "for _ in $(seq 30); do ${pkgs.awww}/bin/awww query 2>/dev/null | grep -q image && break; sleep 0.1; done; sleep 0.35"]
+            onExited: reveal.start()
+        }
+        NumberAnimation {
+            id: reveal
+            target: root
+            property: "progress"
+            from: 0
+            to: 1
+            duration: 900
+            easing.type: Easing.InOutCubic
+            onFinished: {
+                // the pointer was hidden at login (hyprland.start); bring it back
+                Quickshell.execDetached(["hyprctl", "eval", "hl.config({ cursor = { invisible = false } })"]);
+                quitTimer.start();
+            }
+        }
+        Timer {
+            id: quitTimer
+            interval: 100
+            onTriggered: Qt.quit()
+        }
+
+        Variants {
+            model: Quickshell.screens
+
+            PanelWindow {
+                required property var modelData
+                screen: modelData
+                anchors {
+                    top: true
+                    bottom: true
+                    left: true
+                    right: true
+                }
+                exclusionMode: ExclusionMode.Ignore
+                WlrLayershell.layer: WlrLayer.Overlay
+                WlrLayershell.namespace: "desktop-fade"
+                color: "transparent"
+                mask: Region {}
+
+                CenterFade {
+                    anchors.fill: parent
+                    mode: "reveal"
+                    progress: root.progress
                 }
             }
         }
@@ -3826,6 +4178,16 @@
         // that click reopen it straight away.
         property double clearedAt: 0
 
+        // Log out / Restart / Power off: close, so the whole screen fades to black.
+        // (Popups are drawn above everything else, even the black fade layer.)
+        Connections {
+            target: Ui
+            function onLeavingChanged() {
+                if (Ui.leaving)
+                    root.closePopup()
+            }
+        }
+
         // Creates whatever was passed as `button:` and shows it, centered.
         Loader {
             id: buttonLoader
@@ -3967,6 +4329,834 @@
                     width: popup.bodyWidth - root.padding * 2
                     height: popup.bodyHeight - root.padding * 2
                     opacity: root.openness
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/WeatherData.qml".text = ''
+    pragma Singleton
+
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+
+    // Weather for the bar, from Open-Meteo (open-meteo.com: free, no account or key).
+    // One copy shared by every monitor's bar. The place you pick and °F/°C are saved in
+    // ~/.local/state/quickshell/weather.json. Refreshes every 15 minutes.
+    // Temperatures are always fetched in °C and converted for display (show()), so
+    // switching °F / °C is instant and doesn't need the internet.
+    Singleton {
+        id: w
+
+        readonly property string stateDir: Quickshell.env("HOME") + "/.local/state/quickshell"
+
+        // ── settings ──
+        property var place: null      // { name, region, lat, lon }; null until you pick one
+        property bool fahrenheit: Qt.locale().measurementSystem === Locale.ImperialUSSystem
+        // 12-hour clock ("7PM") if your locale uses one, else 24-hour ("19:00")
+        readonly property bool clock12: Qt.locale().timeFormat(Locale.ShortFormat).toLowerCase().indexOf("ap") >= 0
+
+        // a temperature (°C, as stored) in the unit you picked
+        function show(c) {
+            return fahrenheit ? c * 9 / 5 + 32 : c;
+        }
+
+        // ── what Open-Meteo sent ──
+        property var data: null
+        property bool loading: false
+        property string error: ""
+        property double fetchedAt: 0
+        readonly property bool hasData: data !== null && !!data.current
+
+        // ── place search ──
+        property var results: []      // [{ name, region, lat, lon }]
+        property bool searching: false
+
+        // ── handy values (all in °C) ──
+        readonly property real temp: hasData ? data.current.temperature_2m : 0
+        readonly property int code: hasData ? data.current.weather_code : -1
+        readonly property bool isDay: hasData ? data.current.is_day === 1 : true
+        readonly property real todayHigh: hasData ? data.daily.temperature_2m_max[0] : 0
+        readonly property real todayLow: hasData ? data.daily.temperature_2m_min[0] : 0
+
+        // ── loading and saving the settings ──
+        FileView {
+            id: settingsFile
+            path: w.stateDir + "/weather.json"
+            blockLoading: true
+            printErrors: false
+        }
+        Component.onCompleted: {
+            try {
+                const s = JSON.parse(settingsFile.text() || "{}");
+                if (s.place)
+                    place = s.place;
+                if (s.fahrenheit !== undefined)
+                    fahrenheit = s.fahrenheit;
+            } catch (e) {}
+            refresh();
+        }
+        function save() {
+            Quickshell.execDetached(["sh", "-c", "mkdir -p \"$1\" && printf '%s' \"$2\" > \"$1/weather.json\"", "sh", stateDir, JSON.stringify({
+                    "place": place,
+                    "fahrenheit": fahrenheit
+                })]);
+        }
+        function setPlace(p) {
+            place = p;
+            data = null;
+            results = [];
+            save();
+            refresh();
+        }
+        function setFahrenheit(f) {
+            if (f === fahrenheit)
+                return;
+            fahrenheit = f;
+            save();
+        }
+
+        // ── talking to Open-Meteo ──
+        function get(url, ok, fail) {
+            const x = new XMLHttpRequest();
+            x.onreadystatechange = () => {
+                if (x.readyState !== XMLHttpRequest.DONE)
+                    return;
+                if (x.status === 200) {
+                    try {
+                        ok(JSON.parse(x.responseText));
+                    } catch (e) {
+                        fail("Bad answer from the weather service");
+                    }
+                } else {
+                    fail(x.status ? "Weather service error " + x.status : "No connection");
+                }
+            };
+            x.open("GET", url);
+            x.send();
+        }
+        function refresh() {
+            if (!place)
+                return;
+            loading = true;
+            error = "";
+            get("https://api.open-meteo.com/v1/forecast?latitude=" + place.lat + "&longitude=" + place.lon
+                + "&current=temperature_2m,weather_code,is_day"
+                + "&hourly=temperature_2m,weather_code,is_day"
+                + "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset"
+                + "&timezone=auto&forecast_days=7", r => {
+                data = r;
+                fetchedAt = Date.now();
+                loading = false;
+            }, e => {
+                error = e;
+                loading = false;
+            });
+        }
+        function search(q) {
+            q = q.trim();
+            if (q.length < 2) {
+                results = [];
+                return;
+            }
+            searching = true;
+            get("https://geocoding-api.open-meteo.com/v1/search?count=6&language=en&format=json&name=" + encodeURIComponent(q), r => {
+                results = (r.results || []).map(x => ({
+                            "name": x.name,
+                            "region": [x.admin1, x.country].filter(s => !!s).join(", "),
+                            "lat": x.latitude,
+                            "lon": x.longitude
+                        }));
+                searching = false;
+            }, e => {
+                results = [];
+                searching = false;
+            });
+        }
+        Timer {
+            interval: 15 * 60 * 1000
+            running: true
+            repeat: true
+            onTriggered: w.refresh()
+        }
+        // when the popup opens and the data is older than 10 minutes
+        function refreshIfOld() {
+            if (Date.now() - fetchedAt > 10 * 60 * 1000)
+                refresh();
+        }
+
+        // ── turning numbers into words, icons and colors ──
+        // Weather codes are the WMO ones Open-Meteo uses.
+        function describe(c) {
+            if (c === 0)
+                return "Clear";
+            if (c === 1)
+                return "Mostly clear";
+            if (c === 2)
+                return "Partly cloudy";
+            if (c === 3)
+                return "Cloudy";
+            if (c === 45 || c === 48)
+                return "Fog";
+            if (c >= 51 && c <= 55)
+                return "Drizzle";
+            if (c === 56 || c === 57)
+                return "Freezing drizzle";
+            if (c === 61 || c === 80)
+                return "Light rain";
+            if (c === 63 || c === 81)
+                return "Rain";
+            if (c === 65 || c === 82)
+                return "Heavy rain";
+            if (c === 66 || c === 67)
+                return "Freezing rain";
+            if (c >= 71 && c <= 77 || c === 85 || c === 86)
+                return "Snow";
+            if (c === 95)
+                return "Thunderstorms";
+            if (c === 96 || c === 99)
+                return "Thunderstorms, hail";
+            return "—";
+        }
+        // Material Symbols icon name
+        function icon(c, day) {
+            if (c === 0 || c === 1)
+                return day ? "clear_day" : "clear_night";
+            if (c === 2)
+                return day ? "partly_cloudy_day" : "partly_cloudy_night";
+            if (c === 3)
+                return "cloud";
+            if (c === 45 || c === 48)
+                return "foggy";
+            if (c >= 51 && c <= 55 || c === 61)
+                return "rainy_light";
+            if (c === 63 || c === 80 || c === 81)
+                return "rainy";
+            if (c === 65 || c === 82)
+                return "rainy_heavy";
+            if (c === 56 || c === 57 || c === 66 || c === 67)
+                return "weather_mix";
+            if (c >= 71 && c <= 77 || c === 85 || c === 86)
+                return "weather_snowy";
+            if (c === 95)
+                return "thunderstorm";
+            if (c === 96 || c === 99)
+                return "weather_hail";
+            return "cloud";
+        }
+        function iconColor(c, day) {
+            if (c <= 2)
+                return day ? Theme.yellow : Theme.blue;
+            if (c >= 51 && c <= 67 || c >= 80 && c <= 82)
+                return Theme.blue;
+            if (c >= 95)
+                return Theme.yellow;
+            return Theme.text;
+        }
+        // Color for a temperature in °C (for the range bars): cold blue -> aqua -> green -> yellow -> orange
+        function tempColor(c) {
+            const f = c * 9 / 5 + 32;
+            if (f < 40)
+                return Theme.blue;
+            if (f < 55)
+                return Theme.cyan;
+            if (f < 70)
+                return Theme.green;
+            if (f < 85)
+                return Theme.yellow;
+            return Theme.orange;
+        }
+
+        // "2026-10-17T19:00" -> "7PM" (or "19:00" with a 24-hour locale); minutes shown when not on the hour
+        function clockLabel(iso) {
+            const h = parseInt(iso.substr(11, 2));
+            const m = iso.substr(14, 2);
+            if (!clock12)
+                return iso.substr(11, 5);
+            const h12 = h % 12 === 0 ? 12 : h % 12;
+            return h12 + (m === "00" ? "" : ":" + m) + (h < 12 ? "AM" : "PM");
+        }
+
+        // The next hours (now + 5), with sunrise / sunset slotted in where they happen.
+        // [{ label, icon, color, temp }]
+        readonly property var hours: {
+            if (!hasData)
+                return [];
+            const H = data.hourly, D = data.daily;
+            const nowHour = data.current.time.substr(0, 13);
+            let i = H.time.findIndex(t => t.substr(0, 13) === nowHour);
+            if (i < 0)
+                i = 0;
+            const list = [];
+            for (let k = i; k < Math.min(i + 6, H.time.length); k++)
+                list.push({
+                    "time": H.time[k],
+                    "label": k === i ? "Now" : clockLabel(H.time[k]),
+                    "icon": icon(H.weather_code[k], H.is_day[k] === 1),
+                    "color": iconColor(H.weather_code[k], H.is_day[k] === 1),
+                    "temp": k === i ? data.current.temperature_2m : H.temperature_2m[k]
+                });
+            const end = list.length ? list[list.length - 1].time : "";
+            for (let d = 0; d < D.time.length; d++) {
+                for (const [key, name] of [["sunrise", "Sunrise"], ["sunset", "Sunset"]]) {
+                    const t = D[key][d];
+                    if (t > data.current.time && t < end) {
+                        // temperature of the hour it falls in
+                        const j = H.time.findIndex(x => x.substr(0, 13) === t.substr(0, 13));
+                        list.push({
+                            "time": t,
+                            "label": clockLabel(t),
+                            "icon": "wb_twilight",
+                            "color": Theme.orange,
+                            "temp": j >= 0 ? H.temperature_2m[j] : NaN,
+                            "event": name
+                        });
+                    }
+                }
+            }
+            list.sort((a, b) => a.time < b.time ? -1 : a.time > b.time ? 1 : 0);
+            return list.slice(0, 6);
+        }
+
+        // The next 5 days: [{ label, icon, color, low, high }], plus the week's range
+        readonly property var days: {
+            if (!hasData)
+                return [];
+            const D = data.daily;
+            const out = [];
+            for (let d = 0; d < Math.min(5, D.time.length); d++) {
+                const p = D.time[d].split("-");
+                const date = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+                out.push({
+                    "label": d === 0 ? "Today" : Qt.formatDate(date, "ddd"),
+                    "icon": icon(D.weather_code[d], true),
+                    "color": iconColor(D.weather_code[d], true),
+                    "low": D.temperature_2m_min[d],
+                    "high": D.temperature_2m_max[d]
+                });
+            }
+            return out;
+        }
+        readonly property real weekLow: days.length ? Math.min(...days.map(d => d.low)) : 0
+        readonly property real weekHigh: days.length ? Math.max(...days.map(d => d.high)) : 1
+    }
+  '';
+
+  xdg.configFile."quickshell/Weather.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+    import Quickshell
+
+    // ── Weather ──
+    // In the bar: the current conditions icon and temperature. Click for the card:
+    // place + now, the next hours (with sunrise/sunset), and the next 5 days with
+    // temperature range bars. Click the place name to search for another one;
+    // °F / °C switches in the top-right corner of the card.
+    // Data: WeatherData.qml (Open-Meteo).
+    Widget {
+        id: root
+
+        property bool picking: false        // the place search is open
+        readonly property bool shown: picking || !WeatherData.place
+
+        // t is in °C (that's how WeatherData keeps it); shown in the unit you picked
+        function deg(t) {
+            return isNaN(t) ? "--" : Math.round(WeatherData.show(t)) + "°";
+        }
+
+        button: Pill {
+            icon: !WeatherData.place ? "location_on" : WeatherData.hasData ? WeatherData.icon(WeatherData.code, WeatherData.isDay) : "cloud"
+            iconColor: WeatherData.hasData ? WeatherData.iconColor(WeatherData.code, WeatherData.isDay) : Theme.text
+            text: !WeatherData.place ? "Weather" : WeatherData.hasData ? root.deg(WeatherData.temp) : "--"
+        }
+
+        Column {
+            id: card
+            width: 340
+            spacing: 12
+
+            // fresh data each time it opens (if it's more than 10 minutes old)
+            readonly property bool open: !!QsWindow.window && QsWindow.window.visible
+            onOpenChanged: if (open)
+                WeatherData.refreshIfOld()
+            else
+                root.picking = false
+
+            // ── place + now ──
+            Item {
+                width: parent.width
+                height: 108
+                visible: !root.shown
+
+                // place: click it to change it
+                Row {
+                    id: placeRow
+                    spacing: 4
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: WeatherData.place ? WeatherData.place.name : ""
+                        color: placeMouse.containsMouse ? Theme.accent : Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 1.3
+                        font.weight: 700
+                        font.letterSpacing: Theme.letterSpacing
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: 120
+                            }
+                        }
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "edit_location"
+                        color: Theme.text
+                        opacity: placeMouse.containsMouse ? 0.9 : 0.4
+                        font.family: Theme.iconFont
+                        font.pixelSize: Theme.iconSize
+                        font.variableAxes: Theme.iconAxes
+                        Behavior on opacity {
+                            NumberAnimation {
+                                duration: 120
+                            }
+                        }
+                    }
+                }
+                MouseArea {
+                    id: placeMouse
+                    anchors.fill: placeRow
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.picking = true
+                }
+
+                // big temperature
+                Text {
+                    anchors.left: parent.left
+                    anchors.top: placeRow.bottom
+                    anchors.topMargin: -2
+                    text: WeatherData.hasData ? root.deg(WeatherData.temp) : "--"
+                    color: Theme.text
+                    font.family: Theme.font
+                    font.pixelSize: 54
+                    font.weight: 300
+                    font.letterSpacing: -2
+                }
+
+                // °F / °C: switches right away (no new download)
+                Row {
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    spacing: 4
+                    Chip {
+                        label: "°F"
+                        selected: WeatherData.fahrenheit
+                        onClicked: WeatherData.setFahrenheit(true)
+                    }
+                    Chip {
+                        label: "°C"
+                        selected: !WeatherData.fahrenheit
+                        onClicked: WeatherData.setFahrenheit(false)
+                    }
+                }
+
+                // condition, high / low, on the right
+                Column {
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 6
+                    spacing: 2
+                    Text {
+                        anchors.right: parent.right
+                        text: WeatherData.hasData ? WeatherData.icon(WeatherData.code, WeatherData.isDay) : ""
+                        color: WeatherData.iconColor(WeatherData.code, WeatherData.isDay)
+                        font.family: Theme.iconFont
+                        font.pixelSize: 26
+                        font.variableAxes: ({
+                                "FILL": 1,
+                                "wght": 500,
+                                "opsz": 24,
+                                "GRAD": 0
+                            })
+                    }
+                    Text {
+                        anchors.right: parent.right
+                        text: WeatherData.hasData ? WeatherData.describe(WeatherData.code) : WeatherData.loading ? "Loading..." : WeatherData.error
+                        color: Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize
+                        font.weight: 700
+                    }
+                    Text {
+                        anchors.right: parent.right
+                        visible: WeatherData.hasData
+                        text: "H:" + root.deg(WeatherData.todayHigh) + "  L:" + root.deg(WeatherData.todayLow)
+                        color: Theme.text
+                        opacity: 0.7
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.9
+                        font.weight: 600
+                    }
+                }
+            }
+
+            Rectangle {
+                visible: !root.shown && WeatherData.hasData
+                width: parent.width
+                height: 1
+                color: Theme.pill
+            }
+
+            // ── the next hours ──
+            Row {
+                visible: !root.shown && WeatherData.hasData
+                width: parent.width
+                Repeater {
+                    model: WeatherData.hours
+                    Column {
+                        required property var modelData
+                        width: card.width / 6
+                        spacing: 6
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: modelData.label
+                            color: Theme.text
+                            opacity: 0.7
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.85
+                            font.weight: 600
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: modelData.icon
+                            color: modelData.color
+                            font.family: Theme.iconFont
+                            font.pixelSize: 22
+                            font.variableAxes: ({
+                                    "FILL": 1,
+                                    "wght": 500,
+                                    "opsz": 24,
+                                    "GRAD": 0
+                                })
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: root.deg(modelData.temp)
+                            color: Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize
+                            font.weight: 700
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                visible: !root.shown && WeatherData.hasData
+                width: parent.width
+                height: 1
+                color: Theme.pill
+            }
+
+            // ── the next 5 days ──
+            Column {
+                visible: !root.shown && WeatherData.hasData
+                width: parent.width
+                spacing: 4
+                Repeater {
+                    model: WeatherData.days
+                    Item {
+                        id: dayRow
+                        required property var modelData
+                        required property int index
+                        width: card.width
+                        height: 30
+
+                        Text {
+                            id: dayName
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 52
+                            text: dayRow.modelData.label
+                            color: Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize
+                            font.weight: 700
+                        }
+                        Text {
+                            id: dayIcon
+                            anchors.left: dayName.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 30
+                            horizontalAlignment: Text.AlignHCenter
+                            text: dayRow.modelData.icon
+                            color: dayRow.modelData.color
+                            font.family: Theme.iconFont
+                            font.pixelSize: 20
+                            font.variableAxes: ({
+                                    "FILL": 1,
+                                    "wght": 500,
+                                    "opsz": 24,
+                                    "GRAD": 0
+                                })
+                        }
+                        Text {
+                            id: lowText
+                            anchors.left: dayIcon.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 44
+                            horizontalAlignment: Text.AlignRight
+                            text: root.deg(dayRow.modelData.low)
+                            color: Theme.text
+                            opacity: 0.55
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize
+                            font.weight: 600
+                        }
+                        Text {
+                            id: highText
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 40
+                            horizontalAlignment: Text.AlignRight
+                            text: root.deg(dayRow.modelData.high)
+                            color: Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize
+                            font.weight: 700
+                        }
+
+                        // the range bar: the whole track is the week's lowest to highest;
+                        // the colored part is this day's low to high
+                        Rectangle {
+                            id: track
+                            anchors.left: lowText.right
+                            anchors.right: highText.left
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            anchors.verticalCenter: parent.verticalCenter
+                            height: 5
+                            radius: 2.5
+                            color: Theme.pill
+
+                            readonly property real span: Math.max(1, WeatherData.weekHigh - WeatherData.weekLow)
+                            function at(t) {
+                                return (t - WeatherData.weekLow) / span * width;
+                            }
+
+                            Rectangle {
+                                x: track.at(dayRow.modelData.low)
+                                width: Math.max(height, track.at(dayRow.modelData.high) - x)
+                                height: parent.height
+                                radius: parent.radius
+                                gradient: Gradient {
+                                    orientation: Gradient.Horizontal
+                                    GradientStop {
+                                        position: 0
+                                        color: WeatherData.tempColor(dayRow.modelData.low)
+                                    }
+                                    GradientStop {
+                                        position: 1
+                                        color: WeatherData.tempColor(dayRow.modelData.high)
+                                    }
+                                }
+                            }
+                            // today: a dot where the temperature is right now
+                            Rectangle {
+                                visible: dayRow.index === 0
+                                width: 9
+                                height: 9
+                                radius: 4.5
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: Math.max(0, Math.min(track.width, track.at(WeatherData.temp))) - width / 2
+                                color: Theme.text
+                                border.width: 2
+                                border.color: Theme.bg
+                            }
+                        }
+                    }
+                }
+            }
+
+            // nothing yet (no place, offline, loading)
+            Text {
+                visible: !root.shown && !WeatherData.hasData
+                width: parent.width
+                wrapMode: Text.Wrap
+                text: WeatherData.loading ? "Loading..." : WeatherData.error !== "" ? WeatherData.error : ""
+                color: Theme.text
+                opacity: 0.6
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize
+            }
+
+            // ── picking a place ──
+            Column {
+                visible: root.shown
+                width: parent.width
+                spacing: 8
+
+                // title, and a close button (once there's a place to go back to)
+                Item {
+                    width: parent.width
+                    height: 26
+                    Text {
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Weather location"
+                        color: Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 1.2
+                        font.weight: 700
+                        font.letterSpacing: Theme.letterSpacing
+                    }
+                    Row {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 6
+                        IconButton {
+                            visible: !!WeatherData.place
+                            icon: "close"
+                            onClicked: root.picking = false
+                        }
+                    }
+                }
+
+                // search box
+                Rectangle {
+                    width: parent.width
+                    height: 34
+                    radius: height / 2
+                    color: Theme.pill
+                    border.width: 1
+                    border.color: searchField.activeFocus ? Theme.accent : Theme.pill
+
+                    Text {
+                        id: searchIcon
+                        anchors.left: parent.left
+                        anchors.leftMargin: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "search"
+                        color: Theme.accent
+                        font.family: Theme.iconFont
+                        font.pixelSize: Theme.iconSize
+                        font.variableAxes: Theme.iconAxes
+                    }
+                    TextField {
+                        id: searchField
+                        anchors.left: searchIcon.right
+                        anchors.right: parent.right
+                        anchors.leftMargin: 6
+                        anchors.rightMargin: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        background: null
+                        color: Theme.text
+                        placeholderText: "Search for a city"
+                        placeholderTextColor: Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.45)
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize
+                        selectionColor: Theme.accent
+                        // search as you type (after a short pause)
+                        onTextEdited: searchDelay.restart()
+                        onAccepted: {
+                            searchDelay.stop();
+                            WeatherData.search(text);
+                        }
+                        Keys.onEscapePressed: root.picking = false
+                    }
+                    Timer {
+                        id: searchDelay
+                        interval: 350
+                        onTriggered: WeatherData.search(searchField.text)
+                    }
+                }
+                // focus the box as soon as the search shows
+                onVisibleChanged: if (visible)
+                    searchField.forceActiveFocus()
+
+                // results
+                Repeater {
+                    model: WeatherData.results
+                    Rectangle {
+                        id: result
+                        required property var modelData
+                        width: parent.width
+                        height: 40
+                        radius: Theme.radius
+                        color: resultMouse.containsMouse ? Theme.pill : "transparent"
+                        scale: resultMouse.pressed ? 0.97 : 1
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: 120
+                            }
+                        }
+                        Behavior on scale {
+                            NumberAnimation {
+                                duration: 120
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+                        Text {
+                            id: pin
+                            anchors.left: parent.left
+                            anchors.leftMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "location_on"
+                            color: Theme.accent
+                            font.family: Theme.iconFont
+                            font.pixelSize: Theme.iconSize
+                            font.variableAxes: Theme.iconAxes
+                        }
+                        Column {
+                            anchors.left: pin.right
+                            anchors.leftMargin: 8
+                            anchors.right: parent.right
+                            anchors.rightMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            Text {
+                                width: parent.width
+                                elide: Text.ElideRight
+                                text: result.modelData.name
+                                color: Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize
+                                font.weight: 700
+                            }
+                            Text {
+                                width: parent.width
+                                elide: Text.ElideRight
+                                visible: text !== ""
+                                text: result.modelData.region
+                                color: Theme.text
+                                opacity: 0.6
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.85
+                            }
+                        }
+                        MouseArea {
+                            id: resultMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                // setPlace clears the results, which deletes this row,
+                                // so everything else has to happen before it.
+                                const p = result.modelData;
+                                searchField.text = "";
+                                root.picking = false;
+                                WeatherData.setPlace(p);
+                            }
+                        }
+                    }
+                }
+                Text {
+                    visible: WeatherData.results.length === 0
+                    text: WeatherData.searching ? "Searching..." : searchField.text.trim().length >= 2 ? "No places found" : "Type a city name"
+                    color: Theme.text
+                    opacity: 0.5
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize * 0.9
                 }
             }
         }
@@ -4219,67 +5409,6 @@
             radius: 6
             color: control.pressed ? control.tint : Theme.text
         }
-    }
-  '';
-
-  # ── Color filters for the Display widget ──
-  # Hyprland runs one of these over the whole screen (decoration.screen_shader).
-  # Same format as Hyprland's own shaders: the screen comes in as `tex`.
-  xdg.configFile."hypr/shaders/invert.frag".text = ''
-    #version 300 es
-    precision highp float;
-    in vec2 v_texcoord;
-    uniform sampler2D tex;
-    layout(location = 0) out vec4 fragColor;
-
-    void main() {
-        vec4 c = texture(tex, v_texcoord);
-        fragColor = vec4(1.0 - c.rgb, c.a);
-    }
-  '';
-  xdg.configFile."hypr/shaders/grayscale.frag".text = ''
-    #version 300 es
-    precision highp float;
-    in vec2 v_texcoord;
-    uniform sampler2D tex;
-    layout(location = 0) out vec4 fragColor;
-
-    void main() {
-        vec4 c = texture(tex, v_texcoord);
-        // how bright each color looks to the eye (Rec. 709 weights)
-        float y = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
-        fragColor = vec4(vec3(y), c.a);
-    }
-  '';
-  xdg.configFile."hypr/shaders/sepia.frag".text = ''
-    #version 300 es
-    precision highp float;
-    in vec2 v_texcoord;
-    uniform sampler2D tex;
-    layout(location = 0) out vec4 fragColor;
-
-    void main() {
-        vec4 c = texture(tex, v_texcoord);
-        // the classic sepia-tone matrix
-        vec3 s = vec3(
-            dot(c.rgb, vec3(0.393, 0.769, 0.189)),
-            dot(c.rgb, vec3(0.349, 0.686, 0.168)),
-            dot(c.rgb, vec3(0.272, 0.534, 0.131)));
-        fragColor = vec4(min(s, vec3(1.0)), c.a);
-    }
-  '';
-  xdg.configFile."hypr/shaders/contrast.frag".text = ''
-    #version 300 es
-    precision highp float;
-    in vec2 v_texcoord;
-    uniform sampler2D tex;
-    layout(location = 0) out vec4 fragColor;
-
-    void main() {
-        vec4 c = texture(tex, v_texcoord);
-        // push colors away from mid-gray: darks darker, lights lighter
-        vec3 h = (c.rgb - 0.5) * 1.35 + 0.5;
-        fragColor = vec4(clamp(h, 0.0, 1.0), c.a);
     }
   '';
 
@@ -4725,6 +5854,9 @@
   };
   # The bar is a systemd service, so give it TZDIR directly too.
   systemd.user.services.quickshell.Service.Environment = [ "TZDIR=/etc/zoneinfo" ];
+  # Wait (up to 2 s) until the login fade has covered the screen, so the bar doesn't
+  # pop in before the fade (see fade.qml). Same for the wallpaper below.
+  systemd.user.services.quickshell.Service.ExecStartPre = "${waitForFade}";
   xdg.configFile."uwsm/env".source = "${config.home.sessionVariablesPackage}/etc/profile.d/hm-session-vars.sh";
 
   # ── Autostart, as services (were hl.exec_cmd lines in the Hyprland config) ──
@@ -4737,6 +5869,7 @@
     # wallpaper. An empty value clears that check; Restart= retries it instead.
     Unit.ConditionEnvironment = lib.mkForce "";
     Service.RestartSec = lib.mkForce 2;
+    Service.ExecStartPre = "${waitForFade}";
     # Set the picture every time the daemon (re)starts. awww answers a moment after it
     # starts, so keep trying for up to ~10 s.
     Service.ExecStartPost = toString (
@@ -4767,22 +5900,41 @@
 
   # Keeps track of the most recently active media player for playerctl.
   services.playerctld.enable = true;
+
+  # ── Wallpapers for the login screen ──
+  # The login screen can't read your home folder, so this copies the pictures in
+  # ~/Pictures/Wallpapers to /var/lib/greeter-wallpapers (made in configuration.nix)
+  # when you log in and whenever something in that folder changes. Pick one with the
+  # wallpaper button in the login screen's top bar.
+  systemd.user.services.greeter-wallpapers = {
+    Unit.Description = "Copy ~/Pictures/Wallpapers for the login screen";
+    Service = {
+      Type = "oneshot";
+      ExecStart = toString (
+        pkgs.writeShellScript "greeter-wallpapers" ''
+          src="$HOME/Pictures/Wallpapers"
+          dst=/var/lib/greeter-wallpapers
+          [ -d "$src" ] && [ -w "$dst" ] || exit 0
+          # pictures only, no subfolders; files you delete get removed there too
+          exec ${pkgs.rsync}/bin/rsync -rt --delete --delete-excluded --chmod=D755,F644 \
+            --include='*.png' --include='*.PNG' --include='*.jpg' --include='*.JPG' \
+            --include='*.jpeg' --include='*.JPEG' --include='*.webp' --include='*.WEBP' \
+            --exclude='*' "$src/" "$dst/"
+        ''
+      );
+    };
+    Install.WantedBy = [ "default.target" ];
+  };
+  # Re-run it when you add, change or delete a picture in the folder.
+  systemd.user.paths.greeter-wallpapers = {
+    Unit.Description = "Watch ~/Pictures/Wallpapers for the login screen";
+    Path.PathChanged = "%h/Pictures/Wallpapers";
+    Install.WantedBy = [ "default.target" ];
+  };
   # Bluetooth pairing agent (with services.blueman in configuration.nix): when a device
   # wants a code confirmed, blueman shows the dialog. The bar's widget does the rest.
   services.blueman-applet.enable = true;
 
-  # Night light (and software dimming on screens without a backlight) for the
-  # bar's Display widget. --identity: start with no tint; the widget turns it on.
-  services.hyprsunset = {
-    enable = true;
-    extraArgs = [ "--identity" ];
-  };
-  # Same start-up race as awww: don't skip it if WAYLAND_DISPLAY isn't set yet,
-  # just retry quickly.
-  systemd.user.services.hyprsunset = {
-    Unit.ConditionEnvironment = lib.mkForce "";
-    Service.RestartSec = lib.mkForce 2;
-  };
   programs.hyprtoolkit.settings = {
     background = "0xFF2D353B"; # your Theme.bg (everforest bg0)
     base = "0xFF3D484D"; # your Theme.pill (bg2)
@@ -4906,6 +6058,26 @@
           },
       })
 
+      -- What shows before the wallpaper and bar are up: plain black, so logging in
+      -- fades smoothly from the login screen (which fades out to black) into the desktop.
+      -- At login: the screen stays black and the desktop fades in from the middle
+      -- (~/.config/quickshell/fade.qml, started here before anything else). The mouse
+      -- pointer is hidden until then; the timer is a safety net if the fade doesn't run.
+      hl.on("hyprland.start", function()
+          hl.config({ cursor = { invisible = true } })
+          hl.timer(function() hl.config({ cursor = { invisible = false } }) end, { timeout = 6000, type = "oneshot" })
+          hl.exec_cmd("${config.programs.quickshell.package}/bin/quickshell -p ~/.config/quickshell/fade.qml")
+      end)
+
+      hl.config({
+          misc = {
+              background_color = "rgb(000000)",
+              disable_hyprland_logo = true,
+              disable_splash_rendering = true,
+              force_default_wallpaper = 0,
+          },
+      })
+
       hl.config({
           input = {
               kb_layout = "us",
@@ -4965,7 +6137,8 @@
 
       hl.bind("SUPER + Q", hl.dsp.window.close())
 
-      hl.bind("SUPER + SHIFT + E", hl.dsp.exec_cmd("uwsm stop"))
+      -- log out with the fade to black (falls back to a plain log out if the bar isn't running)
+      hl.bind("SUPER + SHIFT + E", hl.dsp.exec_cmd("quickshell ipc call session logout || uwsm stop"))
 
 
       -- Captures the entire screen and copies it directly to your clipboard
@@ -5043,19 +6216,22 @@
     '';
   };
 
+  # App launcher (Super+Tab): apps only, a search bar, and your wallpaper as a square
+  # on the left. To get the old tall launcher on the left edge back, set the window's
+  # location/anchor to "west" and its height to "96%".
   programs.rofi = {
     enable = true;
     settings = {
-      modi = "drun,run,filebrowser";
+      modi = "drun"; # apps only (no run / files switcher)
       show-icons = true;
-      display-drun = "";
-      display-run = "";
-      display-filebrowser = "";
+      display-drun = "";
       drun-display-format = "{name}";
     };
     theme = lib.mkForce (
       let
         inherit (config.lib.formats.rasi) mkLiteral;
+        # a small square copy of hk.png, made by the rofi-wallpaper service below
+        wallpaper = "${config.home.homeDirectory}/.cache/rofi/wallpaper.png";
       in
       {
         # Everforest dark (medium)
@@ -5071,39 +6247,52 @@
         };
         "window" = {
           transparency = "real";
-          location = mkLiteral "west";
-          anchor = mkLiteral "west";
+          location = mkLiteral "center";
+          anchor = mkLiteral "center";
           fullscreen = false;
-          width = mkLiteral "500px";
-          height = mkLiteral "96%";
-          x-offset = mkLiteral "20px";
-          y-offset = mkLiteral "0px";
-          enabled = true;
-          margin = mkLiteral "0px";
+          width = mkLiteral "720px";
+          height = mkLiteral "420px";
           padding = mkLiteral "0px";
-          border = mkLiteral "4px solid";
+          border = mkLiteral "3px solid";
           border-color = mkLiteral "@background-alt";
+          border-radius = mkLiteral "14px";
           cursor = "default";
           background-color = mkLiteral "@background";
         };
+        # picture on the left, search + apps on the right
         "mainbox" = {
-          enabled = true;
-          spacing = mkLiteral "20px";
-          margin = mkLiteral "0px";
-          padding = mkLiteral "20px";
+          orientation = mkLiteral "horizontal";
+          spacing = mkLiteral "0px";
+          padding = mkLiteral "0px";
+          background-color = mkLiteral "transparent";
+          children = [
+            "imagebox"
+            "listbox"
+          ];
+        };
+        # The wallpaper square. (Width = the window's height minus its 2 x 3 px border.)
+        "imagebox" = {
+          expand = false;
+          width = mkLiteral "414px";
+          border-radius = mkLiteral "11px 0px 0px 11px";
+          background-color = mkLiteral "@background-alt";
+          background-image = mkLiteral ''url("${wallpaper}", both)'';
+        };
+        "listbox" = {
+          orientation = mkLiteral "vertical";
+          spacing = mkLiteral "12px";
+          padding = mkLiteral "16px";
           background-color = mkLiteral "transparent";
           children = [
             "inputbar"
-            "message"
             "listview"
-            "mode-switcher"
           ];
         };
+        # the minimal search bar
         "inputbar" = {
-          enabled = true;
           spacing = mkLiteral "10px";
-          margin = mkLiteral "0px";
-          padding = mkLiteral "10px";
+          padding = mkLiteral "10px 12px";
+          border-radius = mkLiteral "10px";
           background-color = mkLiteral "@background-alt";
           text-color = mkLiteral "@foreground";
           children = [
@@ -5111,60 +6300,43 @@
             "entry"
           ];
         };
-        "prompt" = {
-          enabled = true;
-          background-color = mkLiteral "inherit";
-          text-color = mkLiteral "inherit";
-        };
         "textbox-prompt-colon" = {
-          enabled = true;
-          padding = mkLiteral "0px";
           expand = false;
-          str = " ";
+          str = ""; # magnifying glass (Nerd Font icon)
+          vertical-align = mkLiteral "0.5";
+          padding = mkLiteral "0px 2px 0px 0px";
           background-color = mkLiteral "inherit";
-          text-color = mkLiteral "inherit";
+          text-color = mkLiteral "@selected";
         };
         "entry" = {
-          enabled = true;
-          padding = mkLiteral "0px";
           background-color = mkLiteral "inherit";
           text-color = mkLiteral "inherit";
           cursor = mkLiteral "text";
-          placeholder = "Search...";
-          placeholder-color = mkLiteral "inherit";
+          placeholder = "Search apps";
+          placeholder-color = mkLiteral "#859289";
         };
         "listview" = {
-          enabled = true;
           columns = 1;
-          lines = 12;
+          lines = 8;
           cycle = true;
           dynamic = true;
-          scrollbar = true;
+          scrollbar = false;
           layout = mkLiteral "vertical";
-          reverse = false;
           fixed-height = true;
-          fixed-columns = true;
-          spacing = mkLiteral "5px";
+          spacing = mkLiteral "4px";
           background-color = mkLiteral "transparent";
           text-color = mkLiteral "@foreground";
           cursor = "default";
         };
-        "scrollbar" = {
-          handle-width = mkLiteral "5px";
-          handle-color = mkLiteral "@selected";
-          background-color = mkLiteral "@background-alt";
-        };
         "element" = {
-          enabled = true;
           spacing = mkLiteral "10px";
-          margin = mkLiteral "0px";
-          padding = mkLiteral "6px";
+          padding = mkLiteral "7px 10px";
           background-color = mkLiteral "transparent";
           text-color = mkLiteral "@foreground";
           cursor = mkLiteral "pointer";
         };
         "element normal.normal, element alternate.normal" = {
-          background-color = mkLiteral "var(background)";
+          background-color = mkLiteral "transparent";
           text-color = mkLiteral "var(foreground)";
         };
         "element normal.urgent, element alternate.urgent, element selected.active" = {
@@ -5182,7 +6354,7 @@
         "element-icon" = {
           background-color = mkLiteral "transparent";
           text-color = mkLiteral "inherit";
-          size = mkLiteral "24px";
+          size = mkLiteral "22px";
           cursor = mkLiteral "inherit";
         };
         "element-text" = {
@@ -5193,41 +6365,6 @@
           vertical-align = mkLiteral "0.5";
           horizontal-align = mkLiteral "0.0";
         };
-        "mode-switcher" = {
-          enabled = true;
-          spacing = mkLiteral "10px";
-          margin = mkLiteral "0px";
-          padding = mkLiteral "0px 0px";
-          background-color = mkLiteral "transparent";
-          text-color = mkLiteral "@foreground";
-        };
-        "button" = {
-          padding = mkLiteral "10px";
-          background-color = mkLiteral "@background-alt";
-          text-color = mkLiteral "inherit";
-          cursor = mkLiteral "pointer";
-        };
-        "button selected" = {
-          background-color = mkLiteral "var(urgent)";
-          text-color = mkLiteral "var(background)";
-        };
-        "message" = {
-          enabled = true;
-          margin = mkLiteral "0px";
-          padding = mkLiteral "10px";
-          background-color = mkLiteral "@background-alt";
-          text-color = mkLiteral "@foreground";
-        };
-        "textbox" = {
-          background-color = mkLiteral "transparent";
-          text-color = mkLiteral "@foreground";
-          vertical-align = mkLiteral "0.5";
-          horizontal-align = mkLiteral "0.0";
-          highlight = mkLiteral "none";
-          placeholder-color = mkLiteral "@foreground";
-          blink = true;
-          markup = true;
-        };
         "error-message" = {
           padding = mkLiteral "20px";
           background-color = mkLiteral "@background";
@@ -5235,6 +6372,35 @@
         };
       }
     );
+  };
+
+  # ── The picture for rofi, made ahead of time ──
+  # rofi has no background daemon: it starts fresh each time you open it, and decoding
+  # the full-size hk.png (4288 x 2848, 12 MB) took long enough to see the square pop in.
+  # So this keeps a small 828 x 828 copy (2x the 414 px square, sharp on HiDPI) in
+  # ~/.cache/rofi, cut from the middle of the picture. It's about 20x faster to load.
+  # Made at login and again whenever hk.png changes.
+  systemd.user.services.rofi-wallpaper = {
+    Unit.Description = "Square copy of the wallpaper for rofi";
+    Service = {
+      Type = "oneshot";
+      ExecStart = toString (
+        pkgs.writeShellScript "rofi-wallpaper" ''
+          src="$HOME/Pictures/Wallpapers/hk.png"
+          out="$HOME/.cache/rofi/wallpaper.png"
+          [ -f "$src" ] || exit 0
+          ${pkgs.coreutils}/bin/mkdir -p "$HOME/.cache/rofi"
+          ${pkgs.imagemagick}/bin/magick "$src" -resize 828x828^ -gravity center -extent 828x828 -strip "$out.new.png" \
+            && ${pkgs.coreutils}/bin/mv "$out.new.png" "$out"
+        ''
+      );
+    };
+    Install.WantedBy = [ "default.target" ];
+  };
+  systemd.user.paths.rofi-wallpaper = {
+    Unit.Description = "Watch hk.png for rofi";
+    Path.PathChanged = "%h/Pictures/Wallpapers/hk.png";
+    Install.WantedBy = [ "default.target" ];
   };
 
   programs.fastfetch = {
