@@ -330,6 +330,42 @@ in
                     return;
                 send(["playlist-move", from, to > from ? to + 1 : to]);
             }
+            // Sort the whole queue by "album", "artist" or "title" (the song that's
+            // playing stays playing, it just moves with the rest). Works out the new order,
+            // then moves entries into place one by one, top to bottom, with the same
+            // playlist-move that drag-to-reorder uses. Songs that aren't in the library
+            // (so have no tags) go to the end.
+            function sortQueue(by) {
+                const key = e => {
+                    const s = byPath[e.filename];
+                    if (!s)
+                        return ["\uffff", "", "", e.filename];
+                    const k = {
+                        album: [s.album, s.artist, s.path],
+                        artist: [s.artist, s.album, s.path],
+                        title: [s.title, s.artist, s.path]
+                    }[by];
+                    return k.map(x => (x || "\uffff").toLowerCase());
+                };
+                const cmp = (a, b) => {
+                    const ka = key(a), kb = key(b);
+                    for (let i = 0; i < ka.length; i++) {
+                        const c = ka[i].localeCompare(kb[i]);
+                        if (c !== 0)
+                            return c;
+                    }
+                    return 0;
+                };
+                const wanted = queue.slice().sort(cmp);
+                const now = queue.slice();      // mirror of mpv's list as the moves happen
+                for (let i = 0; i < wanted.length; i++) {
+                    const from = now.indexOf(wanted[i]);
+                    if (from === i)
+                        continue;
+                    send(["playlist-move", from, i]);   // lands in front of slot i, i.e. at i
+                    now.splice(i, 0, now.splice(from, 1)[0]);
+                }
+            }
             // empties the queue except the song that's playing
             function clearQueue() {
                 send(["playlist-clear"]);
@@ -754,7 +790,8 @@ in
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: disp.width - 2 * (Theme.iconSize + 6)
                                     // never all the way to 0: a black screen is hard to fix by mouse
-                                    from: disp.mode === "backlight" ? 1 : 20
+                                    // (a laptop backlight at 1% still glows; software dimming stops at 10%)
+                                    from: disp.mode === "backlight" ? 1 : 10
                                     to: 100
                                     stepSize: 1
                                     tint: Theme.yellow
@@ -1470,12 +1507,53 @@ in
                                 spacing: 8
 
                                 property string tab: "library"       // or "queue"
-                                // the library, narrowed down by the search box
+                                // Library views: every song, or songs grouped by artist / album.
+                                // Clicking an artist or album "opens" it (pick); the back arrow closes it.
+                                property string view: "songs"        // "songs", "artists" or "albums"
+                                property var pick: null              // { kind, name, artist, songs } or null
+                                onViewChanged: pick = null
+                                onTabChanged: pick = null
+
+                                // the songs listed: the open artist/album, or the library narrowed
+                                // down by the search box
                                 readonly property var results: {
+                                    if (pick)
+                                        return pick.songs;
                                     const q = search.text.toLowerCase();
                                     if (q === "")
                                         return music.songs;
                                     return music.songs.filter(s => (s.title + " " + s.artist + " " + s.album).toLowerCase().includes(q));
+                                }
+                                // artists or albums, each with its songs (in library order:
+                                // artist, album, then file name, so albums keep track order)
+                                readonly property var groups: {
+                                    if (view === "songs")
+                                        return [];
+                                    const map = {};
+                                    const list = [];
+                                    for (const s of music.songs) {
+                                        const name = view === "artists" ? (s.artist || "Unknown artist") : (s.album || "Unknown album");
+                                        const id = view === "artists" ? name : name + "\n" + s.artist;
+                                        let g = map[id];
+                                        if (!g) {
+                                            g = map[id] = {
+                                                kind: view,
+                                                name: name,
+                                                artist: s.artist,
+                                                cover: "",
+                                                songs: []
+                                            };
+                                            list.push(g);
+                                        }
+                                        g.songs.push(s);
+                                        if (g.cover === "" && s.cover !== "")
+                                            g.cover = s.cover;
+                                    }
+                                    const q = search.text.toLowerCase();
+                                    const shown = q === "" ? list : list.filter(g => (g.name + " " + g.artist).toLowerCase().includes(q));
+                                    return shown.sort((a, b) => a.name.localeCompare(b.name, undefined, {
+                                            sensitivity: "base"
+                                        }));
                                 }
 
                                 // seconds -> "m:ss"
@@ -1582,9 +1660,9 @@ in
                                 // ── search ──
                                 TextField {
                                     id: search
-                                    visible: lib.tab === "library"
+                                    visible: lib.tab === "library" && !lib.pick
                                     width: parent.width
-                                    placeholderText: "Search songs, artists, albums"
+                                    placeholderText: lib.view === "artists" ? "Search artists" : lib.view === "albums" ? "Search albums" : "Search songs, artists, albums"
                                     placeholderTextColor: Theme.pillIcon
                                     color: Theme.text
                                     font.family: Theme.font
@@ -1596,6 +1674,117 @@ in
                                         color: Theme.bg
                                         border.width: 1
                                         border.color: search.activeFocus ? Theme.accent : Theme.pillIcon
+                                    }
+                                }
+
+                                // ── Songs / Artists / Albums ──
+                                Row {
+                                    visible: lib.tab === "library" && !lib.pick
+                                    spacing: 4
+                                    Repeater {
+                                        model: [
+                                            {
+                                                id: "songs",
+                                                name: "Songs"
+                                            },
+                                            {
+                                                id: "artists",
+                                                name: "Artists"
+                                            },
+                                            {
+                                                id: "albums",
+                                                name: "Albums"
+                                            }
+                                        ]
+                                        Chip {
+                                            required property var modelData
+                                            label: modelData.name
+                                            selected: lib.view === modelData.id
+                                            onClicked: lib.view = modelData.id
+                                        }
+                                    }
+                                }
+
+                                // ── inside an artist or album: back arrow, name, play it all ──
+                                Item {
+                                    visible: lib.tab === "library" && lib.pick !== null
+                                    width: parent.width
+                                    height: 36
+                                    IconButton {
+                                        id: backButton
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        icon: "arrow_back"
+                                        onClicked: lib.pick = null
+                                    }
+                                    Column {
+                                        anchors.left: backButton.right
+                                        anchors.leftMargin: 6
+                                        anchors.right: pickPlay.left
+                                        anchors.rightMargin: 6
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        Text {
+                                            width: parent.width
+                                            elide: Text.ElideRight
+                                            text: lib.pick ? lib.pick.name : ""
+                                            color: Theme.text
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 1.1
+                                            font.weight: 700
+                                            font.letterSpacing: Theme.letterSpacing
+                                        }
+                                        Text {
+                                            width: parent.width
+                                            elide: Text.ElideRight
+                                            text: !lib.pick ? "" : (lib.pick.kind === "albums" && lib.pick.artist ? lib.pick.artist + "  ·  " : "") + lib.pick.songs.length + (lib.pick.songs.length === 1 ? " song" : " songs")
+                                            color: Theme.text
+                                            opacity: 0.6
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.85
+                                        }
+                                    }
+                                    IconButton {
+                                        id: pickPlay
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        icon: "play_circle"
+                                        onClicked: music.playAll(lib.results)
+                                    }
+                                }
+
+                                // ── queue: sort it ──
+                                Row {
+                                    visible: lib.tab === "queue" && music.queue.length > 1
+                                    spacing: 4
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "Sort by"
+                                        color: Theme.text
+                                        opacity: 0.6
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.9
+                                        rightPadding: 4
+                                    }
+                                    Repeater {
+                                        model: [
+                                            {
+                                                id: "album",
+                                                name: "Album"
+                                            },
+                                            {
+                                                id: "artist",
+                                                name: "Artist"
+                                            },
+                                            {
+                                                id: "title",
+                                                name: "Title"
+                                            }
+                                        ]
+                                        Chip {
+                                            required property var modelData
+                                            label: modelData.name
+                                            onClicked: music.sortQueue(modelData.id)
+                                        }
                                     }
                                 }
 
@@ -1611,6 +1800,8 @@ in
                                             return music.queue.length === 0 ? "The queue is empty." : "";
                                         if (music.songs.length === 0)
                                             return music.scanning ? "Scanning ~/Music..." : "No songs found in ~/Music.";
+                                        if (lib.view !== "songs" && !lib.pick)
+                                            return lib.groups.length === 0 ? "No matches." : "";
                                         return lib.results.length === 0 ? "No matches." : "";
                                     }
                                     color: Theme.text
@@ -1623,7 +1814,7 @@ in
                                 // ListView only creates rows that are on screen, so thousands of songs are fine.
                                 ListView {
                                     id: songList
-                                    visible: lib.tab === "library" && lib.results.length > 0
+                                    visible: lib.tab === "library" && (lib.view === "songs" || lib.pick !== null) && lib.results.length > 0
                                     width: parent.width
                                     height: 320
                                     clip: true
@@ -1880,6 +2071,133 @@ in
                                                     font.pixelSize: Theme.textSize * 0.85
                                                     font.weight: 700
                                                 }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // ── artists / albums ──
+                                // Click one to see its songs; the play button plays all of them.
+                                ListView {
+                                    id: groupList
+                                    visible: lib.tab === "library" && lib.view !== "songs" && !lib.pick && lib.groups.length > 0
+                                    width: parent.width
+                                    height: 320
+                                    clip: true
+                                    spacing: 2
+                                    model: lib.groups
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    ScrollBar.vertical: ScrollBar {
+                                        id: groupBar
+                                        contentItem: Rectangle {
+                                            implicitWidth: 4
+                                            radius: 2
+                                            color: Theme.pillIcon
+                                            opacity: groupBar.size < 1 ? (groupBar.active ? 1 : 0.4) : 0
+                                            Behavior on opacity {
+                                                NumberAnimation {
+                                                    duration: 200
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    delegate: Rectangle {
+                                        id: group
+                                        required property var modelData      // { kind, name, artist, cover, songs }
+                                        width: ListView.view.width - 8
+                                        height: 46
+                                        radius: Theme.radius
+                                        color: groupMouse.containsMouse ? Theme.pill : "transparent"
+                                        scale: groupMouse.pressed ? 0.95 : 1
+                                        Behavior on color {
+                                            ColorAnimation {
+                                                duration: 120
+                                            }
+                                        }
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 120
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            id: groupMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: lib.pick = group.modelData
+
+                                            // artists get a round picture, albums a rounded square
+                                            ClippingRectangle {
+                                                id: groupCover
+                                                x: 5
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: 36
+                                                height: 36
+                                                radius: group.modelData.kind === "artists" ? 18 : 6
+                                                color: Theme.pill
+                                                Image {
+                                                    anchors.fill: parent
+                                                    source: group.modelData.cover
+                                                    sourceSize: Qt.size(72, 72)
+                                                    fillMode: Image.PreserveAspectCrop
+                                                    asynchronous: true
+                                                }
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    visible: group.modelData.cover === ""
+                                                    text: group.modelData.kind === "artists" ? "person" : "album"
+                                                    color: Theme.pillIcon
+                                                    font.family: Theme.iconFont
+                                                    font.pixelSize: Theme.iconSize
+                                                }
+                                            }
+                                            Column {
+                                                anchors.left: groupCover.right
+                                                anchors.leftMargin: 10
+                                                anchors.right: groupPlay.left
+                                                anchors.rightMargin: 8
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                Text {
+                                                    width: parent.width
+                                                    text: group.modelData.name
+                                                    elide: Text.ElideRight
+                                                    color: Theme.text
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize
+                                                    font.weight: 700
+                                                    font.letterSpacing: Theme.letterSpacing
+                                                }
+                                                Text {
+                                                    width: parent.width
+                                                    text: (group.modelData.kind === "albums" && group.modelData.artist ? group.modelData.artist + "  ·  " : "") + group.modelData.songs.length + (group.modelData.songs.length === 1 ? " song" : " songs")
+                                                    elide: Text.ElideRight
+                                                    color: Theme.text
+                                                    opacity: 0.6
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize * 0.85
+                                                }
+                                            }
+                                            IconButton {        // play everything by this artist / on this album
+                                                id: groupPlay
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: 4
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                visible: groupMouse.containsMouse
+                                                icon: "play_arrow"
+                                                onClicked: music.playAll(group.modelData.songs)
+                                            }
+                                            Text {
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: 10
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                visible: !groupMouse.containsMouse
+                                                text: "chevron_right"
+                                                color: Theme.pillIcon
+                                                font.family: Theme.iconFont
+                                                font.pixelSize: Theme.iconSize
                                             }
                                         }
                                     }
@@ -4090,8 +4408,9 @@ in
     // The popup hangs off the bottom of the bar and curves into it, like it's
     // part of the bar, slides down when it opens, and slides back up into the
     // bar when it closes.
-    // Click to open, click the same button again to close. A popup stays open while you
-    // use other apps; opening another widget closes it (one open at a time).
+    // Click to open. It closes when you click the same button again, open another
+    // widget, or click anywhere that isn't the popup or the bar. Clicking other things
+    // on the bar (workspaces, media buttons, ...) leaves it open.
     //
     //   Widget {
     //       button: Image { width: 18; height: 18; source: "file:///home/garinh/Pictures/x.png" }
@@ -4141,6 +4460,8 @@ in
             Ui.openWidget = root
             popup.visible = true
             root.open = true
+            grabBar = false
+            grab.active = true
             // Opening: starts fast and settles (OutCubic), sliding down out of the bar.
             slide.duration = root.duration
             slide.easing.type = Easing.OutCubic
@@ -4153,6 +4474,7 @@ in
                 return
             root.open = false
             grab.active = false
+            grabBar = false
             if (Ui.openWidget === root)
                 Ui.openWidget = null
             // Closing: the same slide played backwards. The mirror of "starts fast and
@@ -4171,15 +4493,23 @@ in
             onFinished: if (root.openness === 0) popup.visible = false
         }
 
-        // Keyboard. A popup doesn't get typed keys on its own, so clicking inside one
-        // turns on Hyprland's focus grab for it (the bar is included, so its buttons keep
-        // working). The grab ends when you click outside; the popup just stays open
-        // without the keyboard until you click it again. Ending a grab never closes it.
-        // (Hyprland uses that first outside click to end the grab: it doesn't reach the
-        // app you clicked, so it can take a second click there.)
+        // Click-off-to-close, through Hyprland's focus grab. While the popup is open the
+        // grab covers the popup and this bar: clicks there work normally (other widgets
+        // and bar buttons react on the first click), and typed keys go to the popup. A
+        // click anywhere else ends the grab and Hyprland tells us (onCleared), so the
+        // popup slides back into the bar. (Hyprland spends that outside click on ending
+        // the grab; it doesn't reach the app you clicked.)
+        //
+        // The bar joins the grab in a second step, after the grab has gone out with the
+        // popup alone: Hyprland hands the keyboard to one of the grabbed windows in no
+        // fixed order, so the popup goes first to be sure it gets your typing.
+        property bool grabBar: false
         HyprlandFocusGrab {
             id: grab
-            windows: [popup, root.QsWindow.window]
+            windows: root.grabBar ? [popup, root.QsWindow.window] : [popup]
+            onActiveChanged: if (active)
+                root.grabBar = true
+            onCleared: root.closePopup()
         }
         // e.g. a monitor unplugged while its bar had the open popup
         Component.onDestruction: if (Ui.openWidget === root)
@@ -4336,18 +4666,6 @@ in
                 }
             }
 
-            // Any press inside the popup takes the keyboard (see `grab` above). It sits
-            // on top but only notices the press and lets it through (accepted = false),
-            // so the buttons, lists and text boxes underneath still get it.
-            MouseArea {
-                anchors.fill: parent
-                z: 1000
-                onPressed: mouse => {
-                    if (root.open)
-                        grab.active = true
-                    mouse.accepted = false
-                }
-            }
         }
     }
   '';
@@ -5870,7 +6188,14 @@ in
     TZDIR = "/etc/zoneinfo";
   };
   # The bar is a systemd service, so give it TZDIR directly too.
-  systemd.user.services.quickshell.Service.Environment = [ "TZDIR=/etc/zoneinfo" ];
+  systemd.user.services.quickshell.Service.Environment = [
+    "TZDIR=/etc/zoneinfo"
+    # Bar animations stepping at 60 on a high-refresh screen? Removing the # below makes
+    # Qt move animations forward once per frame drawn, at whatever rate the screen runs.
+    # Quickshell leaves it off on purpose: it can keep the GPU redrawing much more
+    # (Qt bug QTBUG-126099). Try it live first (see the notes from Claude).
+    # "QSG_USE_SIMPLE_ANIMATION_DRIVER=1"
+  ];
   # Wait (up to 2 s) until the login fade has covered the screen, so the bar doesn't
   # pop in before the fade (see fade.qml). Same for the wallpaper below.
   systemd.user.services.quickshell.Service.ExecStartPre = "${waitForFade}";

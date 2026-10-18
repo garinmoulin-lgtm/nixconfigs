@@ -659,30 +659,86 @@ in
           property string wallpaper: fallbackWallpaper
 
           // ── showing up only when it's ready ──
-          // The screen stays black until the wallpaper is loaded and drawn (or 2.5 s at
-          // most), then opens up from the middle. By then everything is set up, so you
-          // can type the moment you see it. (Keys typed before that still count.)
+          // The screen stays black until all of these are true, then opens up from the
+          // middle:
+          //   1. the wallpaper is loaded (wallReady)
+          //   2. Hyprland has found your keyboard (kbDevice). The login screen starts
+          //      early in boot, sometimes before the keyboard has been set up; keys
+          //      pressed before that never reach Hyprland at all, so nothing could
+          //      catch them. Checked every 100 ms with `hyprctl devices`.
+          //   3. Hyprland has given this window the keyboard (kbReady)
+          //   4. a run of frames has been drawn on time (smoothFrames), so the first
+          //      frames' set-up work (like the blur's shaders) is out of the way
+          // So the moment you can see it, it's taking keys. Keys pressed while it's
+          // still black count too, once 2 and 3 are true. If something never gets
+          // ready, it shows up after 5 s anyway.
+          // How long each step took is written to /var/lib/greeter/startup.log.
           property bool ready: false
+          property bool wallReady: false
+          property bool kbDevice: false
+          property bool kbReady: false
+          property int smoothFrames: 0
+          property var kbNames: []          // the keyboards Hyprland reported
+          readonly property double t0: Date.now()
+          property var times: ({})          // step -> ms after start
+          function mark(step) {
+              if (times[step] !== undefined)
+                  return;
+              const t = times;
+              t[step] = Date.now() - t0;
+              times = t;
+          }
+          onWallReadyChanged: mark("wallpaper")
+          onKbDeviceChanged: mark("keyboardFound")
+          onKbReadyChanged: mark("windowGotKeyboard")
+
+          // 2. ask Hyprland for its keyboards until a real one shows up. Things like the
+          //    power button and media-key devices are listed as keyboards too, so
+          //    they're skipped.
+          Process {
+              id: devPoll
+              running: true
+              command: [root.hyprctl, "devices", "-j"]
+              stdout: StdioCollector {
+                  onStreamFinished: {
+                      let names = [];
+                      try {
+                          names = (JSON.parse(text).keyboards || []).map(k => k.name).filter(n => !/power-button|sleep-button|video-bus|lid-switch|pc-speaker|virtual|wmi|hotkey|consumer-control|system-control/i.test(n));
+                      } catch (e) {}
+                      root.kbNames = names;
+                      if (names.length > 0)
+                          root.kbDevice = true;
+                      else
+                          devRetry.start();
+                  }
+              }
+          }
+          Timer {
+              id: devRetry
+              interval: 100
+              onTriggered: devPoll.running = true
+          }
+          FileView {
+              id: startLog
+              path: "/var/lib/greeter/startup.log"
+              printErrors: false
+          }
           property real introP: 0      // 0 = black, 1 = login screen fully visible
           property real outP: 0        // 0 = visible, 1 = black again (logging in)
-          function markReady() {
+          function markReady(why) {
               if (ready)
                   return;
               ready = true;
+              mark(why === "fallback" ? "shown (gave up waiting, 5 s)" : "shown");
+              startLog.setText(JSON.stringify({ "msAfterStart": times, "keyboards": kbNames }, null, 2) + "\n");
               pointer(true);           // hidden until now (see /etc/greetd/hyprland.lua)
               introAnim.start();
           }
           Timer {
               id: readyFallback
-              interval: 2500
+              interval: 5000
               running: true
-              onTriggered: root.markReady()
-          }
-          Timer {
-              // after the wallpaper is ready, a couple of frames for the blur to be drawn
-              id: readySoon
-              interval: 120
-              onTriggered: root.markReady()
+              onTriggered: root.markReady("fallback")
           }
           NumberAnimation {
               id: introAnim
@@ -928,7 +984,7 @@ in
                               if (img.status === Image.Ready && img.source.toString() === "file://" + shown) {
                                   useB = img === wallB;
                                   if (win.main)
-                                      readySoon.start();
+                                      root.wallReady = true;
                               }
                           }
                           Component.onCompleted: show(root.wallpaper)
@@ -995,8 +1051,27 @@ in
                               }
                           }
                       }
-                      Component.onCompleted: if (win.main)
-                          field.forceActiveFocus()   // takes keys from the very first frame
+                      Component.onCompleted: if (win.main) {
+                          field.forceActiveFocus();   // takes keys from the very first frame
+                          if (hasKeyboard)
+                              root.kbReady = true;
+                      }
+
+                      // 3. keyboard focus: the window becomes "active" when Hyprland gives
+                      //    it the keyboard
+                      readonly property bool hasKeyboard: Window.active
+                      onHasKeyboardChanged: if (win.main && hasKeyboard)
+                          root.kbReady = true
+                      // 4. smooth frames: once 1-3 are done, count frames drawn in under
+                      //    25 ms in a row; 8 of them and it opens up
+                      FrameAnimation {
+                          running: win.main && !root.ready && root.wallReady && root.kbDevice && root.kbReady
+                          onTriggered: {
+                              root.smoothFrames = frameTime > 0 && frameTime < 0.025 ? root.smoothFrames + 1 : 0;
+                              if (root.smoothFrames >= 8)
+                                  root.markReady();
+                          }
+                      }
 
                       // ── the clock: 64 px, 74 px above the middle (hyprlock's spot) ──
                       SystemClock {
@@ -1610,8 +1685,14 @@ in
   # };
   services.upower.enable = true;
 
+  # Firmware for the Wi-Fi/Bluetooth chip (and other devices). The generated
+  # hardware-configuration.nix usually turns this on already; set here so it's certain.
+  hardware.enableRedistributableFirmware = true;
+
   # ── Bluetooth ──
   # BlueZ, which the bar's Bluetooth widget talks to (Quickshell.Bluetooth uses BlueZ over D-Bus).
+  # If it doesn't show up: BIOS → Advanced → Onboard Devices Configuration → Bluetooth
+  # Controller = Enabled, then check `rfkill list` and `bluetoothctl show`.
   hardware.bluetooth = {
     enable = true;
     powerOnBoot = true; # adapter on at boot, so devices can reconnect by themselves
