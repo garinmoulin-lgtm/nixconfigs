@@ -56,7 +56,8 @@ hardware.nvidia = {
   package = config.boot.kernelPackages.nvidiaPackages.stable;
 };
 ```
-Swap the driver I have set up for whatever you have.
+Swap the driver I have set up for whatever you have. There will also be commented blocks that you
+may uncomment for your specific drivers.
 Then, run:
 ```bash
 cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake /etc/nixos#nixos && cd && flatpak update -y
@@ -82,9 +83,9 @@ Scroll to about line 530-630, somewhere there, and find the monitor block.
 This is mine, already in the config, and you'll want to set it up using your values.
 ```lua
 hl.monitor({
-    output   = "[Your monitor here]", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
-    mode     = "[Your preffered availableMode here]",
-    position = "0x0",
+    output   = "", -- for laptops generally eDP-0 or eDP-1, and desktops usually DP-1.
+    mode     = "highrr",
+    position = "auto",
     scale    = 1, -- might be different...
 })
 ```
