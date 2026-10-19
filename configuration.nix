@@ -78,6 +78,27 @@ in
     #./kernel.nix
   ];
 
+  # ── Boot splash (Plymouth) ──
+  # An animation from the moment the kernel starts until the login screen, instead of
+  # a black screen. The module adds the "splash" kernel option itself, the quiet
+  # console block above keeps text from showing through, and greetd waits for the
+  # splash to finish before it takes the screen. It's built into the initrd at
+  # rebuild time, so it stays the same whichever bar theme you pick.
+  # The driver it needs to start early is in the GPU section below (boot.initrd.kernelModules).
+  # Other themes: any name from github.com/adi1090x/plymouth-themes in both places
+  # below (e.g. "colorful_loop", "circle_hud", "cuts", "lone"), or for Catppuccin:
+  #   theme = "catppuccin-mocha";
+  #   themePackages = [ (pkgs.catppuccin-plymouth.override { variant = "mocha"; }) ];
+  # Leave both out for "bgrt": your motherboard's logo with a spinner.
+  boot.plymouth = {
+    enable = true;
+    theme = "rings";
+    themePackages = [
+      # only the one theme, not all ~80 in the package
+      (pkgs.adi1090x-plymouth-themes.override { selected_themes = [ "rings" ]; })
+    ];
+  };
+
   boot.blacklistedKernelModules = [
     "acpi_pad"
     # (nouveau is blacklisted in the NVIDIA block of the GPU section below)
@@ -1550,6 +1571,16 @@ in
     powerManagement.enable = true;
   };
   boot.kernelParams = [ "nvidia-drm.modeset=1" ];
+  # Start the driver inside the initrd, so the boot splash (Plymouth) is drawn by it
+  # from the start instead of by the firmware's basic display, which jumps or blanks
+  # when the driver takes over partway through boot. If a boot ever stays black, pick
+  # the previous generation in the boot menu and delete this line.
+  boot.initrd.kernelModules = [
+    "nvidia"
+    "nvidia_modeset"
+    "nvidia_uvm"
+    "nvidia_drm"
+  ];
   boot.extraModprobeConfig = ''
     blacklist nouveau
     options nvidia NVreg_PreserveVideoMemoryAllocations=1
@@ -1568,6 +1599,7 @@ in
   #   enable32Bit = true; # for Steam / 32-bit games
   # };
   # environment.sessionVariables.LIBVA_DRIVER_NAME = "radeonsi"; # Mesa's VA-API driver
+  # boot.initrd.kernelModules = [ "amdgpu" ]; # early start, for the boot splash
   # ── AMD ─────────────────────────────────────────────────────── end of block ──
 
   # ── Intel ───────────────────────────────────────────────── start of block ──
@@ -1581,6 +1613,7 @@ in
   #   ];
   # };
   # environment.sessionVariables.LIBVA_DRIVER_NAME = "iHD"; # "i965" on pre-2014 Intel
+  # boot.initrd.kernelModules = [ "i915" ]; # early start, for the boot splash ("xe" on the newest Intel)
   # ── Intel ───────────────────────────────────────────────────── end of block ──
 
   #LE STEAM
