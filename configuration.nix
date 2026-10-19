@@ -684,11 +684,380 @@ in
       esac
     done
   '';
+  # The pieces the login screen and the lock screen share (so they always look the
+  # same): the blurred wallpaper, and the clock + password box.
+  environment.etc."greetd/greeter/Backdrop.qml".text = ''
+      import QtQuick
+      import QtQuick.Effects
+
+      // The blurred wallpaper behind the login screen and the lock screen.
+      // A new picture loads into a hidden copy first, then they cross-fade.
+      Item {
+          id: backdrop
+
+          property string wallpaper: ""   // full path
+          property bool awake: true       // more blur while you're typing
+          property bool settled: true     // false = slightly zoomed in (it settles in when this turns true)
+          signal shown                    // the current wallpaper has loaded and is on screen
+
+          // ── wallpaper ──
+          // Two pictures stacked: a new wallpaper loads into the hidden one,
+          // then they cross-fade.
+          Item {
+              id: wallLayer
+              anchors.fill: parent
+              visible: false      // drawn through the blur below
+              property string shown: ""
+              property bool useB: false
+
+              function show(path) {
+                  if (path === shown)
+                      return;
+                  shown = path;
+                  const target = useB ? wallA : wallB;
+                  target.source = path !== "" ? "file://" + path : "";
+                  loaded(target);
+              }
+              function loaded(img) {
+                  if (img.status === Image.Ready && img.source.toString() === "file://" + shown) {
+                      useB = img === wallB;
+                      backdrop.shown();
+                  }
+              }
+              Component.onCompleted: show(backdrop.wallpaper)
+              Connections {
+                  target: backdrop
+                  function onWallpaperChanged() {
+                      wallLayer.show(backdrop.wallpaper);
+                  }
+              }
+
+              Image {
+                  id: wallA
+                  anchors.fill: parent
+                  fillMode: Image.PreserveAspectCrop
+                  // load it at screen size, not the photo's full size (less to blur)
+                  sourceSize.width: width
+                  sourceSize.height: height
+                  asynchronous: true
+                  opacity: wallLayer.useB ? 0 : 1
+                  Behavior on opacity {
+                      NumberAnimation {
+                          duration: 500
+                          easing.type: Easing.InOutQuad
+                      }
+                  }
+                  onStatusChanged: wallLayer.loaded(wallA)
+              }
+              Image {
+                  id: wallB
+                  anchors.fill: parent
+                  fillMode: Image.PreserveAspectCrop
+                  sourceSize.width: width
+                  sourceSize.height: height
+                  asynchronous: true
+                  opacity: wallLayer.useB ? 1 : 0
+                  Behavior on opacity {
+                      NumberAnimation {
+                          duration: 500
+                          easing.type: Easing.InOutQuad
+                      }
+                  }
+                  onStatusChanged: wallLayer.loaded(wallB)
+              }
+          }
+          // just blurred (no darkening); a little more blur while you're typing
+          MultiEffect {
+              anchors.fill: parent
+              source: wallLayer
+              blurEnabled: true
+              blurMax: 48
+              blur: backdrop.awake ? 1.0 : 0.45
+              Behavior on blur {
+                  NumberAnimation {
+                      duration: 250
+                      easing.type: Easing.OutCubic
+                  }
+              }
+              // start slightly zoomed and settle in
+              scale: backdrop.settled ? 1.0 : 1.06
+              Behavior on scale {
+                  NumberAnimation {
+                      duration: 900
+                      easing.type: Easing.OutCubic
+                  }
+              }
+          }
+      }
+  '';
+  environment.etc."greetd/greeter/LoginCard.qml".text = ''
+      import QtQuick
+      import QtQuick.Controls.Basic
+      import QtQuick.Effects
+      import Quickshell
+
+      // The middle of the login screen and the lock screen: date and clock, the
+      // password pill (dots, shake on a wrong password, colors while checking), and a
+      // line under it (who's logging in, or a message). Fills the screen it's put in.
+      // The screen that uses it does the actual checking (greetd or PAM); this only
+      // shows things and reports what you type.
+      Item {
+          id: card
+
+          property bool main: true          // false = only the clock (other monitors)
+          property string password: ""      // what's typed so far (shown as dots)
+          property string phase: "idle"     // idle, checking, failed, launching / unlocking
+          property string message: ""       // errors and PAM messages
+          property string label: ""         // under the box when there's no message (your name)
+          property bool awake: true          // full strength while you're typing
+
+          signal typed(string text)         // the password box changed
+          signal submit                     // Enter
+          signal escapePressed              // Esc
+          signal activity                   // any key
+
+          // puts the keyboard in the password box
+          function focusField() {
+              field.forceActiveFocus();
+          }
+
+          // One entry per typed character; the dots in the box are drawn from this,
+          // so each one can fade in and out on its own.
+          ListModel {
+              id: dots
+          }
+          onPasswordChanged: {
+              while (dots.count < password.length)
+                  dots.append({ "n": dots.count });
+              while (dots.count > password.length)
+                  dots.remove(dots.count - 1);
+          }
+
+          // ── the clock: 64 px, 74 px above the middle ──
+          SystemClock {
+              id: clock
+              precision: SystemClock.Minutes
+          }
+          Text {
+              id: clockText
+              anchors.horizontalCenter: parent.horizontalCenter
+              anchors.bottom: parent.verticalCenter
+              anchors.bottomMargin: 74 - height / 2
+              text: Qt.formatTime(clock.date, "HH:mm")
+              color: Theme.text
+              font.family: Theme.font
+              font.pixelSize: 64
+              font.weight: 700
+              // soft shadow, so it stays readable on a bright wallpaper
+              layer.enabled: true
+              layer.effect: MultiEffect {
+                  shadowEnabled: true
+                  shadowBlur: 0.6
+                  shadowOpacity: 0.55
+                  shadowVerticalOffset: 2
+              }
+          }
+          Text {
+              anchors.horizontalCenter: parent.horizontalCenter
+              anchors.bottom: clockText.top
+              text: Qt.formatDate(clock.date, "dddd, MMMM d")
+              color: Theme.text
+              opacity: 0.85
+              font.family: Theme.font
+              font.pixelSize: 15
+              // soft shadow, so it stays readable on a bright wallpaper
+              layer.enabled: true
+              layer.effect: MultiEffect {
+                  shadowEnabled: true
+                  shadowBlur: 0.6
+                  shadowOpacity: 0.55
+                  shadowVerticalOffset: 2
+              }
+          }
+
+          // ── password box: 200 x 50 pill, 20 px below the middle ──
+          Item {
+              id: loginBox
+              visible: card.main
+              // grows when the dots don't fit
+              width: Math.max(200, dots.count * 18 + 56)
+              height: 50
+              anchors.horizontalCenter: parent.horizontalCenter
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.verticalCenterOffset: 20
+              // dimmer while resting with nothing typed
+              opacity: card.awake || card.password !== "" ? 1 : 0.55
+              Behavior on opacity {
+                  NumberAnimation {
+                      duration: 180
+                      easing.type: Easing.OutCubic
+                  }
+              }
+              Behavior on width {
+                  NumberAnimation {
+                      duration: 180
+                      easing.type: Easing.OutCubic
+                  }
+              }
+
+              // shake on a wrong password
+              transform: Translate {
+                  id: shakeMove
+              }
+              SequentialAnimation {
+                  id: shake
+                  running: card.phase === "failed"
+                  NumberAnimation { target: shakeMove; property: "x"; to: -10; duration: 50 }
+                  NumberAnimation { target: shakeMove; property: "x"; to: 10; duration: 70 }
+                  NumberAnimation { target: shakeMove; property: "x"; to: -6; duration: 70 }
+                  NumberAnimation { target: shakeMove; property: "x"; to: 6; duration: 70 }
+                  NumberAnimation { target: shakeMove; property: "x"; to: 0; duration: 60 }
+              }
+
+              Rectangle {
+                  anchors.fill: parent
+                  radius: height / 2
+                  color: Theme.inner
+                  border.width: 3
+                  // green normally, yellow while checking, red when it failed
+                  border.color: card.phase === "checking" ? Theme.yellow : card.phase === "failed" ? Theme.red : Theme.accent
+                  Behavior on border.color {
+                      ColorAnimation {
+                          duration: 200
+                      }
+                  }
+              }
+
+              // The hint inside the box (an italic placeholder); fades
+              // out as you start typing and back in when the box is empty.
+              Text {
+                  anchors.centerIn: parent
+                  opacity: dots.count > 0 ? 0 : card.phase === "failed" ? 1 : 0.5
+                  text: card.phase === "failed" ? card.message : "Input Password..."
+                  color: card.phase === "failed" ? Theme.red : Theme.text
+                  font.family: Theme.font
+                  font.pixelSize: 14
+                  font.italic: true
+                  elide: Text.ElideRight
+                  width: Math.min(implicitWidth, parent.width - 32)
+                  Behavior on opacity {
+                      NumberAnimation {
+                          duration: 150
+                      }
+                  }
+              }
+
+              // The dots. Each one pops in when you type and fades out when
+              // you delete it; the row slides to stay centred.
+              ListView {
+                  id: dotsView
+                  y: (parent.height - height) / 2
+                  x: (parent.width - width) / 2
+                  width: Math.max(1, dots.count * 18 - 8)
+                  height: 10
+                  orientation: ListView.Horizontal
+                  interactive: false
+                  spacing: 8
+                  model: dots
+                  Behavior on x {
+                      NumberAnimation {
+                          duration: 160
+                          easing.type: Easing.OutCubic
+                      }
+                  }
+                  delegate: Rectangle {
+                      width: 10
+                      height: 10
+                      radius: 5
+                      color: card.phase === "checking" ? Theme.yellow : Theme.text
+                      Behavior on color {
+                          ColorAnimation {
+                              duration: 200
+                          }
+                      }
+                  }
+                  add: Transition {
+                      NumberAnimation {
+                          property: "opacity"
+                          from: 0
+                          to: 1
+                          duration: 160
+                      }
+                      NumberAnimation {
+                          property: "scale"
+                          from: 0.2
+                          to: 1
+                          duration: 220
+                          easing.type: Easing.OutBack
+                      }
+                  }
+                  remove: Transition {
+                      NumberAnimation {
+                          property: "opacity"
+                          to: 0
+                          duration: 140
+                      }
+                      NumberAnimation {
+                          property: "scale"
+                          to: 0.2
+                          duration: 140
+                      }
+                  }
+              }
+
+              // The real (invisible) text box that takes the keys.
+              TextField {
+                  id: field
+                  anchors.fill: parent
+                  anchors.leftMargin: 16
+                  anchors.rightMargin: 16
+                  background: null
+                  focus: card.main
+                  enabled: card.phase !== "launching" && card.phase !== "unlocking"
+                  echoMode: TextInput.Password
+                  color: "transparent"
+                  selectByMouse: false
+                  cursorDelegate: Item {}   // no text cursor
+                  text: card.password
+                  onTextEdited: card.typed(text)
+                  onAccepted: card.submit()
+                  Keys.onPressed: event => {
+                      card.activity();
+                      event.accepted = false;   // let the box handle the key too
+                  }
+                  Keys.onEscapePressed: card.escapePressed()
+              }
+          }
+
+          // who's logging in, and messages, under the box
+          Text {
+              visible: card.main
+              anchors.horizontalCenter: parent.horizontalCenter
+              anchors.top: loginBox.bottom
+              anchors.topMargin: 14
+              text: card.phase === "checking" ? "Checking..." : card.message !== "" && card.phase !== "failed" ? card.message : card.label
+              color: card.phase === "checking" ? Theme.yellow : Theme.text
+              opacity: loginBox.opacity * 0.9
+              font.family: Theme.font
+              font.pixelSize: 14
+              // soft shadow, so it stays readable on a bright wallpaper
+              layer.enabled: true
+              layer.effect: MultiEffect {
+                  shadowEnabled: true
+                  shadowBlur: 0.6
+                  shadowOpacity: 0.55
+                  shadowVerticalOffset: 2
+              }
+          }
+      }
+  '';
+
   environment.etc."greetd/greeter/shell.qml".text = ''
       // Login screen: Quickshell running inside its own little Hyprland, started by
-      // greetd. Looks like your hyprlock (blurred wallpaper, big clock, green pill
-      // password box). The bar at the top picks the session (desktop) and the
-      // wallpaper, and has suspend / reboot / power off.
+      // greetd. Blurred wallpaper, big clock, a pill password box: Backdrop.qml and
+      // LoginCard.qml, which the lock screen (lock.qml) uses too. The bar at the top
+      // picks the session (desktop) and the wallpaper, and has suspend / reboot /
+      // power off.
       //
       // Flow: type password, Enter -> greetd checks it -> the screen fades -> greetd
       // starts the session you picked -> this Hyprland exits.
@@ -835,7 +1204,7 @@ in
           property string message: ""     // shown under the box (errors, PAM messages)
           property string password: ""
 
-          // ── awake / resting, like hyprlock ──
+          // ── awake / resting ──
           // Typing or moving the mouse wakes the screen: the wallpaper blurs and darkens
           // more and the password box comes up to full strength. After a few quiet
           // seconds with nothing typed it relaxes again.
@@ -850,18 +1219,6 @@ in
               running: true
               onTriggered: if (root.password === "" && root.phase === "idle")
                   root.awake = false
-          }
-
-          // One entry per typed character; the dots in the box are drawn from this,
-          // so each one can fade in and out on its own.
-          ListModel {
-              id: dots
-          }
-          onPasswordChanged: {
-              while (dots.count < password.length)
-                  dots.append({ "n": dots.count });
-              while (dots.count > password.length)
-                  dots.remove(dots.count - 1);
           }
 
           // ── what you picked last time ──
@@ -1037,97 +1394,18 @@ in
                           onPositionChanged: root.wake()
                       }
 
-                      // ── wallpaper ──
-                      // Two pictures stacked: a new wallpaper loads into the hidden one,
-                      // then they cross-fade.
-                      Item {
-                          id: wallLayer
+                      // ── wallpaper (Backdrop.qml, shared with the lock screen) ──
+                      Backdrop {
+                          id: backdrop
                           anchors.fill: parent
-                          visible: false      // drawn through the blur below
-                          property string shown: ""
-                          property bool useB: false
-
-                          function show(path) {
-                              if (path === shown)
-                                  return;
-                              shown = path;
-                              const target = useB ? wallA : wallB;
-                              target.source = path !== "" ? "file://" + path : "";
-                              loaded(target);
-                          }
-                          function loaded(img) {
-                              if (img.status === Image.Ready && img.source.toString() === "file://" + shown) {
-                                  useB = img === wallB;
-                                  if (win.main)
-                                      root.wallReady = true;
-                              }
-                          }
-                          Component.onCompleted: show(root.wallpaper)
-                          Connections {
-                              target: root
-                              function onWallpaperChanged() {
-                                  wallLayer.show(root.wallpaper);
-                              }
-                          }
-
-                          Image {
-                              id: wallA
-                              anchors.fill: parent
-                              fillMode: Image.PreserveAspectCrop
-                              // load it at screen size, not the photo's full size (less to blur)
-                              sourceSize.width: width
-                              sourceSize.height: height
-                              asynchronous: true
-                              opacity: wallLayer.useB ? 0 : 1
-                              Behavior on opacity {
-                                  NumberAnimation {
-                                      duration: 500
-                                      easing.type: Easing.InOutQuad
-                                  }
-                              }
-                              onStatusChanged: wallLayer.loaded(wallA)
-                          }
-                          Image {
-                              id: wallB
-                              anchors.fill: parent
-                              fillMode: Image.PreserveAspectCrop
-                              sourceSize.width: width
-                              sourceSize.height: height
-                              asynchronous: true
-                              opacity: wallLayer.useB ? 1 : 0
-                              Behavior on opacity {
-                                  NumberAnimation {
-                                      duration: 500
-                                      easing.type: Easing.InOutQuad
-                                  }
-                              }
-                              onStatusChanged: wallLayer.loaded(wallB)
-                          }
-                      }
-                      // just blurred (no darkening); a little more blur while you're typing
-                      MultiEffect {
-                          anchors.fill: parent
-                          source: wallLayer
-                          blurEnabled: true
-                          blurMax: 48
-                          blur: root.awake ? 1.0 : 0.45
-                          Behavior on blur {
-                              NumberAnimation {
-                                  duration: 250
-                                  easing.type: Easing.OutCubic
-                              }
-                          }
-                          // start slightly zoomed and settle in
-                          scale: root.ready ? 1.0 : 1.06
-                          Behavior on scale {
-                              NumberAnimation {
-                                  duration: 900
-                                  easing.type: Easing.OutCubic
-                              }
-                          }
+                          wallpaper: root.wallpaper
+                          awake: root.awake
+                          settled: root.ready
+                          onShown: if (win.main)
+                              root.wallReady = true
                       }
                       Component.onCompleted: if (win.main) {
-                          field.forceActiveFocus();   // takes keys from the very first frame
+                          card.focusField();   // takes keys from the very first frame
                           if (hasKeyboard)
                               root.kbReady = true;
                       }
@@ -1148,232 +1426,31 @@ in
                           }
                       }
 
-                      // ── the clock: 64 px, 74 px above the middle (hyprlock's spot) ──
-                      SystemClock {
-                          id: clock
-                          precision: SystemClock.Minutes
-                      }
-                      Text {
-                          id: clockText
-                          anchors.horizontalCenter: parent.horizontalCenter
-                          anchors.bottom: parent.verticalCenter
-                          anchors.bottomMargin: 74 - height / 2
-                          text: Qt.formatTime(clock.date, "HH:mm")
-                          color: Theme.text
-                          font.family: Theme.font
-                          font.pixelSize: 64
-                          font.weight: 700
-                          // soft shadow, so it stays readable on a bright wallpaper
-                          layer.enabled: true
-                          layer.effect: MultiEffect {
-                              shadowEnabled: true
-                              shadowBlur: 0.6
-                              shadowOpacity: 0.55
-                              shadowVerticalOffset: 2
+                      // ── clock, password box and your name (LoginCard.qml, shared with the lock screen) ──
+                      LoginCard {
+                          id: card
+                          anchors.fill: parent
+                          main: win.main
+                          password: root.password
+                          phase: root.phase
+                          message: root.message
+                          awake: root.awake
+                          label: root.user.real !== "" ? root.user.real : root.user.name
+                          onTyped: text => {
+                              root.password = text;
+                              if (root.phase !== "checking")
+                                  root.message = "";   // typing again clears the old error
                           }
-                      }
-                      Text {
-                          anchors.horizontalCenter: parent.horizontalCenter
-                          anchors.bottom: clockText.top
-                          text: Qt.formatDate(clock.date, "dddd, MMMM d")
-                          color: Theme.text
-                          opacity: 0.85
-                          font.family: Theme.font
-                          font.pixelSize: 15
-                          // soft shadow, so it stays readable on a bright wallpaper
-                          layer.enabled: true
-                          layer.effect: MultiEffect {
-                              shadowEnabled: true
-                              shadowBlur: 0.6
-                              shadowOpacity: 0.55
-                              shadowVerticalOffset: 2
-                          }
-                      }
-
-                      // ── password box: 200 x 50 pill, 20 px below the middle ──
-                      Item {
-                          id: loginBox
-                          visible: win.main
-                          // grows when the dots don't fit, like hyprlock
-                          width: Math.max(200, dots.count * 18 + 56)
-                          height: 50
-                          anchors.horizontalCenter: parent.horizontalCenter
-                          anchors.verticalCenter: parent.verticalCenter
-                          anchors.verticalCenterOffset: 20
-                          // dimmer while resting with nothing typed
-                          opacity: root.awake || root.password !== "" ? 1 : 0.55
-                          Behavior on opacity {
-                              NumberAnimation {
-                                  duration: 180
-                                  easing.type: Easing.OutCubic
+                          onSubmit: root.login()
+                          onActivity: root.wake()
+                          onEscapePressed: {
+                              if (sessionMenu.open || userMenu.open || wallMenu.open) {
+                                  sessionMenu.open = false;
+                                  userMenu.open = false;
+                                  wallMenu.open = false;
+                              } else {
+                                  root.password = "";
                               }
-                          }
-                          Behavior on width {
-                              NumberAnimation {
-                                  duration: 180
-                                  easing.type: Easing.OutCubic
-                              }
-                          }
-
-                          // shake on a wrong password
-                          transform: Translate {
-                              id: shakeMove
-                          }
-                          SequentialAnimation {
-                              id: shake
-                              running: root.phase === "failed"
-                              NumberAnimation { target: shakeMove; property: "x"; to: -10; duration: 50 }
-                              NumberAnimation { target: shakeMove; property: "x"; to: 10; duration: 70 }
-                              NumberAnimation { target: shakeMove; property: "x"; to: -6; duration: 70 }
-                              NumberAnimation { target: shakeMove; property: "x"; to: 6; duration: 70 }
-                              NumberAnimation { target: shakeMove; property: "x"; to: 0; duration: 60 }
-                          }
-
-                          Rectangle {
-                              anchors.fill: parent
-                              radius: height / 2
-                              color: Theme.inner
-                              border.width: 3
-                              // green normally, yellow while checking, red when it failed
-                              border.color: root.phase === "checking" ? Theme.yellow : root.phase === "failed" ? Theme.red : Theme.accent
-                              Behavior on border.color {
-                                  ColorAnimation {
-                                      duration: 200
-                                  }
-                              }
-                          }
-
-                          // The hint inside the box (hyprlock's italic placeholder); fades
-                          // out as you start typing and back in when the box is empty.
-                          Text {
-                              anchors.centerIn: parent
-                              opacity: dots.count > 0 ? 0 : root.phase === "failed" ? 1 : 0.5
-                              text: root.phase === "failed" ? root.message : "Input Password..."
-                              color: root.phase === "failed" ? Theme.red : Theme.text
-                              font.family: Theme.font
-                              font.pixelSize: 14
-                              font.italic: true
-                              elide: Text.ElideRight
-                              width: Math.min(implicitWidth, parent.width - 32)
-                              Behavior on opacity {
-                                  NumberAnimation {
-                                      duration: 150
-                                  }
-                              }
-                          }
-
-                          // The dots. Each one pops in when you type and fades out when
-                          // you delete it; the row slides to stay centred.
-                          ListView {
-                              id: dotsView
-                              y: (parent.height - height) / 2
-                              x: (parent.width - width) / 2
-                              width: Math.max(1, dots.count * 18 - 8)
-                              height: 10
-                              orientation: ListView.Horizontal
-                              interactive: false
-                              spacing: 8
-                              model: dots
-                              Behavior on x {
-                                  NumberAnimation {
-                                      duration: 160
-                                      easing.type: Easing.OutCubic
-                                  }
-                              }
-                              delegate: Rectangle {
-                                  width: 10
-                                  height: 10
-                                  radius: 5
-                                  color: root.phase === "checking" ? Theme.yellow : Theme.text
-                                  Behavior on color {
-                                      ColorAnimation {
-                                          duration: 200
-                                      }
-                                  }
-                              }
-                              add: Transition {
-                                  NumberAnimation {
-                                      property: "opacity"
-                                      from: 0
-                                      to: 1
-                                      duration: 160
-                                  }
-                                  NumberAnimation {
-                                      property: "scale"
-                                      from: 0.2
-                                      to: 1
-                                      duration: 220
-                                      easing.type: Easing.OutBack
-                                  }
-                              }
-                              remove: Transition {
-                                  NumberAnimation {
-                                      property: "opacity"
-                                      to: 0
-                                      duration: 140
-                                  }
-                                  NumberAnimation {
-                                      property: "scale"
-                                      to: 0.2
-                                      duration: 140
-                                  }
-                              }
-                          }
-
-                          // The real (invisible) text box that takes the keys.
-                          TextField {
-                              id: field
-                              anchors.fill: parent
-                              anchors.leftMargin: 16
-                              anchors.rightMargin: 16
-                              background: null
-                              focus: win.main
-                              enabled: root.phase !== "launching"
-                              echoMode: TextInput.Password
-                              color: "transparent"
-                              selectByMouse: false
-                              cursorDelegate: Item {}   // no text cursor, like hyprlock
-                              text: root.password
-                              onTextEdited: {
-                                  root.password = text;
-                                  if (root.phase !== "checking")
-                                      root.message = "";   // typing again clears the old error
-                              }
-                              onAccepted: root.login()
-                              Keys.onPressed: event => {
-                                  root.wake();
-                                  event.accepted = false;   // let the box handle the key too
-                              }
-                              Keys.onEscapePressed: {
-                                  if (sessionMenu.open || userMenu.open || wallMenu.open) {
-                                      sessionMenu.open = false;
-                                      userMenu.open = false;
-                                      wallMenu.open = false;
-                                  } else {
-                                      root.password = "";
-                                  }
-                              }
-                          }
-                      }
-
-                      // who's logging in, and messages, under the box
-                      Text {
-                          visible: win.main
-                          anchors.horizontalCenter: parent.horizontalCenter
-                          anchors.top: loginBox.bottom
-                          anchors.topMargin: 14
-                          text: root.phase === "checking" ? "Checking..." : root.message !== "" && root.phase !== "failed" ? root.message : root.user.real !== "" ? root.user.real : root.user.name
-                          color: root.phase === "checking" ? Theme.yellow : Theme.text
-                          opacity: loginBox.opacity * 0.9
-                          font.family: Theme.font
-                          font.pixelSize: 14
-                          // soft shadow, so it stays readable on a bright wallpaper
-                          layer.enabled: true
-                          layer.effect: MultiEffect {
-                              shadowEnabled: true
-                              shadowBlur: 0.6
-                              shadowOpacity: 0.55
-                              shadowVerticalOffset: 2
                           }
                       }
 
@@ -1463,7 +1540,7 @@ in
                               root.sessionIndex = i;
                               open = false;
                               root.saveLast();
-                              field.forceActiveFocus();
+                              card.focusField();
                           }
                       }
                       DropList {
@@ -1476,7 +1553,7 @@ in
                               root.userIndex = i;
                               open = false;
                               root.saveLast();
-                              field.forceActiveFocus();
+                              card.focusField();
                           }
                       }
                       WallPicker {
@@ -1487,7 +1564,7 @@ in
                           onPicked: path => {
                               root.wallpaper = path;
                               root.saveLast();
-                              field.forceActiveFocus();
+                              card.focusField();
                           }
                       }
                   }
@@ -1504,6 +1581,300 @@ in
           }
       }
   '';
+
+  # The lock screen (replaces hyprlock): the same look as the login screen, built from
+  # the same files in this folder. Runs in your session, as you: the `lock` command in
+  # home.nix starts it (quickshell -p /etc/greetd/greeter/lock.qml).
+  environment.etc."greetd/greeter/lock.qml".text = ''
+      // Lock screen: the login screen's look, for when you're already logged in.
+      // The wallpaper, clock and password box are Backdrop.qml and LoginCard.qml, the
+      // same files the login screen (shell.qml) uses, so the two always match. What's
+      // different: it locks your session with the Wayland session lock (Hyprland shows
+      // nothing else until it's unlocked, and if this ever crashed the screen would
+      // stay locked, not open), and it checks your password with PAM (the
+      // "quickshell-lock" service in configuration.nix) instead of greetd.
+      //
+      // Started by `lock` (home.nix), which the power menu's Lock button runs. It runs
+      // as you, so it just reads these files.
+      //
+      // Keys: Enter = unlock, Esc = clear.
+      import QtQuick
+      import Quickshell
+      import Quickshell.Wayland
+      import Quickshell.Services.Pam
+
+      ShellRoot {
+          id: root
+
+          // ── filled in by configuration.nix ──
+          readonly property var users: ${greeterUsers}       // [{ name, real }]
+
+          readonly property string userName: Quickshell.env("USER")
+          readonly property var me: users.find(u => u.name === userName) || ({ "name": userName, "real": "" })
+          // the theme's wallpaper, the same one your desktop shows
+          readonly property string wallpaper: Quickshell.env("HOME") + "/.local/state/theme/wallpaper"
+
+          // "idle", "checking" (PAM is looking at the password), "failed", "unlocking"
+          property string phase: "idle"
+          property string message: ""
+          property string password: ""
+
+          // ── awake / resting, like the login screen ──
+          property bool awake: true
+          function wake() {
+              awake = true;
+              restTimer.restart();
+          }
+          Timer {
+              id: restTimer
+              interval: 6000
+              running: true
+              onTriggered: if (root.password === "" && root.phase === "idle")
+                  root.awake = false
+          }
+
+          // ── showing up ──
+          // Locks right away (black), then opens up from the middle once the wallpaper
+          // is on screen (or after 1.5 s if it never loads).
+          property bool ready: false
+          property real introP: 0     // 0 = black, 1 = lock screen fully visible
+          property real outP: 0       // 0 = visible, 1 = black (unlocking)
+          property real revealP: 0    // 0 = black, 1 = your desktop fully visible again
+          function show() {
+              if (ready)
+                  return;
+              ready = true;
+              introAnim.start();
+          }
+          Timer {
+              interval: 1500
+              running: true
+              onTriggered: root.show()
+          }
+          NumberAnimation {
+              id: introAnim
+              target: root
+              property: "introP"
+              from: 0
+              to: 1
+              duration: 500
+              easing.type: Easing.OutCubic
+          }
+
+          // ── checking the password ──
+          PamContext {
+              id: pam
+              config: "quickshell-lock"
+              onPamMessage: {
+                  if (responseRequired)
+                      respond(root.password);       // PAM asks for the password: what you typed
+                  else if (message !== "")
+                      root.message = message;       // info, e.g. "Place your finger..."
+              }
+              onCompleted: result => {
+                  if (result === PamResult.Success)
+                      root.unlock();
+                  else
+                      root.fail(result === PamResult.MaxTries ? "Too many tries, wait a moment" : "Wrong password");
+              }
+          }
+          function check() {
+              if (phase === "checking" || phase === "unlocking")
+                  return;
+              if (password === "") {
+                  message = "Type your password first";
+                  return;
+              }
+              message = "";
+              phase = "checking";
+              if (!pam.start())
+                  fail("Couldn't start checking the password");
+          }
+          function fail(why) {
+              phase = "failed";
+              message = why;
+              password = "";
+              failReset.restart();
+          }
+          Timer {
+              id: failReset
+              interval: 2500
+              onTriggered: if (root.phase === "failed")
+                  root.phase = "idle"
+          }
+
+          // ── unlocking ──
+          // The lock closes to black from the middle (outP). Then a black cover goes up
+          // over the desktop (the windows below, still hidden by the lock), the lock
+          // lets go, and the desktop opens up from the middle (revealP), the same way it
+          // does after you log in. Then this quits.
+          function unlock() {
+              phase = "unlocking";
+              outAnim.start();
+          }
+          NumberAnimation {
+              id: outAnim
+              target: root
+              property: "outP"
+              from: 0
+              to: 1
+              duration: 450
+              easing.type: Easing.InOutCubic
+              onFinished: letGoTimer.start()
+          }
+          Timer {
+              id: letGoTimer
+              interval: 120       // the black cover is up by now
+              onTriggered: {
+                  lock.locked = false;
+                  revealAnim.start();
+              }
+          }
+          NumberAnimation {
+              id: revealAnim
+              target: root
+              property: "revealP"
+              from: 0
+              to: 1
+              duration: 700
+              easing.type: Easing.InOutCubic
+              onFinished: Qt.quit()
+          }
+
+          // ── the lock itself: one surface per screen, the password box on the first ──
+          WlSessionLock {
+              id: lock
+              locked: true
+
+              WlSessionLockSurface {
+                  id: surface
+                  readonly property bool main: !!screen && screen.name === Quickshell.screens[0].name
+                  color: "black"
+
+                  Item {
+                      anchors.fill: parent
+
+                      // moving the mouse wakes the screen (hover only)
+                      MouseArea {
+                          anchors.fill: parent
+                          hoverEnabled: true
+                          acceptedButtons: Qt.NoButton
+                          onPositionChanged: root.wake()
+                      }
+
+                      Backdrop {
+                          anchors.fill: parent
+                          wallpaper: root.wallpaper
+                          awake: root.awake
+                          settled: root.ready
+                          onShown: root.show()
+                      }
+
+                      LoginCard {
+                          id: card
+                          anchors.fill: parent
+                          main: surface.main
+                          password: root.password
+                          phase: root.phase
+                          message: root.message
+                          awake: root.awake
+                          label: root.me.real !== "" ? root.me.real : root.me.name
+                          onTyped: text => {
+                              root.password = text;
+                              if (root.phase !== "checking")
+                                  root.message = "";   // typing again clears the old error
+                          }
+                          onSubmit: root.check()
+                          onActivity: root.wake()
+                          onEscapePressed: root.password = ""
+                          Component.onCompleted: if (surface.main)
+                              focusField()
+                      }
+
+                      // suspend / restart / power off, like the login screen's bar
+                      Rectangle {
+                          visible: surface.main
+                          anchors.horizontalCenter: parent.horizontalCenter
+                          anchors.top: parent.top
+                          anchors.topMargin: 12
+                          width: lockBar.implicitWidth + 16
+                          height: 38
+                          radius: height / 2
+                          color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.85)
+
+                          Row {
+                              id: lockBar
+                              anchors.centerIn: parent
+                              spacing: 6
+
+                              BarChip {
+                                  icon: "lock"
+                                  label: "Locked"
+                              }
+                              Rectangle {
+                                  width: 1
+                                  height: 18
+                                  anchors.verticalCenter: parent.verticalCenter
+                                  color: Theme.pill
+                              }
+                              BarChip {
+                                  icon: "bedtime"
+                                  onClicked: Quickshell.execDetached(["systemctl", "suspend"])
+                              }
+                              BarChip {
+                                  icon: "restart_alt"
+                                  onClicked: Quickshell.execDetached(["systemctl", "reboot"])
+                              }
+                              BarChip {
+                                  icon: "power_settings_new"
+                                  iconColor: Theme.red
+                                  onClicked: Quickshell.execDetached(["systemctl", "poweroff"])
+                              }
+                          }
+                      }
+                  }
+
+                  // opening up from the middle, and closing to black when unlocking
+                  CenterFade {
+                      anchors.fill: parent
+                      mode: root.phase === "unlocking" ? "cover" : "reveal"
+                      progress: root.phase === "unlocking" ? root.outP : root.introP
+                  }
+              }
+          }
+
+          // The black cover over your desktop for unlocking (see unlock() above). Made
+          // only then; the lock hides it until it lets go.
+          Variants {
+              model: root.phase === "unlocking" ? Quickshell.screens : []
+
+              PanelWindow {
+                  required property var modelData
+                  screen: modelData
+                  anchors {
+                      top: true
+                      bottom: true
+                      left: true
+                      right: true
+                  }
+                  exclusionMode: ExclusionMode.Ignore
+                  WlrLayershell.layer: WlrLayer.Overlay
+                  WlrLayershell.namespace: "unlock-fade"
+                  color: "transparent"
+                  mask: Region {}      // clicks go straight through
+
+                  CenterFade {
+                      anchors.fill: parent
+                      mode: "reveal"
+                      progress: root.revealP
+                  }
+              }
+          }
+      }
+  '';
+  # How the lock screen checks your password: PAM's normal password check, under its
+  # own name (/etc/pam.d/quickshell-lock), which is what lock.qml asks for.
+  security.pam.services.quickshell-lock = { };
 
   environment.sessionVariables = {
     # Fixes standard electron/chromium apps on Wayland too (any GPU)
@@ -1731,7 +2102,6 @@ in
     vscodium
     nixfmt
     kdePackages.qtdeclarative
-    hyprlock
     vlc
     fastfetch
     psmisc

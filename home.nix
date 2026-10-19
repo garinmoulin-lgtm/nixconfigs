@@ -19,8 +19,8 @@ let
 
   # ── The color themes ──
   # Every part of the desktop with colors in it reads them from here: the bar
-  # (Quickshell), kitty, rofi, hyprlock, GTK and Qt apps, the mouse cursor, and the
-  # login screen (configuration.nix reads this as my.themes, see "Themes" near the
+  # (Quickshell), kitty, rofi, GTK and Qt apps, the mouse cursor, and the login and
+  # lock screens (configuration.nix reads this as my.themes, see "Themes" near the
   # end of this file).
   #
   # All of them get built, and the theme button on the bar (or `theme <id>` in a
@@ -507,6 +507,13 @@ let
   themeState = "${config.home.homeDirectory}/.local/state/theme";
   themeCmd = "${themeSwitch}/bin/theme";
 
+  # `lock`: the lock screen. It lives with the login screen in /etc/greetd/greeter
+  # (lock.qml in configuration.nix) and looks the same, because it's built from the
+  # same pieces. -n: if it's already locked, don't start a second one.
+  lockCmd = pkgs.writeShellScriptBin "lock" ''
+    exec ${config.programs.quickshell.package}/bin/quickshell -n -p /etc/greetd/greeter/lock.qml "$@"
+  '';
+
   # ── Wallpaper animation ──
   # How awww changes the wallpaper: when you switch themes, and at login. The theme
   # command and the awww service both use these, and they're in your session's
@@ -599,65 +606,6 @@ let
             accent = "0xFF${lib.toUpper c.accent}";
             font_family = "SFProText Nerd Font";
             font_family_monospace = "SFMono Nerd Font";
-          };
-        }
-      );
-
-      # Lock screen. Measured from the reference screenshot and scaled to 1920x1080.
-      "hyprlock.conf" = pkgs.writeText "hyprlock.conf" (
-        lib.hm.generators.toHyprconf {
-          importantPrefixes = [
-            "$"
-            "monitor"
-          ];
-          attrs = {
-            general.hide_cursor = false; # cursor is visible in the reference
-
-            background = [
-              {
-                monitor = "";
-                path = "${themeState}/wallpaper"; # the theme's wallpaper
-                blur_passes = 3;
-              }
-            ];
-
-            # Clock: 07:44 — ink ~238x64px, centered 74px above screen center
-            label = [
-              {
-                monitor = "";
-                text = "$TIME";
-                color = "rgb(${c.fg})";
-                font_size = 64;
-                font_family = "SFMono Nerd Font";
-                position = "0, 74";
-                halign = "center";
-                valign = "center";
-              }
-            ];
-
-            # Password pill: ~225x56px, centered 27px below screen center
-            input-field = [
-              {
-                monitor = "";
-                size = "200, 50";
-                position = "0, -20";
-                halign = "center";
-                valign = "center";
-                rounding = -1; # full pill
-                outline_thickness = 3;
-                outer_color = "rgb(${c.accent})";
-                inner_color = "rgb(${c.surface})";
-                font_color = "rgb(${c.fg})";
-                font_family = "SFMono Nerd Font";
-                placeholder_text = "<i>Input Password...</i>";
-                fade_on_empty = false;
-                dots_center = true;
-                check_color = "rgb(${c.yellow})";
-                fail_color = "rgb(${c.red})";
-                dots_size = 0.33; # 0.2–0.8, fraction of the field height
-                dots_spacing = 0.15; # 0.0–1.0, gap between dots, relative to dot size
-              }
-            ];
           };
         }
       );
@@ -5393,7 +5341,7 @@ in
                                     {
                                         icon: "lock",
                                         name: "Lock",
-                                        cmd: ["hyprlock"]
+                                        cmd: ["${lockCmd}/bin/lock"]
                                     },
                                     {
                                         icon: "logout",
@@ -7835,6 +7783,10 @@ in
       hl.config({
           misc = {
               background_color = "rgb(000000)",
+              -- if the lock screen ever crashed, the screen stays locked (red); this lets
+              -- you start it again: on a text console (Ctrl+Alt+F3) log in and run
+              -- WAYLAND_DISPLAY=wayland-1 lock   (ls /run/user/$UID shows the wayland-N name)
+              allow_session_lock_restore = true,
               disable_hyprland_logo = true,
               disable_splash_rendering = true,
               force_default_wallpaper = 0,
@@ -8319,7 +8271,7 @@ in
   # button on the bar, or in a terminal:  theme  (lists them)  /  theme rose-pine
   #
   # How it fits together, since NixOS itself can't change after it's built:
-  #  - every theme's files (kitty colors, rofi colors, hyprlock.conf, ...) are made by
+  #  - every theme's files (kitty colors, rofi colors, qt6ct.conf, ...) are made by
   #    mkThemeDir and kept in the Nix store, one folder per theme
   #  - the apps' config files point at ~/.local/state/theme/current/<file>
   #  - ~/.local/state/theme/current is a link to one theme's folder. That link (and
@@ -8345,6 +8297,7 @@ in
 
   home.packages = [
     themeSwitch
+    lockCmd
   ]
   # every theme's GTK theme, icons and cursor, so they're there when you switch
   ++ lib.unique (
@@ -8428,11 +8381,4 @@ in
     '';
   };
 
-  # Lock screen (the power menu's lock button). hyprlock is installed system-wide in
-  # configuration.nix (needed for PAM); its config is the theme's ("hyprlock.conf" in
-  # mkThemeDir, with the layout and the theme's colors and wallpaper).
-  xdg.configFile."hypr/hyprlock.conf" = {
-    source = config.lib.file.mkOutOfStoreSymlink "${themeState}/current/hyprlock.conf";
-    force = true;
-  };
 }
