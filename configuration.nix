@@ -1939,7 +1939,8 @@ in
   # ── NVIDIA (active) ─────────────────────────────────────── start of block ──
   services.xserver.videoDrivers = [ "nvidia" ];
   hardware.nvidia = {
-    package = pkgs.nvidia_cachyos; # chaotic: prebuilt for linuxPackages_cachyos (was config.boot.kernelPackages.nvidiaPackages.latest)
+    package = config.boot.kernelPackages.nvidiaPackages.latest; # chaotic: prebuilt for linuxPackages_cachyos (was config.boot.kernelPackages.nvidiaPackages.latest)
+    # Nvidia-cachy pkg is pkgs.nvidia_cachyos
     open = true;
     modesetting.enable = true;
     powerManagement.enable = true;
@@ -2040,8 +2041,8 @@ in
     nssmdns4 = true;
     openFirewall = true;
   };
-
-  hardware.new-lg4ff.enable = true;
+  # For Logitech wheel support
+  # hardware.new-lg4ff.enable = true;
   services.udev.extraRules = ''
     SUBSYSTEM=="input", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
     KERNEL=="js*", SUBSYSTEM=="input", ATTRS{idVendor}=="046d", MODE="0666", GROUP="input"
