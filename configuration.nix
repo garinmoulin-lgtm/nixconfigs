@@ -115,7 +115,8 @@ in
 
   boot.loader.efi.canTouchEfiVariables = true;
   # Use latest kernel. You can switch to cachy (using chaotic flake) by appending _cachyos rather than _latest.
-  boot.kernelPackages = pkgs.linuxPackages_cachyos;
+  # If cachy doesn't work, just swap to _latest temporarily
+  boot.kernelPackages = pkgs.linuxPackages_latest;
 
   nix.settings.trusted-users = [
     "root"
