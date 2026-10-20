@@ -1892,6 +1892,8 @@ in
       nerd-fonts.jetbrains-mono
       nerd-fonts.symbols-only # Acts as a universal fallback for system icons
       material-symbols
+      corefonts
+      vista-fonts
 
       # Ioskeley Mono - the exact Berkeley Mono mimic configuration built over Iosevka
       # Options include: .normal, .normal-NF (Nerd Font patched), .condensed, etc.
