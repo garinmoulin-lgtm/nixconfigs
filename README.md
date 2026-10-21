@@ -148,6 +148,8 @@ Feel free to contribute!
 ## Current Wallpaper Collection (again, expect more in the future)
 <img src="https://i.imgur.com/T96Rzme.jpeg">
 <img src="https://i.imgur.com/fPfOXeh.jpeg">
+
 ## Demo
-![Demo](./demo.mp4)
+<video src="https://raw.githubusercontent.com/garinmoulin-lgtm/nixconfigs/main/demo.mp4" controls width="100%"></video>
+
 E-mail me for suggestions (for anything related to this page) at garinmoulin@gmail.com
