@@ -148,6 +148,6 @@ Feel free to contribute!
 ## Current Wallpaper Collection (again, expect more in the future)
 <img src="https://i.imgur.com/T96Rzme.jpeg">
 <img src="https://i.imgur.com/fPfOXeh.jpeg">
-
-[![Watch the video](https://www.youtube.com/watch?v=qGV3y57N0Cg)]
+## Demo
+<video src="https://www.youtube.com/watch?v=qGV3y57N0Cg">
 E-mail me for suggestions (for anything related to this page) at garinmoulin@gmail.com
