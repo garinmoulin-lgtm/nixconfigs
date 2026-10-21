@@ -149,5 +149,5 @@ Feel free to contribute!
 <img src="https://i.imgur.com/T96Rzme.jpeg">
 <img src="https://i.imgur.com/fPfOXeh.jpeg">
 ## Demo
-<video src="./demo.mp4">
+![Demo](./demo.gif)
 E-mail me for suggestions (for anything related to this page) at garinmoulin@gmail.com
