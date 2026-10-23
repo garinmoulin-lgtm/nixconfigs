@@ -6078,6 +6078,84 @@ in
                                         }
                                     }
                                 }
+
+                                // ── power profile (power-profiles-daemon) ──
+                                // Power saver, Balanced or Performance, for the whole computer.
+                                // Some programs can hold a profile while they run (a game asking
+                                // for Performance); that's listed under it.
+                                Rectangle {
+                                    width: parent.width
+                                    height: 1
+                                    color: Theme.pill
+                                }
+                                Item {
+                                    width: parent.width
+                                    height: 26
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "Power profile"
+                                        color: Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize
+                                        font.weight: 700
+                                        font.letterSpacing: Theme.letterSpacing
+                                    }
+                                    Row {
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 4
+                                        Repeater {
+                                            model: [
+                                                {
+                                                    profile: PowerProfile.PowerSaver,
+                                                    name: "Saver",
+                                                    tint: Theme.green
+                                                },
+                                                {
+                                                    profile: PowerProfile.Balanced,
+                                                    name: "Balanced",
+                                                    tint: Theme.blue
+                                                },
+                                                {
+                                                    profile: PowerProfile.Performance,
+                                                    name: "Performance",
+                                                    tint: Theme.orange
+                                                }
+                                            ]
+                                            Chip {
+                                                required property var modelData
+                                                // Performance only where the computer has it
+                                                visible: modelData.profile !== PowerProfile.Performance || PowerProfiles.hasPerformanceProfile
+                                                label: modelData.name
+                                                tint: modelData.tint
+                                                selected: PowerProfiles.profile === modelData.profile
+                                                onClicked: PowerProfiles.profile = modelData.profile
+                                            }
+                                        }
+                                    }
+                                }
+                                // why Performance is running slower than it should, if it is
+                                Text {
+                                    visible: PowerProfiles.profile === PowerProfile.Performance && PowerProfiles.degradationReason !== PerformanceDegradationReason.None
+                                    width: parent.width
+                                    wrapMode: Text.Wrap
+                                    text: "Held back: " + PerformanceDegradationReason.toString(PowerProfiles.degradationReason).toLowerCase()
+                                    color: Theme.orange
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                }
+                                // programs holding a profile
+                                Text {
+                                    visible: PowerProfiles.holds.length > 0
+                                    width: parent.width
+                                    wrapMode: Text.Wrap
+                                    text: PowerProfiles.holds.map(h => (h.applicationId || "A program") + " is holding " + PowerProfile.toString(h.profile)).join("\n")
+                                    color: Theme.text
+                                    opacity: 0.6
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                }
                             }
                         }
                         // ── Power menu ──
@@ -6499,7 +6577,7 @@ in
         property int padding: 12       // space between the popup's edge and your content
         property int curve: 14         // size of the two curves where the popup melts into the bar
         property int cornerRadius: 14  // roundness of the popup's two bottom corners
-        property int duration: 320       // slide-down (open) time in ms
+        property int duration: 320       // slide-down (open) time in ms, for an average-size popup
         property int closeDuration: 260  // slide-up (close) time in ms; closing a bit faster feels snappier
         // The slides' speed curves: cubic béziers [x1, y1, x2, y2], like CSS's
         // cubic-bezier(). Opening is a soft ease-out: quick out of the bar, then a long
@@ -6507,6 +6585,11 @@ in
         // instead of snapping. (Try them at cubic-bezier.com.)
         property var openCurve: [0.3, 0.6, 0.35, 1]
         property var closeCurve: [0.45, 0, 0.55, 1]
+        // A bigger popup travels further, so it gets a little longer (up to 1.2x for a
+        // very tall one, 0.9x for a small one) and moves at about the same pace either way.
+        function timeFor(base, height) {
+            return Math.round(base * (0.9 + 0.3 * Math.min(1, height / 900)));
+        }
         property int headroom: 240       // extra window height if the screen's size isn't known yet
 
         // The popup window's height. See implicitHeight in the PopupWindow below.
@@ -6547,6 +6630,9 @@ in
             grab.active = true
             // Opening: sliding down out of the bar (openCurve)
             closeSlide.stop()
+            resize.stop()
+            popup.shownHeight = popup.bodyHeight
+            openSlide.duration = root.timeFor(root.duration, popup.bodyHeight)
             openSlide.restart()
         }
 
@@ -6561,6 +6647,8 @@ in
             // Closing: back up into the bar (closeCurve). The window is hidden once
             // this finishes (see onFinished).
             openSlide.stop()
+            resize.stop()
+            closeSlide.duration = root.timeFor(root.closeDuration, popup.shownHeight)
             closeSlide.restart()
         }
 
@@ -6684,23 +6772,37 @@ in
             // list got a row longer. Now only the shape inside grows; the window stays.
             implicitHeight: Math.max(1, root.windowHeight)
             // only if the screen's size wasn't known when it opened (see fitWindow)
-            onBodyHeightChanged: if (root.open && bodyHeight > root.windowHeight)
-                root.fitWindow()
+            onBodyHeightChanged: {
+                if (root.open && bodyHeight > root.windowHeight)
+                    root.fitWindow();
+                // open (or opening): glide to the new size; closed: just take it
+                if (root.open) {
+                    // a bit longer for a bigger change, so a whole section appearing
+                    // doesn't rush and a single row doesn't drag (200 to 340 ms)
+                    resize.duration = Math.round(Math.min(340, 200 + Math.abs(bodyHeight - shownHeight) * 0.25));
+                    resize.to = bodyHeight;
+                    resize.restart();
+                } else if (!closeSlide.running) {
+                    shownHeight = bodyHeight;
+                }
+            }
             // Clicks only land on the shape. The empty part of the window below it lets
             // them through, as if the popup weren't there.
             mask: Region {
                 item: shape
             }
 
-            // The height the shape shows. It follows bodyHeight, and glides there when
-            // the content grows or shrinks while the popup is open (a row appearing).
-            property real shownHeight: bodyHeight
-            Behavior on shownHeight {
-                enabled: root.open && root.openness === 1
-                NumberAnimation {
-                    duration: 200
-                    easing.type: Easing.OutCubic
-                }
+            // The height the shape shows. It follows bodyHeight, and glides there on the
+            // same soft curve as opening (openCurve) when the content grows or shrinks
+            // while the popup is open: a row appearing, a tab switching, the weather
+            // arriving. (See onBodyHeightChanged above.)
+            property real shownHeight: 0
+            NumberAnimation {
+                id: resize
+                target: popup
+                property: "shownHeight"
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: root.openCurve.concat([1, 1])
             }
 
             color: "transparent"    // the shape below is what you see
