@@ -737,19 +737,39 @@ let
         # only written when it changes: Quickshell reloads the bar's colors on a write
         [ "$(cat "$state/name" 2>/dev/null || true)" = "$1" ] || printf '%s\n' "$1" >"$state/name"
       }
-      # The theme's wallpaper: the first picture (A to Z) in ~/Pictures/Wallpapers/<id>/,
-      # or ~/Pictures/Wallpapers/hk.png if that folder is empty or missing.
+      # The theme's wallpaper: the one you picked for it last (the bar's wallpaper
+      # widget, or `theme --wallpaper FILE`), kept in $state/wallpapers/<id>. If you
+      # haven't picked one (or it's gone), the first picture (A to Z) in
+      # ~/Pictures/Wallpapers/<id>/ (upper/lower case alike, the same order the
+      # wallpaper widget shows), or ~/Pictures/Wallpapers/hk.png if that's empty.
+      picked_for() {
+        local f
+        f=$(cat "$state/wallpapers/$1" 2>/dev/null || true)
+        if [ -n "$f" ] && [ -f "$f" ]; then echo "$f"; fi
+      }
       wallpaper_for() {
         local f
-        f=$(find "$HOME/Pictures/Wallpapers/$1" -maxdepth 1 -type f \
-          \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.gif' \) \
-          2>/dev/null | LC_ALL=C sort | head -n 1) || true # no folder yet is fine
+        f=$(picked_for "$1")
+        if [ -z "$f" ]; then
+          f=$(find "$HOME/Pictures/Wallpapers/$1" -maxdepth 1 -type f \
+            \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.gif' -o -iname '*.bmp' \) \
+            2>/dev/null | LC_ALL=C sort -f | head -n 1) || true # no folder yet is fine
+        fi
         echo "''${f:-$HOME/Pictures/Wallpapers/hk.png}"
       }
       use_wallpaper() {
         local f
         f=$(wallpaper_for "$1")
         [ "$(readlink "$state/wallpaper" 2>/dev/null || true)" = "$f" ] || relink "$f" "$state/wallpaper"
+        note_wallpaper
+      }
+      # The wallpaper's path as plain text, for the bar's wallpaper widget (it can't
+      # read links). Only written when it changes: the widget rereads it on a write.
+      note_wallpaper() {
+        local f
+        f=$(readlink "$state/wallpaper" 2>/dev/null || true)
+        [ "$(cat "$state/wallpaper.path" 2>/dev/null || true)" = "$f" ] && return 0
+        printf '%s\n' "$f" >"$state/wallpaper.path.new" && mv -f "$state/wallpaper.path.new" "$state/wallpaper.path"
       }
       # The login screen runs as its own user and can't look in your home folder, so
       # it gets the theme name, cursor and a copy of the wallpaper in /var/lib/greeter-theme.
@@ -820,12 +840,28 @@ let
           ;;
         -h | --help)
           echo "usage: theme [${lib.concatStringsSep "|" themes.order}]"
+          echo "       theme --wallpaper FILE   (this theme's wallpaper, remembered for it)"
+          ;;
+        --wallpaper)
+          f=$(realpath -s -- "''${2-}" 2>/dev/null || true)
+          if [ -z "''${2-}" ] || [ ! -f "$f" ]; then
+            echo "theme: no picture at: ''${2-}" >&2
+            exit 1
+          fi
+          id=$(current)
+          mkdir -p "$state/wallpapers"
+          printf '%s\n' "$f" >"$state/wallpapers/$id"
+          use_wallpaper "$id"
+          awww img "$state/wallpaper" >/dev/null 2>&1 || true
+          systemctl --user start --no-block rofi-wallpaper.service || true
+          sync_greeter
           ;;
         --refresh)
           # home-manager runs this on every rebuild: the theme folders get new store
           # paths, so the link is pointed at this build's copy of the same theme
           use "$(current)"
           [ -e "$state/wallpaper" ] || use_wallpaper "$(current)"
+          note_wallpaper
           ;;
         --login)
           # at login (theme-session service): pick up new pictures in the folder too
@@ -1164,7 +1200,6 @@ in
                     return;
                 // your own order from here on: the sort chip goes off
                 queueSort = "";
-                unsortedIds = [];
                 send(["playlist-move", from, to > from ? to + 1 : to]);
             }
             // Sort the whole queue by "album", "artist" or "title" (the song that's
@@ -1173,27 +1208,16 @@ in
             // playlist-move that drag-to-reorder uses. Songs that aren't in the library
             // (so have no tags) go to the end.
             //
-            // The queue sort is a mode, like the library's: the chip stays lit while it's on,
-            // songs you add get sorted in, and clicking the lit chip again turns it off and
-            // puts the queue back the way it was before (songs added since go at the end).
-            // Dragging a song turns it off too, keeping the order you made.
+            // The queue sort is a mode: the chip stays lit (green) while it's on, and songs
+            // you add get sorted in. Clicking the lit chip again doesn't turn it off; it
+            // stays on until you change the order yourself (dragging a song, see move()),
+            // or pick another sort.
             property string queueSort: ""     // "", "album", "artist" or "title"
-            property var unsortedIds: []      // mpv entry ids in the order from before the sort
             property var sortedIds: ({})      // ids the sort has seen (id -> true)
             property var expectIds: null      // the order our moves will end on; null = not busy
             function setQueueSort(by) {
-                if (by === queueSort) {
-                    // off: back to the old order, then anything newer as it is now
-                    const ids = queue.map(e => e.id);
-                    const old = unsortedIds.filter(id => ids.includes(id));
-                    const order = old.concat(ids.filter(id => !old.includes(id)));
-                    queueSort = "";
-                    unsortedIds = [];
-                    applyOrder(order.map(id => queue.find(e => e.id === id)));
+                if (by === queueSort)
                     return;
-                }
-                if (queueSort === "")
-                    unsortedIds = queue.map(e => e.id);
                 queueSort = by;
                 sortQueue(by);
             }
@@ -1209,12 +1233,10 @@ in
             function checkSort() {
                 if (queueSort === "")
                     return;
-                // songs added while sorted: remember them for "off", and sort them in
+                // songs added while sorted: sort them in
                 const fresh = queue.filter(e => !sortedIds[e.id]);
-                if (fresh.length > 0) {
-                    unsortedIds = unsortedIds.concat(fresh.map(e => e.id));
+                if (fresh.length > 0)
                     sortQueue(queueSort);
-                }
             }
             Timer {
                 // in case mpv never reports the exact order we expected
@@ -2740,13 +2762,18 @@ in
                                     leftPadding: 8
                                     rightPadding: 8
                                     wrapMode: Text.Wrap
-                                    text: "Wallpaper: the first picture in\n~/Pictures/Wallpapers/" + Theme.current + "/"
+                                    text: "Wallpapers: ~/Pictures/Wallpapers/" + Theme.current + "/\nPick one with the wallpaper button next to this one."
                                     color: Theme.text
                                     opacity: 0.6
                                     font.family: Theme.font
                                     font.pixelSize: Theme.textSize * 0.85
                                 }
                             }
+                        }
+
+                        // ── Wallpaper: pick one from the theme's folder (Wallpapers.qml) ──
+                        Wallpapers {
+                            anchors.verticalCenter: parent.verticalCenter
                         }
 
                         Widget {
@@ -3002,6 +3029,20 @@ in
                                             recent: (a, b) => (b.added - a.added) || az(a, b)
                                         }[groupSort] || az;
                                         return shown.sort(cmp);
+                                    }
+
+                                    // the queue, narrowed down by its search box (title, artist, album,
+                                    // or the file name for songs that aren't in the library)
+                                    readonly property string queueQuery: queueSearch.text.trim().toLowerCase()
+                                    readonly property var queueShown: {
+                                        const q = queueQuery;
+                                        if (q === "")
+                                            return music.queue;
+                                        return music.queue.filter(e => {
+                                            const s = music.byPath[e.filename];
+                                            const text = s ? s.title + " " + s.artist + " " + s.album : e.filename.split("/").pop();
+                                            return text.toLowerCase().includes(q);
+                                        });
                                     }
 
                                     // seconds -> "m:ss"
@@ -3292,11 +3333,35 @@ in
                                             Chip {
                                                 required property var modelData
                                                 label: modelData.name
-                                                // lit while the queue is kept sorted this way; click it
-                                                // again to put the queue back how it was
+                                                // lit while the queue is kept sorted this way, until
+                                                // you drag a song somewhere else
                                                 selected: music.queueSort === modelData.id
                                                 onClicked: music.setQueueSort(modelData.id)
                                             }
+                                        }
+                                    }
+
+                                    // ── queue: search it ──
+                                    // While you're searching, dragging is off (the list has gaps, so
+                                    // there's no telling where a dropped song should land). Clicking a
+                                    // song still jumps to it.
+                                    TextField {
+                                        id: queueSearch
+                                        visible: lib.tab === "queue" && music.queue.length > 0
+                                        width: parent.width
+                                        placeholderText: "Search the queue"
+                                        placeholderTextColor: Theme.pillIcon
+                                        color: Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize
+                                        leftPadding: 12
+                                        rightPadding: 12
+                                        Keys.onEscapePressed: text = ""
+                                        background: Rectangle {
+                                            radius: height / 2
+                                            color: Theme.bg
+                                            border.width: 1
+                                            border.color: queueSearch.activeFocus ? Theme.accent : Theme.pillIcon
                                         }
                                     }
 
@@ -3309,7 +3374,7 @@ in
                                             if (!music.connected)
                                                 return "The player isn't running. Start it with:\nsystemctl --user start music-player";
                                             if (lib.tab === "queue")
-                                                return music.queue.length === 0 ? "The queue is empty." : "";
+                                                return music.queue.length === 0 ? "The queue is empty." : lib.queueShown.length === 0 ? "Nothing in the queue matches." : "";
                                             if (music.songs.length === 0)
                                                 return music.scanning ? "Scanning ~/Music..." : "No songs found in ~/Music.";
                                             if (lib.view !== "songs" && !lib.pick)
@@ -3718,7 +3783,7 @@ in
                                     // ── the queue ──
                                     ListView {
                                         id: queueList
-                                        visible: lib.tab === "queue" && music.queue.length > 0
+                                        visible: lib.tab === "queue" && lib.queueShown.length > 0
                                         width: parent.width
                                         height: 356
                                         clip: true
@@ -3728,7 +3793,7 @@ in
                                         // makes the ListView throw every row away and rebuild the list on
                                         // each mpv update, which is what jumped it back to the top after a drop.
                                         model: ScriptModel {
-                                            values: music.queue
+                                            values: lib.queueShown
                                         }
                                         boundsBehavior: Flickable.StopAtBounds
                                         // no flicking the list while a row is being dragged
@@ -3866,6 +3931,8 @@ in
                                             required property int index
                                             // the library's info for this file (title, cover...), if it's in the library
                                             readonly property var info: music.byPath[modelData.filename] ?? null
+                                            // where it is in mpv's queue (not the same as the row while searching)
+                                            readonly property int queueIndex: lib.queueQuery === "" ? index : music.queue.findIndex(e => e.id === modelData.id)
 
                                             // Where this row should sit while something is dragged:
                                             // the dragged row follows the mouse, the rows it passes
@@ -3924,13 +3991,14 @@ in
                                                 anchors.fill: parent
                                                 hoverEnabled: true
                                                 cursorShape: Qt.PointingHandCursor
-                                                onClicked: music.jumpTo(entry.index)
+                                                onClicked: music.jumpTo(entry.queueIndex)
 
                                                 // grab here and drag up or down to move the song
                                                 Text {
                                                     id: dragHandle
                                                     x: 4
                                                     anchors.verticalCenter: parent.verticalCenter
+                                                    visible: lib.queueQuery === ""     // no dragging while searching
                                                     text: "drag_indicator"
                                                     color: Theme.text
                                                     opacity: entryMouse.containsMouse || entry.dragged ? 0.8 : 0.3
@@ -4032,7 +4100,7 @@ in
                                                     visible: entryMouse.containsMouse        // only while hovered
                                                     icon: "close"
                                                     iconColor: Theme.red
-                                                    onClicked: music.remove(entry.index)
+                                                    onClicked: music.remove(entry.queueIndex)
                                                 }
                                             }
                                         }
@@ -5536,106 +5604,10 @@ in
                                 }
                             }
                         }
-                        Widget {
+                        // ── Clock: calendar, events, timers, stopwatch (Clock.qml) ──
+                        Clock {
                             anchors.verticalCenter: parent.verticalCenter
-
-                            button: Pill {
-                                icon: "schedule"
-                                iconColor: Theme.red
-                                text: Qt.formatDateTime(clock.date, "hh:mm AP")
-                            }
-
-                            Column {
-                                id: cal
-                                spacing: 6
-
-                                // the date being shown; updates by itself because clock.date does
-                                readonly property date now: clock.date
-
-                                // ── Time ──
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: Qt.formatDateTime(cal.now, "hh:mm AP")
-                                    color: Theme.text
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 2.4
-                                    font.weight: 700
-                                    font.letterSpacing: Theme.letterSpacing
-                                }
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    bottomPadding: 6
-                                    text: Qt.formatDateTime(cal.now, "dddd, MMMM d")
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize
-                                    font.weight: 600
-                                }
-
-                                // ── Month label ──
-                                Text {
-                                    text: Qt.formatDateTime(cal.now, "MMMM yyyy")
-                                    color: Theme.accent
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 1.1
-                                    font.weight: 700
-                                    font.letterSpacing: Theme.letterSpacing
-                                }
-
-                                // ── Weekday names: Sun Mon Tue ... ──
-                                DayOfWeekRow {
-                                    width: grid.width
-                                    delegate: Text {
-                                        required property string shortName
-                                        text: shortName
-                                        horizontalAlignment: Text.AlignHCenter
-                                        color: Theme.text
-                                        opacity: 0.6
-                                        font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 0.85
-                                        font.weight: 600
-                                    }
-                                }
-
-                                // ── The month ──
-                                MonthGrid {
-                                    id: grid
-                                    width: 260
-                                    height: 200
-                                    month: cal.now.getMonth()        // 0 = January, same as MonthGrid
-                                    year: cal.now.getFullYear()
-
-                                    delegate: Item {
-                                        required property var model
-                                        // compared against the clock, so it moves to the new day at midnight
-                                        readonly property bool isToday: model.day === cal.now.getDate() && model.month === cal.now.getMonth() && model.year === cal.now.getFullYear()
-
-                                        implicitWidth: 30
-                                        implicitHeight: 26
-
-                                        // highlight behind today
-                                        Rectangle {
-                                            anchors.centerIn: parent
-                                            width: 26
-                                            height: 26
-                                            radius: 13
-                                            color: Theme.accent
-                                            visible: parent.isToday
-                                        }
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: parent.model.day
-                                            color: parent.isToday ? Theme.bg : Theme.text
-                                            // days from the previous / next month are dimmed
-                                            opacity: parent.model.month === grid.month ? 1 : 0.3
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize
-                                            font.weight: parent.isToday ? 700 : 500
-                                        }
-                                    }
-                                }
-                            }
+                            now: clock.date
                         }
                         // ── System monitor ──
                         // Bar: the CPU package temperature. Popup: a graph of the last minute, every
@@ -6527,17 +6499,28 @@ in
         property int padding: 12       // space between the popup's edge and your content
         property int curve: 14         // size of the two curves where the popup melts into the bar
         property int cornerRadius: 14  // roundness of the popup's two bottom corners
-        property int duration: 350       // slide-down (open) time in ms
+        property int duration: 320       // slide-down (open) time in ms
         property int closeDuration: 260  // slide-up (close) time in ms; closing a bit faster feels snappier
-        property int headroom: 240       // extra (empty, click-through) window height, so new rows fit
+        // The slides' speed curves: cubic béziers [x1, y1, x2, y2], like CSS's
+        // cubic-bezier(). Opening is a soft ease-out: quick out of the bar, then a long
+        // gentle settle. Closing is a light ease-in-out, so it's pulled back in smoothly
+        // instead of snapping. (Try them at cubic-bezier.com.)
+        property var openCurve: [0.3, 0.6, 0.35, 1]
+        property var closeCurve: [0.45, 0, 0.55, 1]
+        property int headroom: 240       // extra window height if the screen's size isn't known yet
 
         // The popup window's height. See implicitHeight in the PopupWindow below.
+        // It's the whole screen below the bar, every time: the empty part is
+        // invisible and click-through, and the popup never has to make its window
+        // bigger while it's open. (Growing an open popup's window didn't always take:
+        // the weather card, filling in after its data arrived on the first click,
+        // got its bottom cut off flat, rounded corners and all.) Not taller than
+        // that, or Hyprland would move it.
         property real windowHeight: 0
         function fitWindow() {
             const bar = root.QsWindow.window;
-            // never taller than the screen below the bar, or Hyprland would move it
-            const room = bar && bar.screen ? bar.screen.height - Theme.barHeight : 100000;
-            windowHeight = Math.max(popup.bodyHeight, Math.min(popup.bodyHeight + headroom, room));
+            const room = bar && bar.screen ? bar.screen.height - Theme.barHeight : 0;
+            windowHeight = room > 0 ? room : popup.bodyHeight + headroom;
         }
 
         // true while the popup is open (or opening)
@@ -6562,11 +6545,9 @@ in
             root.open = true
             grabBar = false
             grab.active = true
-            // Opening: starts fast and settles (OutCubic), sliding down out of the bar.
-            slide.duration = root.duration
-            slide.easing.type = Easing.OutCubic
-            slide.to = 1
-            slide.restart()
+            // Opening: sliding down out of the bar (openCurve)
+            closeSlide.stop()
+            openSlide.restart()
         }
 
         function closePopup() {
@@ -6577,19 +6558,29 @@ in
             grabBar = false
             if (Ui.openWidget === root)
                 Ui.openWidget = null
-            // Closing: the same slide played backwards. The mirror of "starts fast and
-            // settles" is "starts gently and speeds up", so it gets pulled back into
-            // the bar. InQuad instead of InCubic so it reacts right away on click.
-            slide.duration = root.closeDuration
-            slide.easing.type = Easing.InQuad
-            slide.to = 0
-            slide.restart()      // the window is hidden once this finishes (see onFinished)
+            // Closing: back up into the bar (closeCurve). The window is hidden once
+            // this finishes (see onFinished).
+            openSlide.stop()
+            closeSlide.restart()
         }
 
         NumberAnimation {
-            id: slide
+            id: openSlide
             target: root
             property: "openness"
+            to: 1
+            duration: root.duration
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: root.openCurve.concat([1, 1])
+        }
+        NumberAnimation {
+            id: closeSlide
+            target: root
+            property: "openness"
+            to: 0
+            duration: root.closeDuration
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: root.closeCurve.concat([1, 1])
             onFinished: if (root.openness === 0) popup.visible = false
         }
 
@@ -6665,6 +6656,12 @@ in
                 // popup can sit on the bar's bottom edge.
                 window: root.QsWindow.window
 
+                // Never move it up or down to make it fit. The window reaches the bottom
+                // of the screen (see fitWindow), and Hyprland was sliding it up a few
+                // pixels to fit, which hid most of the two curves into the bar behind
+                // the bar itself. Sideways is still fine (a popup near the screen's edge).
+                adjustment: PopupAdjustment.SlideX
+
                 // Runs right before the popup is placed. Item positions aren't reactive,
                 // so the position is worked out here instead of in a binding.
                 onAnchoring: {
@@ -6681,11 +6678,12 @@ in
             readonly property real bodyWidth: root.popupWidth > 0 ? root.popupWidth : Math.ceil(area.childrenRect.width + root.padding * 2)
             readonly property real bodyHeight: root.popupHeight > 0 ? root.popupHeight : Math.ceil(area.childrenRect.height + root.padding * 2)
             implicitWidth: bodyWidth + root.curve * 2
-            // The window is made taller than the content (by root.headroom) and doesn't
-            // shrink while it's open. Resizing a popup window makes it flash for a frame,
+            // The window is as tall as the screen below the bar (see fitWindow) and doesn't
+            // change while it's open. Resizing a popup window makes it flash for a frame,
             // which is what happened every time Bluetooth or Wi-Fi found something and the
             // list got a row longer. Now only the shape inside grows; the window stays.
             implicitHeight: Math.max(1, root.windowHeight)
+            // only if the screen's size wasn't known when it opened (see fitWindow)
             onBodyHeightChanged: if (root.open && bodyHeight > root.windowHeight)
                 root.fitWindow()
             // Clicks only land on the shape. The empty part of the window below it lets
@@ -6711,7 +6709,8 @@ in
             // If the compositor ever hides the popup by itself, skip the animation
             // and reset so the next click opens it again.
             onClosed: {
-                slide.stop()
+                openSlide.stop()
+                closeSlide.stop()
                 grab.active = false
                 root.openness = 0
                 root.open = false
@@ -6789,6 +6788,1270 @@ in
                 }
             }
 
+        }
+    }
+  '';
+
+  # Calendar events, timers and the stopwatch behind the clock widget (Clock.qml).
+  xdg.configFile."quickshell/Planner.qml".text = ''
+    pragma Singleton
+
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+
+    // Everything the clock widget keeps: calendar events, timers and the stopwatch.
+    // One copy for every monitor's bar, saved in ~/.local/state/quickshell/planner.json,
+    // so it all carries on after Quickshell restarts or the computer sleeps. That works
+    // because times are kept as clock times ("ends at 14:05:30"), not as counters.
+    //
+    // A timer that runs out, and an event with a time when it comes, send a notification
+    // (it shows up top right like any other) and play a sound.
+    Singleton {
+        id: p
+
+        readonly property string stateDir: Quickshell.env("HOME") + "/.local/state/quickshell"
+
+        // [{ id, date: "2026-10-23", time: "14:30" ("" = all day), title, notified }]
+        property var events: []
+        // [{ id, label, total, end, left, done }], all in ms. While running, `end` is when
+        // it runs out (Date.now() time); while paused, end is 0 and `left` is what's left.
+        property var timers: []
+        // the stopwatch: when the current run started (0 = stopped), plus earlier runs
+        property double swStart: 0
+        property double swBase: 0
+        property var laps: []          // total time at each lap, first lap first
+
+        readonly property bool swRunning: swStart > 0
+
+        // "now", updated by the ticker below (4 times a second while a timer runs)
+        property double now: Date.now()
+
+        // the running timer that ends first (for the bar), or null
+        readonly property var nextTimer: {
+            let best = null;
+            for (const t of timers)
+                if (!t.done && t.end > 0 && (!best || t.end < best.end))
+                    best = t;
+            return best;
+        }
+        readonly property bool timersRunning: nextTimer !== null
+
+        // how many events each day has: { "2026-10-23": 2, ... } (the calendar's dots)
+        readonly property var eventDays: {
+            const m = {};
+            for (const e of events)
+                m[e.date] = (m[e.date] || 0) + 1;
+            return m;
+        }
+
+        // ── the ticker: runs out timers and sends event reminders ──
+        Timer {
+            interval: p.timersRunning ? 250 : 10000
+            running: true
+            repeat: true
+            triggeredOnStart: true
+            onTriggered: {
+                p.now = Date.now();
+                p.check();
+            }
+        }
+        function check() {
+            let changed = false;
+            const ts = timers.map(t => {
+                if (t.done || t.end === 0 || now < t.end)
+                    return t;
+                changed = true;
+                ring("Timer done", t.label !== "" ? t.label : fmtLength(t.total) + " timer");
+                return Object.assign({}, t, { "done": true });
+            });
+            const es = events.map(e => {
+                if (e.notified || e.time === "")
+                    return e;
+                const due = dueOf(e);
+                if (now < due)
+                    return e;
+                changed = true;
+                // missed by more than 15 minutes (Quickshell or the computer was off): skip it
+                if (now - due < 15 * 60000)
+                    ring(e.title, fmtTime(e.time));
+                return Object.assign({}, e, { "notified": true });
+            });
+            if (changed) {
+                timers = ts;
+                events = es;
+                save();
+            }
+        }
+        function ring(title, body) {
+            Quickshell.execDetached(["${pkgs.libnotify}/bin/notify-send", "-a", "Clock", "-i", "alarm", title, body]);
+            Quickshell.execDetached(["${pkgs.pipewire}/bin/pw-play", "${pkgs.sound-theme-freedesktop}/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga"]);
+        }
+
+        // ── saving and loading ──
+        FileView {
+            id: file
+            path: p.stateDir + "/planner.json"
+            blockLoading: true
+            printErrors: false
+        }
+        Component.onCompleted: {
+            try {
+                const s = JSON.parse(file.text() || "{}");
+                events = s.events || [];
+                timers = s.timers || [];
+                swStart = s.swStart || 0;
+                swBase = s.swBase || 0;
+                laps = s.laps || [];
+            } catch (e) {}
+        }
+        // written to a new file that then replaces the old one, so it's never half-written
+        function save() {
+            Quickshell.execDetached(["sh", "-c", "mkdir -p \"$1\" && printf '%s' \"$2\" > \"$1/planner.json.$$\" && mv -f \"$1/planner.json.$$\" \"$1/planner.json\"", "sh", stateDir, JSON.stringify({
+                    "events": events,
+                    "timers": timers,
+                    "swStart": swStart,
+                    "swBase": swBase,
+                    "laps": laps
+                })]);
+        }
+        function newId() {
+            return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        }
+
+        // ── dates and times ──
+        // a date as the key events are filed under: "2026-10-23"
+        function key(d) {
+            return Qt.formatDate(d, "yyyy-MM-dd");
+        }
+        function dateOf(k) {
+            const a = k.split("-").map(Number);
+            return new Date(a[0], a[1] - 1, a[2]);
+        }
+        function dueOf(e) {
+            const d = dateOf(e.date);
+            const t = e.time.split(":").map(Number);
+            d.setHours(t[0], t[1], 0, 0);
+            return d.getTime();
+        }
+        // what you type for an event's time -> "HH:MM" (24-hour), "" for none (all day),
+        // or null if it isn't a time. "2pm", "2:30 pm", "2:30p", "14:30", "9" all work.
+        function parseTime(text) {
+            const t = text.trim().toLowerCase().replace(/\s+/g, "").replace(/\./g, "");
+            if (t === "")
+                return "";
+            const m = t.match(/^(\d{1,2})(?::?(\d{2}))?(am|pm|a|p)?$/);
+            if (!m)
+                return null;
+            let h = Number(m[1]);
+            const min = m[2] ? Number(m[2]) : 0;
+            if (min > 59)
+                return null;
+            if (m[3]) {
+                if (h < 1 || h > 12)
+                    return null;
+                const pm = m[3][0] === "p";
+                if (pm && h < 12)
+                    h += 12;
+                if (!pm && h === 12)
+                    h = 0;
+            } else if (h > 23) {
+                return null;
+            }
+            return String(h).padStart(2, "0") + ":" + String(min).padStart(2, "0");
+        }
+        // "14:30" -> "2:30 PM" (your locale's clock)
+        function fmtTime(hm) {
+            if (hm === "")
+                return "All day";
+            const t = hm.split(":").map(Number);
+            return Qt.formatTime(new Date(2000, 0, 1, t[0], t[1]), Qt.locale().timeFormat(Locale.ShortFormat));
+        }
+        // what you type for a timer's length -> ms, or 0 if it isn't one.
+        // "5" = 5 minutes, "1:30" = 1 min 30 s, "1:00:00" = an hour, "1h 20m", "90s", "2.5"
+        function parseDuration(text) {
+            const t = text.trim().toLowerCase().replace(/\s+/g, "");
+            if (t === "")
+                return 0;
+            if (/^\d+(\.\d+)?$/.test(t))
+                return Math.round(Number(t) * 60000);
+            if (/^\d+(:\d{1,2}){1,2}$/.test(t)) {
+                const a = t.split(":").map(Number);
+                const s = a.length === 3 ? a[0] * 3600 + a[1] * 60 + a[2] : a[0] * 60 + a[1];
+                return s * 1000;
+            }
+            const m = t.match(/^(?:(\d+(?:\.\d+)?)h)?(?:(\d+)m(?:in)?)?(?:(\d+)s)?$/);
+            if (!m || (!m[1] && !m[2] && !m[3]))
+                return 0;
+            return Math.round(((Number(m[1]) || 0) * 3600 + (Number(m[2]) || 0) * 60 + (Number(m[3]) || 0)) * 1000);
+        }
+        // ms -> "4:05", or "1:04:05" from an hour up (rounded up: "0:01" until it's done)
+        function fmtLeft(ms) {
+            const s = Math.ceil(Math.max(0, ms) / 1000);
+            const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+            const ss = String(sec).padStart(2, "0");
+            return h > 0 ? h + ":" + String(m).padStart(2, "0") + ":" + ss : m + ":" + ss;
+        }
+        // ms -> "5 min", "1 h 30 min", "45 s"
+        function fmtLength(ms) {
+            const s = Math.round(ms / 1000);
+            const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+            const out = [];
+            if (h > 0)
+                out.push(h + " h");
+            if (m > 0)
+                out.push(m + " min");
+            if (sec > 0 || out.length === 0)
+                out.push(sec + " s");
+            return out.join(" ");
+        }
+        // ms -> "01:23.45", or "1:01:23.45" from an hour up
+        function fmtWatch(ms) {
+            const cs = Math.floor(Math.max(0, ms) / 10);
+            const h = Math.floor(cs / 360000), m = Math.floor(cs % 360000 / 6000), s = Math.floor(cs % 6000 / 100), c = cs % 100;
+            const tail = String(s).padStart(2, "0") + "." + String(c).padStart(2, "0");
+            return h > 0 ? h + ":" + String(m).padStart(2, "0") + ":" + tail : String(m).padStart(2, "0") + ":" + tail;
+        }
+
+        // ── events ──
+        function eventsOn(k) {
+            return events.filter(e => e.date === k).sort((a, b) => a.time === b.time ? 0 : a.time === "" ? -1 : b.time === "" ? 1 : a.time < b.time ? -1 : 1);
+        }
+        function addEvent(k, time, title) {
+            const e = {
+                "id": newId(),
+                "date": k,
+                "time": time,
+                "title": title,
+                "notified": false
+            };
+            // already past: no reminder for it
+            if (time !== "" && dueOf(e) <= Date.now())
+                e.notified = true;
+            events = events.concat([e]);
+            save();
+        }
+        function removeEvent(id) {
+            events = events.filter(e => e.id !== id);
+            save();
+        }
+
+        // ── timers ──
+        function left(t) {
+            return t.done ? 0 : t.end > 0 ? Math.max(0, t.end - now) : t.left;
+        }
+        function addTimer(ms, label) {
+            if (ms <= 0)
+                return;
+            now = Date.now();
+            timers = [{
+                    "id": newId(),
+                    "label": label,
+                    "total": ms,
+                    "end": now + ms,
+                    "left": ms,
+                    "done": false
+                }].concat(timers);
+            save();
+        }
+        function updateTimer(id, f) {
+            now = Date.now();
+            timers = timers.map(t => t.id === id ? Object.assign({}, t, f(t)) : t);
+            save();
+        }
+        function pauseTimer(id) {
+            updateTimer(id, t => ({
+                        "end": 0,
+                        "left": Math.max(0, t.end - now)
+                    }));
+        }
+        function resumeTimer(id) {
+            updateTimer(id, t => ({
+                        "end": now + t.left
+                    }));
+        }
+        function restartTimer(id) {
+            updateTimer(id, t => ({
+                        "end": now + t.total,
+                        "left": t.total,
+                        "done": false
+                    }));
+        }
+        function removeTimer(id) {
+            timers = timers.filter(t => t.id !== id);
+            save();
+        }
+
+        // ── the stopwatch ──
+        function watchTime(at) {
+            return swBase + (swStart > 0 ? at - swStart : 0);
+        }
+        function startWatch() {
+            if (swStart === 0) {
+                swStart = Date.now();
+                save();
+            }
+        }
+        function pauseWatch() {
+            if (swStart > 0) {
+                swBase += Date.now() - swStart;
+                swStart = 0;
+                save();
+            }
+        }
+        function lap() {
+            if (swStart > 0) {
+                laps = laps.concat([watchTime(Date.now())]);
+                save();
+            }
+        }
+        function resetWatch() {
+            swStart = 0;
+            swBase = 0;
+            laps = [];
+            save();
+        }
+    }
+  '';
+
+  # The clock in the bar, with the calendar, timers and stopwatch (data: Planner.qml).
+  xdg.configFile."quickshell/Clock.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+    import Quickshell
+
+    // ── Clock ──
+    // In the bar: the time, plus the time left on the timer that ends first while one
+    // runs. Click for the card: the time and date, then three tabs:
+    //   Calendar   the month (‹ › to change it, the month's name for back to today).
+    //              Days with events get a dot. Click a day to see its events and to add
+    //              one: a title, and a time if you want a reminder then ("2pm", "2:30 pm",
+    //              "14:30"); no time = all day.
+    //   Timers     a preset, or type a length ("5" = 5 minutes, "1:30", "1h 20m") and an
+    //              optional label. Pause, start again, remove. When one runs out you get a
+    //              notification and a sound.
+    //   Stopwatch  start / pause, laps, reset.
+    // Everything lives in Planner.qml, which saves it, so timers keep going and events
+    // stay put through restarts and sleep.
+    Widget {
+        id: root
+
+        property date now: new Date()      // the bar's clock: shell.qml passes clock.date
+
+        button: Pill {
+            icon: Planner.timersRunning ? "timer" : "schedule"
+            iconColor: Planner.timersRunning ? Theme.accent : Theme.red
+            text: Qt.formatDateTime(root.now, "hh:mm AP") + (Planner.timersRunning ? "  ·  " + Planner.fmtLeft(Planner.left(Planner.nextTimer)) : "")
+        }
+
+        Column {
+            id: card
+            width: 280
+            spacing: 8
+
+            property string tab: "calendar"     // "calendar", "timers" or "stopwatch"
+            // the month on show, and the day picked (its events are listed)
+            property int viewYear: root.now.getFullYear()
+            property int viewMonth: root.now.getMonth()
+            property string selected: Planner.key(root.now)
+
+            // back to this month and today each time it opens
+            readonly property bool open: !!QsWindow.window && QsWindow.window.visible
+            onOpenChanged: if (open) {
+                viewYear = root.now.getFullYear();
+                viewMonth = root.now.getMonth();
+                selected = Planner.key(root.now);
+            }
+            function stepMonth(by) {
+                const d = new Date(viewYear, viewMonth + by, 1);
+                viewYear = d.getFullYear();
+                viewMonth = d.getMonth();
+            }
+
+            // ── time and date ──
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: Qt.formatDateTime(root.now, "hh:mm AP")
+                color: Theme.text
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize * 2.4
+                font.weight: 700
+                font.letterSpacing: Theme.letterSpacing
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: Qt.formatDateTime(root.now, "dddd, MMMM d")
+                color: Theme.text
+                opacity: 0.6
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize
+                font.weight: 600
+            }
+
+            // ── tabs ──
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                topPadding: 4
+                bottomPadding: 2
+                spacing: 4
+                Repeater {
+                    model: [
+                        {
+                            id: "calendar",
+                            name: "Calendar"
+                        },
+                        {
+                            id: "timers",
+                            name: "Timers"
+                        },
+                        {
+                            id: "stopwatch",
+                            name: "Stopwatch"
+                        }
+                    ]
+                    Chip {
+                        required property var modelData
+                        label: modelData.name
+                        selected: card.tab === modelData.id
+                        onClicked: card.tab = modelData.id
+                    }
+                }
+            }
+
+            // ════ Calendar ════
+            Column {
+                visible: card.tab === "calendar"
+                width: parent.width
+                spacing: 6
+
+                // ‹  October 2026  ›
+                Item {
+                    width: parent.width
+                    height: 26
+                    IconButton {
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        icon: "chevron_left"
+                        onClicked: card.stepMonth(-1)
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        text: Qt.formatDate(new Date(card.viewYear, card.viewMonth, 1), "MMMM yyyy")
+                        color: monthMouse.containsMouse ? Theme.text : Theme.accent
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 1.1
+                        font.weight: 700
+                        font.letterSpacing: Theme.letterSpacing
+                        MouseArea {
+                            id: monthMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {         // back to today
+                                card.viewYear = root.now.getFullYear();
+                                card.viewMonth = root.now.getMonth();
+                                card.selected = Planner.key(root.now);
+                            }
+                        }
+                    }
+                    IconButton {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        icon: "chevron_right"
+                        onClicked: card.stepMonth(1)
+                    }
+                }
+
+                // Sun Mon Tue ...
+                DayOfWeekRow {
+                    width: grid.width
+                    delegate: Text {
+                        required property string shortName
+                        text: shortName
+                        horizontalAlignment: Text.AlignHCenter
+                        color: Theme.text
+                        opacity: 0.6
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.85
+                        font.weight: 600
+                    }
+                }
+
+                MonthGrid {
+                    id: grid
+                    width: parent.width
+                    height: 186
+                    month: card.viewMonth          // 0 = January
+                    year: card.viewYear
+
+                    delegate: Item {
+                        id: day
+                        required property var model
+                        readonly property string dayKey: Planner.key(model.date)
+                        // compared against the clock, so it moves to the new day at midnight
+                        readonly property bool isToday: dayKey === Planner.key(root.now)
+                        readonly property bool isPicked: dayKey === card.selected
+                        readonly property bool inMonth: model.month === grid.month
+
+                        implicitWidth: 34
+                        implicitHeight: 28
+
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: 28
+                            height: 28
+                            radius: 14
+                            color: day.isToday ? Theme.accent : dayMouse.containsMouse ? Theme.pill : "transparent"
+                            border.width: day.isPicked && !day.isToday ? 1.5 : 0
+                            border.color: Theme.accent
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 120
+                                }
+                            }
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            anchors.verticalCenterOffset: -1
+                            text: day.model.day
+                            color: day.isToday ? Theme.bg : Theme.text
+                            opacity: day.inMonth ? 1 : 0.3      // days of the months either side
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize
+                            font.weight: day.isToday || day.isPicked ? 700 : 500
+                        }
+                        // has events
+                        Rectangle {
+                            visible: (Planner.eventDays[day.dayKey] || 0) > 0
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 3
+                            width: 4
+                            height: 4
+                            radius: 2
+                            color: day.isToday ? Theme.bg : Theme.accent
+                            opacity: day.inMonth ? 1 : 0.4
+                        }
+                        MouseArea {
+                            id: dayMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                card.selected = day.dayKey;
+                                if (!day.inMonth)
+                                    card.stepMonth(day.model.date < new Date(card.viewYear, card.viewMonth, 1) ? -1 : 1);
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: 1
+                    color: Theme.pill
+                }
+
+                // the picked day's events
+                Text {
+                    text: card.selected === Planner.key(root.now) ? "Today" : Qt.formatDate(Planner.dateOf(card.selected), "dddd, MMMM d")
+                    color: Theme.text
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize
+                    font.weight: 700
+                    font.letterSpacing: Theme.letterSpacing
+                }
+                ListView {
+                    id: eventList
+                    width: parent.width
+                    height: Math.min(contentHeight, 150)
+                    visible: count > 0
+                    clip: true
+                    spacing: 2
+                    boundsBehavior: Flickable.StopAtBounds
+                    model: Planner.eventsOn(card.selected)
+                    ScrollBar.vertical: ThinScrollBar {}
+
+                    delegate: Rectangle {
+                        id: ev
+                        required property var modelData
+                        width: ListView.view.width
+                        height: 30
+                        radius: Theme.radius
+                        color: evMouse.containsMouse ? Theme.pill : "transparent"
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: 120
+                            }
+                        }
+                        // hover the row for its remove button (the button is inside, so
+                        // pointing at it keeps the row hovered)
+                        MouseArea {
+                            id: evMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+
+                        Text {
+                            id: evTime
+                            anchors.left: parent.left
+                            anchors.leftMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 72
+                            text: Planner.fmtTime(ev.modelData.time)
+                            color: ev.modelData.time === "" ? Theme.text : Theme.accent
+                            opacity: ev.modelData.time === "" ? 0.6 : 1
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.9
+                            font.weight: 700
+                        }
+                        Text {
+                            anchors.left: evTime.right
+                            anchors.right: evRemove.left
+                            anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: ev.modelData.title
+                            elide: Text.ElideRight
+                            color: Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize
+                            font.weight: 600
+                        }
+                        IconButton {
+                            id: evRemove
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: evMouse.containsMouse
+                            icon: "close"
+                            iconColor: Theme.red
+                            onClicked: Planner.removeEvent(ev.modelData.id)
+                        }
+                        }
+                    }
+                }
+                Text {
+                    visible: eventList.count === 0
+                    text: "No events"
+                    color: Theme.text
+                    opacity: 0.5
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize * 0.9
+                }
+
+                // add one: title, time (optional), +
+                Row {
+                    width: parent.width
+                    spacing: 6
+
+                    function submit() {
+                        const title = evTitle.text.trim();
+                        const time = Planner.parseTime(evWhen.text);
+                        if (title === "" || time === null) {
+                            if (title === "")
+                                evTitle.forceActiveFocus();
+                            return;
+                        }
+                        Planner.addEvent(card.selected, time, title);
+                        evTitle.text = "";
+                        evWhen.text = "";
+                    }
+
+                    TextField {
+                        id: evTitle
+                        width: parent.width - evWhen.width - evAdd.width - parent.spacing * 2
+                        placeholderText: "New event"
+                        placeholderTextColor: Theme.pillIcon
+                        color: Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize
+                        leftPadding: 12
+                        rightPadding: 12
+                        onAccepted: parent.submit()
+                        background: Rectangle {
+                            radius: height / 2
+                            color: Theme.bg
+                            border.width: 1
+                            border.color: evTitle.activeFocus ? Theme.accent : Theme.pillIcon
+                        }
+                    }
+                    TextField {
+                        id: evWhen
+                        width: 78
+                        // red while what's typed isn't a time
+                        readonly property bool bad: Planner.parseTime(text) === null
+                        placeholderText: "time"
+                        placeholderTextColor: Theme.pillIcon
+                        color: bad ? Theme.red : Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize
+                        leftPadding: 10
+                        rightPadding: 10
+                        onAccepted: parent.submit()
+                        background: Rectangle {
+                            radius: height / 2
+                            color: Theme.bg
+                            border.width: 1
+                            border.color: evWhen.bad ? Theme.red : evWhen.activeFocus ? Theme.accent : Theme.pillIcon
+                        }
+                    }
+                    IconButton {
+                        id: evAdd
+                        anchors.verticalCenter: parent.verticalCenter
+                        icon: "add"
+                        iconColor: evTitle.text.trim() !== "" && !evWhen.bad ? Theme.accent : Theme.text
+                        onClicked: parent.submit()
+                    }
+                }
+            }
+
+            // ════ Timers ════
+            Column {
+                visible: card.tab === "timers"
+                width: parent.width
+                spacing: 8
+
+                Flow {
+                    width: parent.width
+                    spacing: 4
+                    Repeater {
+                        model: [
+                            {
+                                name: "1 min",
+                                ms: 60000
+                            },
+                            {
+                                name: "5 min",
+                                ms: 300000
+                            },
+                            {
+                                name: "10 min",
+                                ms: 600000
+                            },
+                            {
+                                name: "15 min",
+                                ms: 900000
+                            },
+                            {
+                                name: "25 min",
+                                ms: 1500000
+                            },
+                            {
+                                name: "1 hour",
+                                ms: 3600000
+                            }
+                        ]
+                        Chip {
+                            required property var modelData
+                            label: modelData.name
+                            onClicked: Planner.addTimer(modelData.ms, "")
+                        }
+                    }
+                }
+
+                // your own: length, label (optional), start
+                Row {
+                    width: parent.width
+                    spacing: 6
+
+                    function start() {
+                        const ms = Planner.parseDuration(tLength.text);
+                        if (ms <= 0) {
+                            tLength.forceActiveFocus();
+                            return;
+                        }
+                        Planner.addTimer(ms, tLabel.text.trim());
+                        tLength.text = "";
+                        tLabel.text = "";
+                    }
+
+                    TextField {
+                        id: tLength
+                        width: 96
+                        readonly property bool bad: text.trim() !== "" && Planner.parseDuration(text) <= 0
+                        placeholderText: "Length"
+                        placeholderTextColor: Theme.pillIcon
+                        color: bad ? Theme.red : Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize
+                        leftPadding: 12
+                        rightPadding: 10
+                        onAccepted: parent.start()
+                        background: Rectangle {
+                            radius: height / 2
+                            color: Theme.bg
+                            border.width: 1
+                            border.color: tLength.bad ? Theme.red : tLength.activeFocus ? Theme.accent : Theme.pillIcon
+                        }
+                    }
+                    TextField {
+                        id: tLabel
+                        width: parent.width - tLength.width - tStart.width - parent.spacing * 2
+                        placeholderText: "Label"
+                        placeholderTextColor: Theme.pillIcon
+                        color: Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize
+                        leftPadding: 12
+                        rightPadding: 12
+                        onAccepted: parent.start()
+                        background: Rectangle {
+                            radius: height / 2
+                            color: Theme.bg
+                            border.width: 1
+                            border.color: tLabel.activeFocus ? Theme.accent : Theme.pillIcon
+                        }
+                    }
+                    IconButton {
+                        id: tStart
+                        anchors.verticalCenter: parent.verticalCenter
+                        icon: "play_arrow"
+                        iconColor: Planner.parseDuration(tLength.text) > 0 ? Theme.accent : Theme.text
+                        onClicked: parent.start()
+                    }
+                }
+
+                ListView {
+                    id: timerList
+                    width: parent.width
+                    height: Math.min(contentHeight, 240)
+                    visible: count > 0
+                    clip: true
+                    spacing: 4
+                    boundsBehavior: Flickable.StopAtBounds
+                    model: Planner.timers
+                    ScrollBar.vertical: ThinScrollBar {}
+
+                    delegate: Rectangle {
+                        id: tm
+                        required property var modelData
+                        readonly property double leftMs: Planner.left(modelData)
+                        readonly property bool paused: !modelData.done && modelData.end === 0
+
+                        width: ListView.view.width
+                        height: 56
+                        radius: Theme.radius
+                        color: Theme.pill
+                        border.width: 1
+                        border.color: tm.modelData.done ? Theme.accent : "transparent"
+
+                        Column {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 12
+                            anchors.right: tmButtons.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 1
+                            Text {
+                                text: tm.modelData.done ? "Done" : Planner.fmtLeft(tm.leftMs)
+                                color: tm.modelData.done ? Theme.accent : Theme.text
+                                opacity: tm.paused ? 0.6 : 1
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 1.6
+                                font.weight: 700
+                                font.letterSpacing: Theme.letterSpacing
+                            }
+                            Text {
+                                width: parent.width
+                                elide: Text.ElideRight
+                                text: (tm.modelData.label !== "" ? tm.modelData.label + "  ·  " : "") + Planner.fmtLength(tm.modelData.total) + (tm.paused ? "  ·  paused" : "")
+                                color: Theme.text
+                                opacity: 0.6
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.85
+                            }
+                        }
+                        Row {
+                            id: tmButtons
+                            anchors.right: parent.right
+                            anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            IconButton {
+                                visible: !tm.modelData.done
+                                icon: tm.paused ? "play_arrow" : "pause"
+                                onClicked: tm.paused ? Planner.resumeTimer(tm.modelData.id) : Planner.pauseTimer(tm.modelData.id)
+                            }
+                            IconButton {
+                                icon: "replay"            // from the top again
+                                onClicked: Planner.restartTimer(tm.modelData.id)
+                            }
+                            IconButton {
+                                icon: "close"
+                                iconColor: Theme.red
+                                onClicked: Planner.removeTimer(tm.modelData.id)
+                            }
+                        }
+                        // how much is left, along the bottom
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.bottom: parent.bottom
+                            anchors.leftMargin: tm.radius
+                            anchors.bottomMargin: 4
+                            width: (parent.width - tm.radius * 2) * (tm.modelData.total > 0 ? tm.leftMs / tm.modelData.total : 0)
+                            height: 2
+                            radius: 1
+                            color: Theme.accent
+                            opacity: tm.paused ? 0.4 : 1
+                        }
+                    }
+                }
+                Text {
+                    visible: timerList.count === 0
+                    text: "No timers"
+                    color: Theme.text
+                    opacity: 0.5
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize * 0.9
+                }
+            }
+
+            // ════ Stopwatch ════
+            Column {
+                id: watch
+                visible: card.tab === "stopwatch"
+                width: parent.width
+                spacing: 10
+
+                // ticks quickly only while you can see it running
+                property double at: Date.now()
+                Timer {
+                    interval: 33
+                    repeat: true
+                    running: card.open && card.tab === "stopwatch" && Planner.swRunning
+                    onTriggered: watch.at = Date.now()
+                }
+                readonly property double elapsed: Planner.swRunning ? Planner.watchTime(at) : Planner.swBase
+
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    topPadding: 4
+                    text: Planner.fmtWatch(watch.elapsed)
+                    color: Planner.swRunning ? Theme.text : watch.elapsed > 0 ? Theme.accent : Theme.text
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize * 2.6
+                    font.weight: 700
+                    font.letterSpacing: Theme.letterSpacing
+                    font.features: ({
+                            "tnum": 1
+                        })
+                }
+
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 6
+                    Chip {
+                        label: Planner.swRunning ? "Pause" : watch.elapsed > 0 ? "Resume" : "Start"
+                        selected: true
+                        tint: Planner.swRunning ? Theme.yellow : Theme.green
+                        onClicked: Planner.swRunning ? Planner.pauseWatch() : Planner.startWatch()
+                    }
+                    Chip {
+                        visible: Planner.swRunning
+                        label: "Lap"
+                        onClicked: Planner.lap()
+                    }
+                    Chip {
+                        visible: !Planner.swRunning && watch.elapsed > 0
+                        label: "Reset"
+                        tint: Theme.red
+                        onClicked: Planner.resetWatch()
+                    }
+                }
+
+                // laps, newest on top. The quickest one is green, the slowest red.
+                ListView {
+                    id: lapList
+                    width: parent.width
+                    height: Math.min(contentHeight, 168)
+                    visible: count > 0
+                    clip: true
+                    spacing: 0
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ThinScrollBar {}
+
+                    // [{ n, split, total }], newest first
+                    readonly property var rows: Planner.laps.map((t, i) => ({
+                                "n": i + 1,
+                                "split": t - (i > 0 ? Planner.laps[i - 1] : 0),
+                                "total": t
+                            })).reverse()
+                    readonly property double fastest: rows.length >= 2 ? Math.min.apply(null, rows.map(r => r.split)) : -1
+                    readonly property double slowest: rows.length >= 2 ? Math.max.apply(null, rows.map(r => r.split)) : -1
+                    model: rows
+
+                    delegate: Item {
+                        id: lapRow
+                        required property var modelData
+                        width: ListView.view.width
+                        height: 26
+                        readonly property color tint: modelData.split === lapList.fastest ? Theme.green : modelData.split === lapList.slowest ? Theme.red : Theme.text
+                        Text {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Lap " + lapRow.modelData.n
+                            color: lapRow.tint
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize
+                            font.weight: 600
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: Planner.fmtWatch(lapRow.modelData.split)
+                            color: lapRow.tint
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize
+                            font.weight: 700
+                        }
+                        Text {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: Planner.fmtWatch(lapRow.modelData.total)
+                            color: Theme.text
+                            opacity: 0.5
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.9
+                        }
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  # The wallpaper picker in the bar: the pictures in the current theme's folder.
+  xdg.configFile."quickshell/Wallpapers.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+    import Qt.labs.folderlistmodel
+    import Quickshell
+    import Quickshell.Io
+    import Quickshell.Widgets
+
+    // ── Wallpaper ──
+    // Shows the pictures in ~/Pictures/Wallpapers/<theme>/ (the theme that's on). Click
+    // one to make it the wallpaper. It's remembered for that theme: switch themes and
+    // back and it's still the one. A theme you haven't picked one for uses the first
+    // picture in its folder (A to Z). New pictures in the folder show up by themselves.
+    //
+    // The picking is done by `theme --wallpaper <file>` (home.nix), which also updates
+    // the lock and login screens and rofi. It keeps your picks in
+    // ~/.local/state/theme/wallpapers/<theme>, one line each: the picture's path.
+    Widget {
+        id: root
+        icon: "wallpaper"
+
+        readonly property string dir: Theme.wallpaperDir + "/" + Theme.current
+        // the wallpaper now: the theme command writes its path here whenever it changes
+        readonly property string current: picked !== "" ? picked : wallpaperFile.text().trim()
+        // what you just clicked, shown right away until the command catches up
+        property string picked: ""
+
+        function pick(path) {
+            picked = path;
+            pickedReset.restart();
+            Quickshell.execDetached([Theme.themeCommand, "--wallpaper", path]);
+        }
+        function shuffle() {
+            if (pictures.count < 2)
+                return;
+            let i;
+            do
+                i = Math.floor(Math.random() * pictures.count);
+            while (pictures.get(i, "filePath") === current);
+            pick(pictures.get(i, "filePath"));
+        }
+
+        Column {
+            id: card
+            width: 3 * 120 + 2 * 6
+            spacing: 8
+
+            FileView {
+                id: wallpaperFile
+                path: Quickshell.env("HOME") + "/.local/state/theme/wallpaper.path"
+                watchChanges: true
+                printErrors: false
+                onFileChanged: reload()
+                onLoaded: root.picked = ""
+            }
+            Timer {
+                id: pickedReset
+                interval: 4000         // if the command never answered, show what's really on
+                onTriggered: root.picked = ""
+            }
+
+            FolderListModel {
+                id: pictures
+                folder: "file://" + root.dir
+                nameFilters: ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.bmp"]
+                caseSensitive: false
+                showDirs: false
+                sortField: FolderListModel.Name
+            }
+
+            // ── title, and buttons ──
+            Item {
+                width: parent.width
+                height: 26
+                Row {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 8
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Wallpaper"
+                        color: Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 1.2
+                        font.weight: 700
+                        font.letterSpacing: Theme.letterSpacing
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: Theme.themes[Theme.current] ? Theme.themes[Theme.current].name : Theme.current
+                        color: Theme.accent
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.9
+                        font.weight: 600
+                    }
+                }
+                Row {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    IconButton {
+                        visible: pictures.count > 1
+                        icon: "shuffle"            // a random other one
+                        onClicked: root.shuffle()
+                    }
+                    IconButton {
+                        icon: "folder_open"        // the folder, in your file manager
+                        onClicked: Quickshell.execDetached(["sh", "-c", "mkdir -p \"$1\" && exec xdg-open \"$1\"", "sh", root.dir])
+                    }
+                }
+            }
+
+            // ── the pictures ──
+            GridView {
+                id: grid
+                visible: pictures.count > 0
+                width: parent.width + 6           // the last column's gap hangs off the edge
+                height: Math.min(Math.ceil(pictures.count / 3), 3.5) * cellHeight
+                cellWidth: 126
+                cellHeight: 78
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                model: pictures
+                ScrollBar.vertical: ThinScrollBar {}
+
+                delegate: Item {
+                    id: tile
+                    required property string filePath
+                    required property string fileName
+                    readonly property bool isCurrent: filePath === root.current
+
+                    width: 120
+                    height: 72
+
+                    ClippingRectangle {
+                        anchors.fill: parent
+                        radius: Theme.radius
+                        color: Theme.pill
+                        scale: tileMouse.pressed ? 0.94 : tileMouse.containsMouse ? 1.03 : 1
+                        Behavior on scale {
+                            NumberAnimation {
+                                duration: 120
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+
+                        Image {
+                            id: thumb
+                            anchors.fill: parent
+                            source: "file://" + tile.filePath
+                            sourceSize: Qt.size(240, 144)     // decoded small: quick, and light on memory
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            cache: true
+                            opacity: status === Image.Ready ? 1 : 0
+                            Behavior on opacity {
+                                NumberAnimation {
+                                    duration: 180
+                                }
+                            }
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            visible: thumb.status !== Image.Ready
+                            text: thumb.status === Image.Error ? "broken_image" : "image"
+                            color: Theme.pillIcon
+                            font.family: Theme.iconFont
+                            font.pixelSize: Theme.iconSize * 1.4
+                            font.variableAxes: Theme.iconAxes
+                        }
+                        // the one that's on: an outline and a check
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: Theme.radius
+                            color: "transparent"
+                            border.width: tile.isCurrent ? 2 : 0
+                            border.color: Theme.accent
+                        }
+                        Rectangle {
+                            visible: tile.isCurrent
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 5
+                            width: 18
+                            height: 18
+                            radius: 9
+                            color: Theme.accent
+                            Text {
+                                anchors.centerIn: parent
+                                text: "check"
+                                color: Theme.bg
+                                font.family: Theme.iconFont
+                                font.pixelSize: 13
+                                font.variableAxes: Theme.iconAxes
+                            }
+                        }
+                    }
+                    MouseArea {
+                        id: tileMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: if (!tile.isCurrent)
+                            root.pick(tile.filePath)
+                    }
+                    ToolTip.visible: tileMouse.containsMouse
+                    ToolTip.delay: 600
+                    ToolTip.text: tile.fileName
+                }
+            }
+
+            // ── nothing in the folder yet ──
+            Text {
+                visible: pictures.count === 0
+                width: parent.width
+                wrapMode: Text.Wrap
+                text: "No pictures in ~/Pictures/Wallpapers/" + Theme.current + "/ yet. Put some there (the folder button opens it) and they show up here."
+                color: Theme.text
+                opacity: 0.6
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize * 0.9
+            }
+
+            // the one that's on, by name
+            Text {
+                visible: root.current !== ""
+                width: parent.width
+                elide: Text.ElideMiddle
+                text: root.current.split("/").pop()
+                color: Theme.text
+                opacity: 0.6
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize * 0.85
+            }
         }
     }
   '';
