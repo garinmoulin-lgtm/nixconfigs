@@ -514,6 +514,29 @@ let
     exec ${config.programs.quickshell.package}/bin/quickshell -n -p /etc/greetd/greeter/lock.qml "$@"
   '';
 
+  # After waking from suspend: screens on, then give the keyboard back to the lock
+  # screen. Hyprland hands the keyboard to the lock screen when the mouse moves
+  # (InputManager.cpp), so this "moves" the cursor to where it already is, which
+  # counts as a move. Done again a second later in case the monitor came back late
+  # (NVIDIA can take a moment) and the lock screen made a new window for it.
+  wakeCmd = pkgs.writeShellApplication {
+    name = "after-wake";
+    runtimeInputs = [ pkgs.coreutils ];
+    text = ''
+      hyprctl dispatch 'hl.dsp.dpms({ action = "on" })' >/dev/null || true
+      nudge() {
+        local pos x y
+        pos=$(hyprctl cursorpos 2>/dev/null) || return 0   # "960, 540"
+        x=''${pos%%,*}
+        y=''${pos##*, }
+        hyprctl dispatch "hl.dsp.cursor.move({ x = $x, y = $y })" >/dev/null || true
+      }
+      nudge
+      sleep 1
+      nudge
+    '';
+  };
+
   # ── Wallpaper animation ──
   # How awww changes the wallpaper: when you switch themes, and at login. The theme
   # command and the awww service both use these, and they're in your session's
@@ -597,13 +620,20 @@ let
         disabled_colors=${qtRoles "disabled"}
       '';
 
-      # hyprpolkitagent and other hyprtoolkit apps
+      # hyprpolkitagent and other hyprtoolkit apps. Anything left out here uses
+      # hyprtoolkit's built-in grey, so every color it has is set.
       "hyprtoolkit.conf" = pkgs.writeText "hyprtoolkit.conf" (
         lib.hm.generators.toHyprconf {
           attrs = {
             background = "0xFF${lib.toUpper c.bg}";
             base = "0xFF${lib.toUpper c.overlay}";
+            alternate_base = "0xFF${lib.toUpper c.surface}"; # password box, command box
+            text = "0xFF${lib.toUpper c.fg}";
+            bright_text = "0xFF${lib.toUpper c.fgBright}";
+            link_text = "0xFF${lib.toUpper c.link}";
             accent = "0xFF${lib.toUpper c.accent}";
+            accent_secondary = "0xFF${lib.toUpper c.blue}";
+            icon_theme = t.icons.name;
             font_family = "SFProText Nerd Font";
             font_family_monospace = "SFMono Nerd Font";
           };
@@ -765,6 +795,11 @@ let
           hyprctl eval "hl.env(\"HYPRCURSOR_THEME\", \"$CURSOR_THEME\")" >/dev/null || true
         fi
         systemctl --user set-environment XCURSOR_THEME="$CURSOR_THEME" HYPRCURSOR_THEME="$CURSOR_THEME" || true
+        # hyprtoolkit apps (the polkit agent) watch ~/.config/hypr/hyprtoolkit.conf
+        # itself, not the file it leads to, so the state/current swap goes unnoticed.
+        # Putting the same link back in its place is noticed: they reread it.
+        ht="''${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprtoolkit.conf"
+        if [ -L "$ht" ]; then relink "$(readlink "$ht")" "$ht" || true; fi
         # kitty rereads its config (and so the colors) on SIGUSR1. On NixOS the
         # process is called .kitty-wrapped.
         pkill -USR1 -x kitty || true
@@ -8444,16 +8479,17 @@ in
   services.blueman-applet.enable = true;
 
   # hyprtoolkit's colors (and fonts) come from the theme: see "hyprtoolkit.conf" in
-  # mkThemeDir at the top of this file.
+  # mkThemeDir at the top of this file. The polkit agent is a hyprtoolkit app, and
+  # `theme` makes it reload this file on a switch (see tell_session).
   xdg.configFile."hypr/hyprtoolkit.conf" = {
     source = config.lib.file.mkOutOfStoreSymlink "${themeState}/current/hyprtoolkit.conf";
     force = true;
   };
 
-  # ── Qt theming (polkit agent, pavucontrol-qt, any Qt app) ──
-  # hyprpolkitagent in nixpkgs is the Qt/QML version, so it takes its colors from
-  # Qt's palette, not hyprtoolkit. qt6ct supplies that palette. This module also
-  # exports QT_QPA_PLATFORMTHEME to systemd user services, so the polkit agent sees it.
+  # ── Qt theming (pavucontrol-qt, Quickshell, any Qt app) ──
+  # qt6ct supplies Qt's palette. This module also exports QT_QPA_PLATFORMTHEME to
+  # systemd user services. (hyprpolkitagent used to be a Qt app; since 0.2 it's
+  # hyprtoolkit, themed by hyprtoolkit.conf above.)
   qt = {
     enable = true;
     platformTheme.name = "qtct"; # installs qt5ct + qt6ct
@@ -9130,7 +9166,7 @@ in
     settings.general = {
       lock_cmd = "${lockCmd}/bin/lock"; # what `loginctl lock-session` runs
       before_sleep_cmd = "${lockCmd}/bin/lock"; # lock before suspending
-      after_sleep_cmd = "hyprctl dispatch 'hl.dsp.dpms({ action = \"on\" })'";
+      after_sleep_cmd = "${wakeCmd}/bin/after-wake";
       inhibit_sleep = 3; # wait until it's locked
     };
   };

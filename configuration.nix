@@ -843,6 +843,9 @@ in
           property string message: ""       // errors and PAM messages
           property string label: ""         // under the box when there's no message (your name)
           property bool awake: true          // full strength while you're typing
+          // true = the password box takes the keyboard back on its own, within a
+          // second, whenever it loses it (the lock screen: there's nothing else to type in)
+          property bool keepFocus: false
 
           signal typed(string text)         // the password box changed
           signal submit                     // Enter
@@ -858,6 +861,15 @@ in
           readonly property bool windowActive: Window.active
           onWindowActiveChanged: if (windowActive && main)
               focusField()
+          // ...and a backup for that: if the box doesn't have the keyboard, it takes
+          // it, without waiting for the window to report it's active again.
+          Timer {
+              interval: 1000
+              repeat: true
+              running: card.keepFocus && card.main
+              onTriggered: if (!field.activeFocus)
+                  card.focusField()
+          }
 
           // One entry per typed character; the dots in the box are drawn from this,
           // so each one can fade in and out on its own.
@@ -1842,6 +1854,7 @@ in
                           onSubmit: root.check()
                           onActivity: root.wake()
                           onEscapePressed: root.password = ""
+                          keepFocus: true
                           Component.onCompleted: if (surface.main)
                               focusField()
                       }
