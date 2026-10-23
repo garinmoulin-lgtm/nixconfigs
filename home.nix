@@ -2605,175 +2605,172 @@ in
                             }
                         }
 
-                        // ── Theme: the color themes (the themes block at the top of home.nix) ──
-                        // Icon only, like Bluetooth. Each row shows that theme's own colors;
-                        // click one to switch. The bar fades over, and the theme command does
-                        // the rest (see "Themes" in home.nix). The popup stays open, so you
-                        // can try a few.
+                        // ── Theme and wallpaper ──
+                        // Icon only, like Bluetooth. Left: the color themes (the themes block at
+                        // the top of home.nix); each row shows that theme's own colors, click one
+                        // to switch. The bar fades over, and the theme command does the rest (see
+                        // "Themes" in home.nix). Right: the pictures in that theme's wallpaper
+                        // folder (WallpaperPicker.qml); click one to use it. Picking a theme
+                        // shows its folder right away, with its own remembered wallpaper. The
+                        // popup stays open, so you can try a few.
                         Widget {
                             anchors.verticalCenter: parent.verticalCenter
                             icon: "palette"
 
-                            Column {
-                                id: themeList
-                                spacing: 4
-                                width: 280
+                            Row {
+                                spacing: 14
 
-                                Item {
-                                    width: parent.width
-                                    height: 26
+                                Column {
+                                    id: themeList
+                                    spacing: 4
+                                    width: 280
 
-                                    Text {
-                                        anchors.left: parent.left
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: "Theme"
-                                        color: Theme.text
-                                        font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 1.2
-                                        font.weight: 700
-                                        font.letterSpacing: Theme.letterSpacing
-                                    }
-                                }
+                                    Item {
+                                        width: parent.width
+                                        height: 26
 
-                                Repeater {
-                                    model: Theme.order
-
-                                    Rectangle {
-                                        id: themeRow
-                                        required property string modelData
-                                        readonly property var info: Theme.themes[modelData]
-                                        readonly property var colors: info.colors
-                                        readonly property bool selected: Theme.current === modelData
-
-                                        width: themeList.width
-                                        height: 44
-                                        radius: Theme.radius
-                                        color: themeMouse.containsMouse || selected ? Theme.pill : "transparent"
-
-                                        Behavior on color {
-                                            ColorAnimation {
-                                                duration: 120
-                                            }
+                                        Text {
+                                            anchors.left: parent.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "Theme"
+                                            color: Theme.text
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 1.2
+                                            font.weight: 700
+                                            font.letterSpacing: Theme.letterSpacing
                                         }
+                                    }
 
-                                        Item {
-                                            anchors.fill: parent
-                                            scale: themeMouse.pressed ? 0.85 : 1
+                                    Repeater {
+                                        model: Theme.order
 
-                                            Behavior on scale {
-                                                NumberAnimation {
+                                        Rectangle {
+                                            id: themeRow
+                                            required property string modelData
+                                            readonly property var info: Theme.themes[modelData]
+                                            readonly property var colors: info.colors
+                                            readonly property bool selected: Theme.current === modelData
+
+                                            width: themeList.width
+                                            height: 44
+                                            radius: Theme.radius
+                                            color: themeMouse.containsMouse || selected ? Theme.pill : "transparent"
+
+                                            Behavior on color {
+                                                ColorAnimation {
                                                     duration: 120
-                                                    easing.type: Easing.OutCubic
                                                 }
                                             }
 
-                                            // a little preview: the theme's background with its colors on it
-                                            Rectangle {
-                                                id: themePreview
-                                                anchors.left: parent.left
-                                                anchors.leftMargin: 8
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: 64
-                                                height: 28
-                                                radius: 6
-                                                color: themeRow.colors.bg
-                                                border.width: 1
-                                                border.color: themeRow.colors.overlay
+                                            Item {
+                                                anchors.fill: parent
+                                                scale: themeMouse.pressed ? 0.85 : 1
 
-                                                Row {
-                                                    anchors.centerIn: parent
-                                                    spacing: 3
+                                                Behavior on scale {
+                                                    NumberAnimation {
+                                                        duration: 120
+                                                        easing.type: Easing.OutCubic
+                                                    }
+                                                }
 
-                                                    Repeater {
-                                                        model: ["red", "yellow", "green", "blue", "magenta"]
+                                                // a little preview: the theme's background with its colors on it
+                                                Rectangle {
+                                                    id: themePreview
+                                                    anchors.left: parent.left
+                                                    anchors.leftMargin: 8
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 64
+                                                    height: 28
+                                                    radius: 6
+                                                    color: themeRow.colors.bg
+                                                    border.width: 1
+                                                    border.color: themeRow.colors.overlay
 
-                                                        Rectangle {
-                                                            required property string modelData
-                                                            width: 8
-                                                            height: 8
-                                                            radius: 4
-                                                            color: themeRow.colors[modelData]
+                                                    Row {
+                                                        anchors.centerIn: parent
+                                                        spacing: 3
+
+                                                        Repeater {
+                                                            model: ["red", "yellow", "green", "blue", "magenta"]
+
+                                                            Rectangle {
+                                                                required property string modelData
+                                                                width: 8
+                                                                height: 8
+                                                                radius: 4
+                                                                color: themeRow.colors[modelData]
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                Column {
+                                                    anchors {
+                                                        left: themePreview.right
+                                                        right: themeCheck.left
+                                                        leftMargin: 10
+                                                        rightMargin: 8
+                                                        verticalCenter: parent.verticalCenter
+                                                    }
+
+                                                    Text {
+                                                        width: parent.width
+                                                        text: themeRow.info.name
+                                                        elide: Text.ElideRight
+                                                        color: themeRow.selected ? Theme.accent : Theme.text
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize
+                                                        font.weight: themeRow.selected ? 700 : 500
+                                                        font.letterSpacing: Theme.letterSpacing
+                                                    }
+                                                    Text {
+                                                        width: parent.width
+                                                        text: themeRow.info.variant
+                                                        elide: Text.ElideRight
+                                                        color: Theme.text
+                                                        opacity: 0.6
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.85
+                                                    }
+                                                }
+                                                Text {
+                                                    id: themeCheck
+                                                    anchors.right: parent.right
+                                                    anchors.rightMargin: 10
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: "check"
+                                                    opacity: themeRow.selected ? 1 : 0
+                                                    color: Theme.accent
+                                                    font.family: Theme.iconFont
+                                                    font.pixelSize: Theme.iconSize
+                                                    font.variableAxes: Theme.iconAxes
+
+                                                    Behavior on opacity {
+                                                        NumberAnimation {
+                                                            duration: 120
                                                         }
                                                     }
                                                 }
                                             }
-                                            Column {
-                                                anchors {
-                                                    left: themePreview.right
-                                                    right: themeCheck.left
-                                                    leftMargin: 10
-                                                    rightMargin: 8
-                                                    verticalCenter: parent.verticalCenter
-                                                }
-
-                                                Text {
-                                                    width: parent.width
-                                                    text: themeRow.info.name
-                                                    elide: Text.ElideRight
-                                                    color: themeRow.selected ? Theme.accent : Theme.text
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize
-                                                    font.weight: themeRow.selected ? 700 : 500
-                                                    font.letterSpacing: Theme.letterSpacing
-                                                }
-                                                Text {
-                                                    width: parent.width
-                                                    text: themeRow.info.variant
-                                                    elide: Text.ElideRight
-                                                    color: Theme.text
-                                                    opacity: 0.6
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize * 0.85
-                                                }
+                                            MouseArea {
+                                                id: themeMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: Theme.set(themeRow.modelData)
                                             }
-                                            Text {
-                                                id: themeCheck
-                                                anchors.right: parent.right
-                                                anchors.rightMargin: 10
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                text: "check"
-                                                opacity: themeRow.selected ? 1 : 0
-                                                color: Theme.accent
-                                                font.family: Theme.iconFont
-                                                font.pixelSize: Theme.iconSize
-                                                font.variableAxes: Theme.iconAxes
-
-                                                Behavior on opacity {
-                                                    NumberAnimation {
-                                                        duration: 120
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        MouseArea {
-                                            id: themeMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: Theme.set(themeRow.modelData)
                                         }
                                     }
                                 }
-
-                                // where this theme's wallpaper comes from
-                                Text {
-                                    width: themeList.width
-                                    topPadding: 4
-                                    leftPadding: 8
-                                    rightPadding: 8
-                                    wrapMode: Text.Wrap
-                                    text: "Wallpapers: ~/Pictures/Wallpapers/" + Theme.current + "/\nPick one with the wallpaper button next to this one."
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
+                                // between the two
+                                Rectangle {
+                                    width: 1
+                                    height: Math.max(themeList.height, picker.height)
+                                    color: Theme.pill
+                                }
+                                WallpaperPicker {
+                                    id: picker
                                 }
                             }
-                        }
-
-                        // ── Wallpaper: pick one from the theme's folder (Wallpapers.qml) ──
-                        Wallpapers {
-                            anchors.verticalCenter: parent.verticalCenter
                         }
 
                         Widget {
@@ -7920,8 +7917,8 @@ in
     }
   '';
 
-  # The wallpaper picker in the bar: the pictures in the current theme's folder.
-  xdg.configFile."quickshell/Wallpapers.qml".text = ''
+  # The wallpaper half of the bar's theme popup: the pictures in the current theme's folder.
+  xdg.configFile."quickshell/WallpaperPicker.qml".text = ''
     import QtQuick
     import QtQuick.Controls.Basic
     import Qt.labs.folderlistmodel
@@ -7929,7 +7926,7 @@ in
     import Quickshell.Io
     import Quickshell.Widgets
 
-    // ── Wallpaper ──
+    // ── Wallpaper picker ── (the right half of the bar's theme popup, shell.qml)
     // Shows the pictures in ~/Pictures/Wallpapers/<theme>/ (the theme that's on). Click
     // one to make it the wallpaper. It's remembered for that theme: switch themes and
     // back and it's still the one. A theme you haven't picked one for uses the first
@@ -7938,9 +7935,8 @@ in
     // The picking is done by `theme --wallpaper <file>` (home.nix), which also updates
     // the lock and login screens and rofi. It keeps your picks in
     // ~/.local/state/theme/wallpapers/<theme>, one line each: the picture's path.
-    Widget {
+    Column {
         id: root
-        icon: "wallpaper"
 
         readonly property string dir: Theme.wallpaperDir + "/" + Theme.current
         // the wallpaper now: the theme command writes its path here whenever it changes
