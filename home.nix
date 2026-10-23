@@ -1591,986 +1591,696 @@ in
                     left: true
                     right: true
                 }
-                implicitHeight: Theme.barHeight
-                color: Theme.bg
+                // The window is a little taller than the bar when it curves (Theme.barCurve):
+                // the curves hang below it. Windows still only make room for the bar itself
+                // (exclusiveZone), and the curves let clicks through (mask).
+                implicitHeight: Theme.barHeight + (Theme.barCurve ? Theme.radius : 0)
+                exclusiveZone: Theme.barHeight
+                color: "transparent"
+                mask: Region {
+                    item: barBody
+                }
 
-                SystemClock {
-                    id: clock
-                    precision: SystemClock.Minutes
-                }
-                // SystemClock moves on with a timer, and that timer doesn't count the
-                // time the computer spends asleep, so after waking the clock could be
-                // up to a minute behind (same when the time gets corrected over the
-                // network). Every 2 s this checks that it shows the right minute, and
-                // makes it read the time again if not.
-                Timer {
-                    interval: 2000
-                    running: true
-                    repeat: true
-                    onTriggered: {
-                        const now = new Date();
-                        const shown = clock.date;
-                        if (now.getMinutes() !== shown.getMinutes() || now.getHours() !== shown.getHours() || now.getDate() !== shown.getDate()) {
-                            clock.enabled = false;
-                            clock.enabled = true;
-                        }
-                    }
-                }
-                /*
-                Poll {
-                    id: bluetooth
-                    cmd: "bluetoothctl show | grep -q 'Powered: yes' && echo on || echo off"
-                }
-                */
-                Row {
+                // ── the inward curves under both ends of the bar ──
+                // So the bar looks like it wraps around the top corners of the screen.
+                BarCorner {
+                    visible: Theme.barCurve
                     anchors.left: parent.left
-                    anchors.leftMargin: Theme.spacing
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: Theme.spacing
+                    y: Theme.barHeight
+                }
+                BarCorner {
+                    visible: Theme.barCurve
+                    mirrored: true
+                    anchors.right: parent.right
+                    y: Theme.barHeight
+                }
 
-                    Workspaces {
-                        screen: bar.screen
+                // the bar itself
+                Item {
+                    id: barBody
+                    width: parent.width
+                    height: Theme.barHeight
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: Theme.bg
                     }
 
-                    // ── Display: brightness, night light, color filters ──
-                    // Icon only, like Bluetooth. The icon shows what's on: a filter, night
-                    // light, or plain brightness.
-                    Widget {
+                    SystemClock {
+                        id: clock
+                        precision: SystemClock.Minutes
+                    }
+                    // SystemClock moves on with a timer, and that timer doesn't count the
+                    // time the computer spends asleep, so after waking the clock could be
+                    // up to a minute behind (same when the time gets corrected over the
+                    // network). Every 2 s this checks that it shows the right minute, and
+                    // makes it read the time again if not.
+                    Timer {
+                        interval: 2000
+                        running: true
+                        repeat: true
+                        onTriggered: {
+                            const now = new Date();
+                            const shown = clock.date;
+                            if (now.getMinutes() !== shown.getMinutes() || now.getHours() !== shown.getHours() || now.getDate() !== shown.getDate()) {
+                                clock.enabled = false;
+                                clock.enabled = true;
+                            }
+                        }
+                    }
+                    /*
+                    Poll {
+                        id: bluetooth
+                        cmd: "bluetoothctl show | grep -q 'Powered: yes' && echo on || echo off"
+                    }
+                    */
+                    Row {
+                        anchors.left: parent.left
+                        anchors.leftMargin: Theme.spacing
                         anchors.verticalCenter: parent.verticalCenter
-                        icon: {
-                            if (disp.filter === "invert")
-                                return "invert_colors";
-                            if (disp.filter === "grayscale")
-                                return "filter_b_and_w";
-                            if (disp.filter === "sepia")
-                                return "filter_vintage";
-                            if (disp.filter === "contrast")
-                                return "contrast";
-                            return disp.nightOn ? "nightlight" : "brightness_6";
+                        spacing: Theme.spacing
+
+                        Workspaces {
+                            screen: bar.screen
                         }
 
-                        Column {
-                            id: disp
-                            spacing: 8
-                            width: 280
-
-                            // ── state ──
-                            // "backlight": a laptop screen; brightness is set for real with
-                            //              brightnessctl (the panel actually dims).
-                            // "software":  no backlight (a desktop monitor), so it's dimmed by
-                            //              Hyprland's screen shader instead, like night light.
-                            property string mode: "backlight"
-                            property int brightness: 100     // percent
-                            property bool nightOn: false
-                            property int kelvin: 4000        // night light warmth: lower = warmer
-                            property string filter: "none"   // none / invert / grayscale / sepia / contrast
-
-                            // ── How night light, software dimming and the filters work ──
-                            // All three are one screen shader: a tiny GPU program Hyprland runs
-                            // over the finished picture of the whole screen. Whenever something
-                            // changes, a new shader is written with the settings baked in and
-                            // Hyprland is told to use it. When everything is off there's no
-                            // shader at all, so it costs nothing.
-                            // (This used to go through hyprsunset, which needs the GPU driver to
-                            // support Hyprland's color-matrix feature. NVIDIA's doesn't reliably,
-                            // which is why night light and software brightness did nothing.)
-
-                            // Night light color: how much red / green / blue light to keep at a
-                            // given temperature (Tanner Helland's well-known approximation of a
-                            // black body's color; 6500 K is about white).
-                            function tint(k) {
-                                const t = k / 100;
-                                const clamp = v => Math.max(0, Math.min(255, v)) / 255;
-                                const r = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592);
-                                const g = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661 : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
-                                const b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
-                                return [clamp(r), clamp(g), clamp(b)];
+                        // ── Display: brightness, night light, color filters ──
+                        // Icon only, like Bluetooth. The icon shows what's on: a filter, night
+                        // light, or plain brightness.
+                        Widget {
+                            anchors.verticalCenter: parent.verticalCenter
+                            icon: {
+                                if (disp.filter === "invert")
+                                    return "invert_colors";
+                                if (disp.filter === "grayscale")
+                                    return "filter_b_and_w";
+                                if (disp.filter === "sepia")
+                                    return "filter_vintage";
+                                if (disp.filter === "contrast")
+                                    return "contrast";
+                                return disp.nightOn ? "nightlight" : "brightness_6";
                             }
-                            // The GLSL for the current settings, or "" when nothing is on.
-                            function shaderSource() {
-                                const dim = mode === "software" && brightness < 100;
-                                if (!nightOn && !dim && filter === "none")
-                                    return "";
-                                const f = n => n.toFixed(4);
-                                const lines = [];
-                                if (filter === "invert")
-                                    lines.push("col = 1.0 - col;");
-                                else if (filter === "grayscale")
-                                    lines.push("col = vec3(dot(col, vec3(0.2126, 0.7152, 0.0722)));");
-                                else if (filter === "sepia")
-                                    lines.push("col = min(vec3(dot(col, vec3(0.393, 0.769, 0.189)), dot(col, vec3(0.349, 0.686, 0.168)), dot(col, vec3(0.272, 0.534, 0.131))), vec3(1.0));");
-                                else if (filter === "contrast")
-                                    lines.push("col = clamp((col - 0.5) * 1.35 + 0.5, 0.0, 1.0);");
-                                if (nightOn) {
-                                    const c = tint(kelvin);
-                                    lines.push("col *= vec3(" + f(c[0]) + ", " + f(c[1]) + ", " + f(c[2]) + ");");
+
+                            Column {
+                                id: disp
+                                spacing: 8
+                                width: 280
+
+                                // ── state ──
+                                // "backlight": a laptop screen; brightness is set for real with
+                                //              brightnessctl (the panel actually dims).
+                                // "software":  no backlight (a desktop monitor), so it's dimmed by
+                                //              Hyprland's screen shader instead, like night light.
+                                property string mode: "backlight"
+                                property int brightness: 100     // percent
+                                property bool nightOn: false
+                                property int kelvin: 4000        // night light warmth: lower = warmer
+                                property string filter: "none"   // none / invert / grayscale / sepia / contrast
+
+                                // ── How night light, software dimming and the filters work ──
+                                // All three are one screen shader: a tiny GPU program Hyprland runs
+                                // over the finished picture of the whole screen. Whenever something
+                                // changes, a new shader is written with the settings baked in and
+                                // Hyprland is told to use it. When everything is off there's no
+                                // shader at all, so it costs nothing.
+                                // (This used to go through hyprsunset, which needs the GPU driver to
+                                // support Hyprland's color-matrix feature. NVIDIA's doesn't reliably,
+                                // which is why night light and software brightness did nothing.)
+
+                                // Night light color: how much red / green / blue light to keep at a
+                                // given temperature (Tanner Helland's well-known approximation of a
+                                // black body's color; 6500 K is about white).
+                                function tint(k) {
+                                    const t = k / 100;
+                                    const clamp = v => Math.max(0, Math.min(255, v)) / 255;
+                                    const r = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592);
+                                    const g = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661 : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
+                                    const b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
+                                    return [clamp(r), clamp(g), clamp(b)];
                                 }
-                                if (dim)
-                                    lines.push("col *= " + f(brightness / 100) + ";");
-                                return ["#version 300 es", "precision highp float;", "in vec2 v_texcoord;", "uniform sampler2D tex;", "layout(location = 0) out vec4 fragColor;", "void main() {", "    vec4 c = texture(tex, v_texcoord);", "    vec3 col = c.rgb;"].concat(lines.map(l => "    " + l)).concat(["    fragColor = vec4(col, c.a);", "}", ""]).join("\n");
-                            }
+                                // The GLSL for the current settings, or "" when nothing is on.
+                                function shaderSource() {
+                                    const dim = mode === "software" && brightness < 100;
+                                    if (!nightOn && !dim && filter === "none")
+                                        return "";
+                                    const f = n => n.toFixed(4);
+                                    const lines = [];
+                                    if (filter === "invert")
+                                        lines.push("col = 1.0 - col;");
+                                    else if (filter === "grayscale")
+                                        lines.push("col = vec3(dot(col, vec3(0.2126, 0.7152, 0.0722)));");
+                                    else if (filter === "sepia")
+                                        lines.push("col = min(vec3(dot(col, vec3(0.393, 0.769, 0.189)), dot(col, vec3(0.349, 0.686, 0.168)), dot(col, vec3(0.272, 0.534, 0.131))), vec3(1.0));");
+                                    else if (filter === "contrast")
+                                        lines.push("col = clamp((col - 0.5) * 1.35 + 0.5, 0.0, 1.0);");
+                                    if (nightOn) {
+                                        const c = tint(kelvin);
+                                        lines.push("col *= vec3(" + f(c[0]) + ", " + f(c[1]) + ", " + f(c[2]) + ");");
+                                    }
+                                    if (dim)
+                                        lines.push("col *= " + f(brightness / 100) + ";");
+                                    return ["#version 300 es", "precision highp float;", "in vec2 v_texcoord;", "uniform sampler2D tex;", "layout(location = 0) out vec4 fragColor;", "void main() {", "    vec4 c = texture(tex, v_texcoord);", "    vec3 col = c.rgb;"].concat(lines.map(l => "    " + l)).concat(["    fragColor = vec4(col, c.a);", "}", ""]).join("\n");
+                                }
 
-                            // Writes the shader and switches Hyprland to it. One change at a time:
-                            // while Hyprland is busy with one, newer changes wait, and only the
-                            // latest is sent. (Before, every click went out at once and Hyprland
-                            // worked through the backlog, which is why filters came in bursts.)
-                            // the shader files live in RAM (XDG_RUNTIME_DIR) and are gone after a reboot
-                            readonly property string runDir: Quickshell.env("XDG_RUNTIME_DIR") + "/quickshell-display"
-                            property int shaderSlot: 0       // rotates between 3 file names so Hyprland sees a new path
-                            property bool effectsDirty: false
-                            function applyEffects() {
-                                if (!restored)
-                                    return;
-                                if (effectsSetter.running) {
-                                    effectsDirty = true;
-                                    return;
+                                // Writes the shader and switches Hyprland to it. One change at a time:
+                                // while Hyprland is busy with one, newer changes wait, and only the
+                                // latest is sent. (Before, every click went out at once and Hyprland
+                                // worked through the backlog, which is why filters came in bursts.)
+                                // the shader files live in RAM (XDG_RUNTIME_DIR) and are gone after a reboot
+                                readonly property string runDir: Quickshell.env("XDG_RUNTIME_DIR") + "/quickshell-display"
+                                property int shaderSlot: 0       // rotates between 3 file names so Hyprland sees a new path
+                                property bool effectsDirty: false
+                                function applyEffects() {
+                                    if (!restored)
+                                        return;
+                                    if (effectsSetter.running) {
+                                        effectsDirty = true;
+                                        return;
+                                    }
+                                    const src = shaderSource();
+                                    let path = "";
+                                    if (src !== "") {
+                                        shaderSlot = (shaderSlot + 1) % 3;
+                                        path = runDir + "/effect-" + shaderSlot + ".frag";
+                                    }
+                                    const state = JSON.stringify({
+                                        "brightness": mode === "software" ? brightness : 100,
+                                        "nightOn": nightOn,
+                                        "kelvin": kelvin,
+                                        "filter": filter
+                                    });
+                                    // $1 folder, $2 shader file ("" = none), $3 shader text, $4 settings file, $5 settings
+                                    // Why dim_strength: changing only the shader makes Hyprland redraw just the
+                                    // parts of the screen that change, and it keeps 2-3 screen buffers, so old
+                                    // and new frames alternate for a while: the flicker, and filters that take
+                                    // a while to go away. Setting any window-look option (here dim_strength,
+                                    // to the value it already has) makes Hyprland redraw the whole screen for
+                                    // the next frames, which gets every buffer up to date. Done twice, a moment
+                                    // apart, to cover all of them. (Hyprland does the same "3 full frames"
+                                    // trick itself when a monitor is plugged in.)
+                                    effectsSetter.command = ["sh", "-c", "mkdir -p \"$1\" \"$(dirname \"$4\")\"; printf '%s' \"$5\" > \"$4\"; [ -n \"$2\" ] && printf '%s' \"$3\" > \"$2\"; keep='dim_strength = hl.get_config(\"decoration.dim_strength\")'; hyprctl eval \"hl.config({ decoration = { screen_shader = \\\"$2\\\", $keep } })\"; sleep 0.05; exec hyprctl eval \"hl.config({ decoration = { $keep } })\"", "sh", runDir, path, src, statePath, state];
+                                    effectsSetter.running = true;
                                 }
-                                const src = shaderSource();
-                                let path = "";
-                                if (src !== "") {
-                                    shaderSlot = (shaderSlot + 1) % 3;
-                                    path = runDir + "/effect-" + shaderSlot + ".frag";
-                                }
-                                const state = JSON.stringify({
-                                    "brightness": mode === "software" ? brightness : 100,
-                                    "nightOn": nightOn,
-                                    "kelvin": kelvin,
-                                    "filter": filter
-                                });
-                                // $1 folder, $2 shader file ("" = none), $3 shader text, $4 settings file, $5 settings
-                                // Why dim_strength: changing only the shader makes Hyprland redraw just the
-                                // parts of the screen that change, and it keeps 2-3 screen buffers, so old
-                                // and new frames alternate for a while: the flicker, and filters that take
-                                // a while to go away. Setting any window-look option (here dim_strength,
-                                // to the value it already has) makes Hyprland redraw the whole screen for
-                                // the next frames, which gets every buffer up to date. Done twice, a moment
-                                // apart, to cover all of them. (Hyprland does the same "3 full frames"
-                                // trick itself when a monitor is plugged in.)
-                                effectsSetter.command = ["sh", "-c", "mkdir -p \"$1\" \"$(dirname \"$4\")\"; printf '%s' \"$5\" > \"$4\"; [ -n \"$2\" ] && printf '%s' \"$3\" > \"$2\"; keep='dim_strength = hl.get_config(\"decoration.dim_strength\")'; hyprctl eval \"hl.config({ decoration = { screen_shader = \\\"$2\\\", $keep } })\"; sleep 0.05; exec hyprctl eval \"hl.config({ decoration = { $keep } })\"", "sh", runDir, path, src, statePath, state];
-                                effectsSetter.running = true;
-                            }
-                            Process {
-                                id: effectsSetter
-                                onExited: if (disp.effectsDirty) {
-                                    disp.effectsDirty = false;
-                                    disp.applyEffects();
-                                }
-                            }
-                            // ── remember the settings, and put them back after a restart or login ──
-                            // (written by applyEffects above)
-                            readonly property string statePath: Quickshell.env("HOME") + "/.local/state/quickshell/display.json"
-                            FileView {
-                                id: stateFile
-                                path: disp.statePath
-                                blockLoading: true
-                                printErrors: false
-                            }
-                            property bool restored: false
-
-                            // Read the real brightness (and whether there's a backlight at all)
-                            // at start and each time the popup opens, so the keys are picked up.
-                            readonly property bool shown: !!QsWindow.window && QsWindow.window.visible
-                            onShownChanged: if (shown)
-                                reader.running = true
-                            Process {
-                                id: reader
-                                running: true
-                                // prints e.g. "45" (percent), or nothing when there's no backlight
-                                command: ["sh", "-c", "brightnessctl -m -c backlight 2>/dev/null | head -n1 | cut -d, -f4 | tr -d %"]
-                                stdout: StdioCollector {
-                                    onStreamFinished: {
-                                        const v = parseInt(text.trim());
-                                        if (!disp.restored) {
-                                            // first read: decide the mode, then bring back the saved settings
-                                            disp.mode = isNaN(v) ? "software" : "backlight";
-                                            let saved = {};
-                                            try {
-                                                saved = JSON.parse(stateFile.text() || "{}");
-                                            } catch (e) {}
-                                            disp.nightOn = saved.nightOn === true;
-                                            disp.kelvin = saved.kelvin || 4000;
-                                            disp.filter = saved.filter || "none";
-                                            if (disp.mode === "software")
-                                                disp.brightness = saved.brightness || 100;
-                                            disp.restored = true;
-                                            disp.applyEffects();
-                                        }
-                                        if (disp.mode === "backlight" && !isNaN(v) && !brightSlider.pressed)
-                                            disp.brightness = v;
+                                Process {
+                                    id: effectsSetter
+                                    onExited: if (disp.effectsDirty) {
+                                        disp.effectsDirty = false;
+                                        disp.applyEffects();
                                     }
                                 }
-                            }
+                                // ── remember the settings, and put them back after a restart or login ──
+                                // (written by applyEffects above)
+                                readonly property string statePath: Quickshell.env("HOME") + "/.local/state/quickshell/display.json"
+                                FileView {
+                                    id: stateFile
+                                    path: disp.statePath
+                                    blockLoading: true
+                                    printErrors: false
+                                }
+                                property bool restored: false
 
-                            // Laptop backlight: same one-at-a-time idea as above.
-                            property bool brightDirty: false
-                            function pushBrightness() {
-                                if (mode === "software") {
-                                    applyEffects();
-                                    return;
+                                // Read the real brightness (and whether there's a backlight at all)
+                                // at start and each time the popup opens, so the keys are picked up.
+                                readonly property bool shown: !!QsWindow.window && QsWindow.window.visible
+                                onShownChanged: if (shown)
+                                    reader.running = true
+                                Process {
+                                    id: reader
+                                    running: true
+                                    // prints e.g. "45" (percent), or nothing when there's no backlight
+                                    command: ["sh", "-c", "brightnessctl -m -c backlight 2>/dev/null | head -n1 | cut -d, -f4 | tr -d %"]
+                                    stdout: StdioCollector {
+                                        onStreamFinished: {
+                                            const v = parseInt(text.trim());
+                                            if (!disp.restored) {
+                                                // first read: decide the mode, then bring back the saved settings
+                                                disp.mode = isNaN(v) ? "software" : "backlight";
+                                                let saved = {};
+                                                try {
+                                                    saved = JSON.parse(stateFile.text() || "{}");
+                                                } catch (e) {}
+                                                disp.nightOn = saved.nightOn === true;
+                                                disp.kelvin = saved.kelvin || 4000;
+                                                disp.filter = saved.filter || "none";
+                                                if (disp.mode === "software")
+                                                    disp.brightness = saved.brightness || 100;
+                                                disp.restored = true;
+                                                disp.applyEffects();
+                                            }
+                                            if (disp.mode === "backlight" && !isNaN(v) && !brightSlider.pressed)
+                                                disp.brightness = v;
+                                        }
+                                    }
                                 }
-                                if (brightSetter.running) {
-                                    brightDirty = true;
-                                    return;
-                                }
-                                brightSetter.command = ["brightnessctl", "-q", "-c", "backlight", "set", brightness + "%"];
-                                brightSetter.running = true;
-                            }
-                            Process {
-                                id: brightSetter
-                                onExited: if (disp.brightDirty) {
-                                    disp.brightDirty = false;
-                                    disp.pushBrightness();
-                                }
-                            }
 
-                            function pushNight() {
-                                applyEffects();
-                            }
-                            // Picking the active filter again turns it off.
-                            function setFilter(name) {
-                                filter = filter === name ? "none" : name;
-                                applyEffects();
-                            }
-                            function reset() {
-                                brightness = 100;
-                                nightOn = false;
-                                filter = "none";
-                                if (mode === "backlight")
-                                    pushBrightness();
-                                applyEffects();
-                            }
-
-                            // ── header: title, and Reset on the right ──
-                            Item {
-                                width: parent.width
-                                height: 26
-
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "Display"
-                                    color: Theme.text
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 1.2
-                                    font.weight: 700
-                                    font.letterSpacing: Theme.letterSpacing
+                                // Laptop backlight: same one-at-a-time idea as above.
+                                property bool brightDirty: false
+                                function pushBrightness() {
+                                    if (mode === "software") {
+                                        applyEffects();
+                                        return;
+                                    }
+                                    if (brightSetter.running) {
+                                        brightDirty = true;
+                                        return;
+                                    }
+                                    brightSetter.command = ["brightnessctl", "-q", "-c", "backlight", "set", brightness + "%"];
+                                    brightSetter.running = true;
                                 }
-                                Chip {
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    label: "Reset"
-                                    // full brightness, no tint, no filter
-                                    onClicked: disp.reset()
-                                }
-                            }
-
-                            // ── brightness ──
-                            Item {
-                                width: parent.width
-                                height: brightLabel.implicitHeight
-
-                                Text {
-                                    id: brightLabel
-                                    text: disp.mode === "backlight" ? "Brightness" : "Brightness (software)"
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
-                                    font.weight: 600
-                                }
-                                Text {
-                                    anchors.right: parent.right
-                                    text: disp.brightness + "%"
-                                    color: Theme.yellow
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
-                                    font.weight: 700
-                                }
-                            }
-                            Row {
-                                spacing: 6
-
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "brightness_low"
-                                    color: Theme.text
-                                    font.family: Theme.iconFont
-                                    font.pixelSize: Theme.iconSize
-                                    font.variableAxes: Theme.iconAxes
-                                }
-                                HSlider {
-                                    id: brightSlider
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: disp.width - 2 * (Theme.iconSize + 6)
-                                    // never all the way to 0: a black screen is hard to fix by mouse
-                                    // (a laptop backlight at 1% still glows; software dimming stops at 10%)
-                                    from: disp.mode === "backlight" ? 1 : 10
-                                    to: 100
-                                    stepSize: 1
-                                    tint: Theme.yellow
-                                    value: disp.brightness
-                                    onMoved: {
-                                        disp.brightness = Math.round(value);
+                                Process {
+                                    id: brightSetter
+                                    onExited: if (disp.brightDirty) {
+                                        disp.brightDirty = false;
                                         disp.pushBrightness();
                                     }
                                 }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "brightness_high"
-                                    color: Theme.yellow
-                                    font.family: Theme.iconFont
-                                    font.pixelSize: Theme.iconSize
-                                    font.variableAxes: Theme.iconAxes
-                                }
-                            }
 
-                            // ── night light ──
-                            Item {
-                                width: parent.width
-                                height: 24
-
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "Night light" + (disp.nightOn ? "  ·  " + disp.kelvin + " K" : "")
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
-                                    font.weight: 600
+                                function pushNight() {
+                                    applyEffects();
                                 }
-                                Chip {
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    label: disp.nightOn ? "On" : "Off"
-                                    selected: disp.nightOn
-                                    tint: Theme.orange
-                                    onClicked: {
-                                        disp.nightOn = !disp.nightOn;
-                                        disp.pushNight();
+                                // Picking the active filter again turns it off.
+                                function setFilter(name) {
+                                    filter = filter === name ? "none" : name;
+                                    applyEffects();
+                                }
+                                function reset() {
+                                    brightness = 100;
+                                    nightOn = false;
+                                    filter = "none";
+                                    if (mode === "backlight")
+                                        pushBrightness();
+                                    applyEffects();
+                                }
+
+                                // ── header: title, and Reset on the right ──
+                                Item {
+                                    width: parent.width
+                                    height: 26
+
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "Display"
+                                        color: Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 1.2
+                                        font.weight: 700
+                                        font.letterSpacing: Theme.letterSpacing
                                     }
-                                }
-                            }
-                            Row {
-                                spacing: 6
-                                // dimmed while off; dragging it turns night light on
-                                opacity: disp.nightOn ? 1 : 0.5
-
-                                Behavior on opacity {
-                                    NumberAnimation {
-                                        duration: 150
-                                    }
-                                }
-
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "local_fire_department"
-                                    color: Theme.orange
-                                    font.family: Theme.iconFont
-                                    font.pixelSize: Theme.iconSize
-                                    font.variableAxes: Theme.iconAxes
-                                }
-                                HSlider {
-                                    id: warmSlider
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: disp.width - 2 * (Theme.iconSize + 6)
-                                    // left = warm (2500 K), right = barely tinted (6000 K)
-                                    from: 2500
-                                    to: 6000
-                                    stepSize: 100
-                                    tint: Theme.orange
-                                    value: disp.kelvin
-                                    onMoved: {
-                                        disp.kelvin = Math.round(value);
-                                        disp.nightOn = true;
-                                        disp.pushNight();
-                                    }
-                                }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "ac_unit"
-                                    color: Theme.blue
-                                    font.family: Theme.iconFont
-                                    font.pixelSize: Theme.iconSize
-                                    font.variableAxes: Theme.iconAxes
-                                }
-                            }
-
-                            // ── color filters: one at a time ──
-                            Text {
-                                text: "Color filter"
-                                color: Theme.text
-                                opacity: 0.6
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize * 0.85
-                                font.weight: 600
-                            }
-                            Grid {
-                                width: parent.width
-                                columns: 2
-                                spacing: 6
-
-                                Repeater {
-                                    model: [
-                                        {
-                                            "id": "invert",
-                                            "label": "Invert"
-                                        },
-                                        {
-                                            "id": "grayscale",
-                                            "label": "Grayscale"
-                                        },
-                                        {
-                                            "id": "sepia",
-                                            "label": "Sepia"
-                                        },
-                                        {
-                                            "id": "contrast",
-                                            "label": "Contrast"
-                                        }
-                                    ]
-
                                     Chip {
-                                        required property var modelData
-                                        width: (disp.width - 6) / 2   // two per row, same size
-                                        label: modelData.label
-                                        selected: disp.filter === modelData.id
-                                        tint: Theme.magenta
-                                        onClicked: disp.setFilter(modelData.id)
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        label: "Reset"
+                                        // full brightness, no tint, no filter
+                                        onClicked: disp.reset()
                                     }
                                 }
-                            }
-                        }
-                    }
 
-                    // ── Bluetooth ──
-                    // In the bar: just the icon, no pill. Click it for the device list.
-                    Widget {
-                        anchors.verticalCenter: parent.verticalCenter
-                        // bluetooth_searching (the one with waves) while something is still connecting
-                        icon: !btList.powered ? "bluetooth_disabled" : btList.anyConnected ? "bluetooth_connected" : btList.anyConnecting ? "bluetooth_searching" : "bluetooth"
+                                // ── brightness ──
+                                Item {
+                                    width: parent.width
+                                    height: brightLabel.implicitHeight
 
-                        Column {
-                            id: btList
-                            spacing: 4
-
-                            readonly property var adapter: Bluetooth.defaultAdapter
-                            readonly property bool powered: !!adapter && adapter.enabled
-                            // "Connected" here means actually usable (see ready() below), not just
-                            // "BlueZ has a radio link".
-                            readonly property bool anyConnected: Bluetooth.devices.values.some(d => ready(d))
-                            readonly property bool anyConnecting: Bluetooth.devices.values.some(d => d.state === BluetoothDeviceState.Connecting || (d.connected && !ready(d)))
-
-                            // ── When is a device really connected? ──
-                            // BlueZ (and so Quickshell) flips a device to "Connected" as soon as the
-                            // Bluetooth link is up. For headphones and speakers the audio part (A2DP)
-                            // takes a few more seconds; that's the gap you saw with the AirPods.
-                            // WirePlumber only creates the device's audio node once audio is ready,
-                            // and names it after the MAC address with _ for : (from WirePlumber's
-                            // monitor-utils.lua: "bluez_output.C0_1E_7C_D0_1C_84.1", or
-                            // "bluez_input..." for a mic). So an audio device counts as connected
-                            // once a node with its address exists.
-                            // Mice, keyboards, phones etc. have no node; for them BlueZ's
-                            // "Connected" is used as-is.
-                            readonly property var btNodeNames: Pipewire.nodes.values.filter(n => n.name.startsWith("bluez_")).map(n => n.name)
-                            function isAudio(device) {
-                                return device.icon.startsWith("audio");
-                            }
-                            function hasNode(device) {
-                                const key = device.address.replace(/:/g, "_");
-                                return btNodeNames.some(n => n.includes(key));
-                            }
-                            // Safety net: if an audio device is linked but never gets a node (say
-                            // it only connected for something other than audio), call it connected
-                            // after 15 s anyway instead of saying "Connecting..." forever.
-                            property var linkedSince: ({})  // address -> time BlueZ said Connected
-                            property double now: Date.now()
-                            function ready(device) {
-                                if (device.state !== BluetoothDeviceState.Connected)
-                                    return false;
-                                if (!isAudio(device) || hasNode(device))
-                                    return true;
-                                const t = linkedSince[device.address];
-                                return t !== undefined && now - t >= 15000;
-                            }
-                            Timer {
-                                // only ticks while an audio device is linked but has no node yet
-                                running: Bluetooth.devices.values.some(d => d.connected && btList.isAudio(d) && !btList.hasNode(d))
-                                interval: 1000
-                                repeat: true
-                                triggeredOnStart: true
-                                onTriggered: {
-                                    btList.now = Date.now();
-                                    const next = {};
-                                    for (const d of Bluetooth.devices.values)
-                                        if (d.connected)
-                                            next[d.address] = btList.linkedSince[d.address] ?? btList.now;
-                                    btList.linkedSince = next; // reassign so bindings notice
+                                    Text {
+                                        id: brightLabel
+                                        text: disp.mode === "backlight" ? "Brightness" : "Brightness (software)"
+                                        color: Theme.text
+                                        opacity: 0.6
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.85
+                                        font.weight: 600
+                                    }
+                                    Text {
+                                        anchors.right: parent.right
+                                        text: disp.brightness + "%"
+                                        color: Theme.yellow
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.85
+                                        font.weight: 700
+                                    }
                                 }
-                            }
+                                Row {
+                                    spacing: 6
 
-                            // Devices that have a name (or that you've paired): connected first, then
-                            // paired, then A to Z. Nameless ones are usually random nearby gadgets.
-                            readonly property var devices: Bluetooth.devices.values.filter(d => d.paired || d.deviceName !== "").sort((a, b) => (b.connected - a.connected) || (b.paired - a.paired) || a.name.localeCompare(b.name))
-
-                            // Like the network list, the open drop-down is remembered here, not in the
-                            // rows: the list re-sorts when a device connects, and rows can be rebuilt.
-                            property var active: null       // the device whose drop-down is open
-                            property var pairingDevice: null // a new device we're pairing, to connect once paired
-                            property var failedDevice: null  // shows "Pairing failed" for a few seconds
-
-                            function toggle(device) {
-                                active = active === device ? null : device;
-                            }
-                            // Status shown next to each device.
-                            function stateText(device) {
-                                if (device.state === BluetoothDeviceState.Connected)
-                                    return ready(device) ? "Connected" : "Connecting...";
-                                if (device.state === BluetoothDeviceState.Connecting)
-                                    return "Connecting...";
-                                if (device.state === BluetoothDeviceState.Disconnecting)
-                                    return "Disconnecting...";
-                                if (device.pairing)
-                                    return "Pairing...";
-                                if (device === failedDevice)
-                                    return "Pairing failed";
-                                return device.paired ? "Not connected" : "New";
-                            }
-                            function busy(device) {
-                                return device.pairing || device.state === BluetoothDeviceState.Connecting || device.state === BluetoothDeviceState.Disconnecting;
-                            }
-                            function connectOrDisconnect(device) {
-                                if (busy(device))
-                                    return;
-                                if (device.connected) {
-                                    device.disconnect();
-                                } else if (!device.paired) {
-                                    // never paired: pair first; the Connections below connects afterwards
-                                    device.trusted = true;      // lets it reconnect by itself next time
-                                    failedDevice = null;
-                                    pairingDevice = device;
-                                    device.pair();
-                                } else {
-                                    device.connect();
-                                }
-                            }
-                            // Material Symbols icon for the kind of device (BlueZ gives freedesktop icon names).
-                            function glyph(device) {
-                                const i = device.icon;
-                                if (i.startsWith("audio-head"))
-                                    return "headphones";
-                                if (i.startsWith("audio"))
-                                    return "speaker";
-                                if (i === "input-mouse")
-                                    return "mouse";
-                                if (i === "input-keyboard")
-                                    return "keyboard";
-                                if (i === "input-gaming")
-                                    return "sports_esports";
-                                if (i === "phone")
-                                    return "smartphone";
-                                if (i === "computer")
-                                    return "computer";
-                                return "bluetooth";
-                            }
-
-                            Connections {
-                                target: btList.pairingDevice
-                                function onPairedChanged() {
-                                    const device = btList.pairingDevice;
-                                    btList.pairingDevice = null;
-                                    pairCheck.stop();
-                                    if (device.paired && !device.connected)
-                                        device.connect();
-                                }
-                                // The pairing attempt ended. If it isn't paired a moment later
-                                // (BlueZ can report "paired" just after), it failed.
-                                function onPairingChanged() {
-                                    if (!btList.pairingDevice.pairing && !btList.pairingDevice.paired)
-                                        pairCheck.restart();
-                                }
-                            }
-                            Timer {
-                                id: pairCheck
-                                interval: 1500
-                                onTriggered: {
-                                    const device = btList.pairingDevice;
-                                    if (!device || device.paired)
-                                        return;
-                                    btList.pairingDevice = null;
-                                    btList.failedDevice = device;
-                                    failedReset.restart();
-                                }
-                            }
-                            // "Pairing failed" goes back to "New" after 4 s
-                            Timer {
-                                id: failedReset
-                                interval: 4000
-                                onTriggered: btList.failedDevice = null
-                            }
-
-                            // Look for nearby devices only while this popup is open (and Bluetooth is on).
-                            Binding {
-                                when: btList.powered
-                                target: btList.adapter
-                                property: "discovering"
-                                value: !!QsWindow.window && QsWindow.window.visible
-                            }
-
-                            // header: title on the left, on/off switch on the right
-                            Item {
-                                width: 280
-                                height: 26
-
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "Bluetooth"
-                                    color: Theme.text
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 1.2
-                                    font.weight: 700
-                                    font.letterSpacing: Theme.letterSpacing
-                                }
-                                Rectangle {
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    visible: !!btList.adapter
-                                    width: btPowerLabel.implicitWidth + 24
-                                    height: 24
-                                    radius: height / 2
-                                    color: btList.powered ? Theme.accent : btPowerMouse.containsMouse ? Theme.pill : "transparent"
-                                    border.width: 1
-                                    border.color: btList.powered ? Theme.accent : Theme.pill
-                                    scale: btPowerMouse.pressed ? 0.85 : 1
-
-                                    Behavior on color {
-                                        ColorAnimation {
-                                            duration: 120
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "brightness_low"
+                                        color: Theme.text
+                                        font.family: Theme.iconFont
+                                        font.pixelSize: Theme.iconSize
+                                        font.variableAxes: Theme.iconAxes
+                                    }
+                                    HSlider {
+                                        id: brightSlider
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: disp.width - 2 * (Theme.iconSize + 6)
+                                        // never all the way to 0: a black screen is hard to fix by mouse
+                                        // (a laptop backlight at 1% still glows; software dimming stops at 10%)
+                                        from: disp.mode === "backlight" ? 1 : 10
+                                        to: 100
+                                        stepSize: 1
+                                        tint: Theme.yellow
+                                        value: disp.brightness
+                                        onMoved: {
+                                            disp.brightness = Math.round(value);
+                                            disp.pushBrightness();
                                         }
                                     }
-                                    Behavior on scale {
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "brightness_high"
+                                        color: Theme.yellow
+                                        font.family: Theme.iconFont
+                                        font.pixelSize: Theme.iconSize
+                                        font.variableAxes: Theme.iconAxes
+                                    }
+                                }
+
+                                // ── night light ──
+                                Item {
+                                    width: parent.width
+                                    height: 24
+
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "Night light" + (disp.nightOn ? "  ·  " + disp.kelvin + " K" : "")
+                                        color: Theme.text
+                                        opacity: 0.6
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.85
+                                        font.weight: 600
+                                    }
+                                    Chip {
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        label: disp.nightOn ? "On" : "Off"
+                                        selected: disp.nightOn
+                                        tint: Theme.orange
+                                        onClicked: {
+                                            disp.nightOn = !disp.nightOn;
+                                            disp.pushNight();
+                                        }
+                                    }
+                                }
+                                Row {
+                                    spacing: 6
+                                    // dimmed while off; dragging it turns night light on
+                                    opacity: disp.nightOn ? 1 : 0.5
+
+                                    Behavior on opacity {
                                         NumberAnimation {
-                                            duration: 120
-                                            easing.type: Easing.OutCubic
+                                            duration: 150
                                         }
                                     }
 
                                     Text {
-                                        id: btPowerLabel
-                                        anchors.centerIn: parent
-                                        text: btList.powered ? "On" : "Off"
-                                        color: btList.powered ? Theme.bg : Theme.text
-                                        font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 0.9
-                                        font.weight: 700
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "local_fire_department"
+                                        color: Theme.orange
+                                        font.family: Theme.iconFont
+                                        font.pixelSize: Theme.iconSize
+                                        font.variableAxes: Theme.iconAxes
                                     }
-                                    MouseArea {
-                                        id: btPowerMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: btList.adapter.enabled = !btList.adapter.enabled
+                                    HSlider {
+                                        id: warmSlider
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: disp.width - 2 * (Theme.iconSize + 6)
+                                        // left = warm (2500 K), right = barely tinted (6000 K)
+                                        from: 2500
+                                        to: 6000
+                                        stepSize: 100
+                                        tint: Theme.orange
+                                        value: disp.kelvin
+                                        onMoved: {
+                                            disp.kelvin = Math.round(value);
+                                            disp.nightOn = true;
+                                            disp.pushNight();
+                                        }
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "ac_unit"
+                                        color: Theme.blue
+                                        font.family: Theme.iconFont
+                                        font.pixelSize: Theme.iconSize
+                                        font.variableAxes: Theme.iconAxes
                                     }
                                 }
-                            }
 
-                            // what to show when there's no list
-                            Text {
-                                width: 280
-                                wrapMode: Text.Wrap
-                                visible: text !== ""
-                                text: {
-                                    if (!btList.adapter)
-                                        return "No Bluetooth adapter found.";
-                                    if (!btList.powered)
-                                        return "Bluetooth is off.";
-                                    if (btList.devices.length === 0)
-                                        return btList.adapter.discovering ? "Searching for devices..." : "No devices found.";
-                                    return "";
-                                }
-                                color: Theme.text
-                                opacity: 0.6
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize
-                            }
-
-                            // "Devices", with "Searching..." on the right while it scans
-                            Item {
-                                width: 280
-                                height: devicesLabel.implicitHeight
-                                visible: btList.powered && btList.devices.length > 0
-
+                                // ── color filters: one at a time ──
                                 Text {
-                                    id: devicesLabel
-                                    text: "Devices"
+                                    text: "Color filter"
                                     color: Theme.text
                                     opacity: 0.6
                                     font.family: Theme.font
                                     font.pixelSize: Theme.textSize * 0.85
                                     font.weight: 600
                                 }
-                                Text {
-                                    anchors.right: parent.right
-                                    visible: !!btList.adapter && btList.adapter.discovering
-                                    text: "Searching..."
-                                    color: Theme.accent
-                                    opacity: 0.8
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
-                                }
-                            }
-
-                            // Scrolls once the list is taller than 360 px (lots of devices or networks around).
-                            Flickable {
-                                id: btScroll
-                                width: 280
-                                height: Math.min(contentHeight, 360)
-                                contentHeight: btRows.implicitHeight
-                                visible: btRows.implicitHeight > 0
-                                clip: true
-                                boundsBehavior: Flickable.StopAtBounds
-                                ScrollBar.vertical: ThinScrollBar {}
-
-                                // Scrolls just enough to show all of `row` (used while a row's drop-down opens).
-                                function show(row) {
-                                    if (row.y + row.height > contentY + height)
-                                        contentY = Math.min(row.y + row.height, contentHeight) - height;
-                                    if (row.y < contentY)
-                                        contentY = row.y;
-                                }
-
-                                Column {
-                                    id: btRows
-                                    width: btScroll.width
-                                    spacing: 4
+                                Grid {
+                                    width: parent.width
+                                    columns: 2
+                                    spacing: 6
 
                                     Repeater {
-                                        // ScriptModel only builds rows for new devices instead of rebuilding them all.
-                                        model: ScriptModel {
-                                            values: btList.powered ? btList.devices : []
-                                        }
+                                        model: [
+                                            {
+                                                "id": "invert",
+                                                "label": "Invert"
+                                            },
+                                            {
+                                                "id": "grayscale",
+                                                "label": "Grayscale"
+                                            },
+                                            {
+                                                "id": "sepia",
+                                                "label": "Sepia"
+                                            },
+                                            {
+                                                "id": "contrast",
+                                                "label": "Contrast"
+                                            }
+                                        ]
 
-                                        Rectangle {
-                                            id: btRow
+                                        Chip {
                                             required property var modelData
-                                            readonly property var device: modelData
-                                            readonly property bool expanded: btList.active === device
-                                            readonly property bool ready: btList.ready(device)  // really connected
-                                            // keep it in view while its drop-down glides open
-                                            onHeightChanged: if (expanded)
-                                                btScroll.show(btRow)
-
-                                            width: 280
-                                            height: btHeader.height + btDrop.height
-                                            radius: Theme.radius
-                                            // a device that shows up fades in instead of popping in
-                                            NumberAnimation on opacity {
-                                                from: 0
-                                                to: 1
-                                                duration: 200
-                                            }
-                                            color: btHeaderMouse.containsMouse || expanded ? Theme.pill : "transparent"
-                                            clip: true
-
-                                            Behavior on color {
-                                                ColorAnimation {
-                                                    duration: 120
-                                                }
-                                            }
-
-                                            // ── the row itself: icon, name, status ──
-                                            Item {
-                                                id: btHeader
-                                                width: parent.width
-                                                height: 30
-                                                scale: btHeaderMouse.pressed ? 0.85 : 1
-
-                                                Behavior on scale {
-                                                    NumberAnimation {
-                                                        duration: 120
-                                                        easing.type: Easing.OutCubic
-                                                    }
-                                                }
-
-                                                Text {
-                                                    id: btGlyph
-                                                    anchors.left: parent.left
-                                                    anchors.leftMargin: 10
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    text: btList.glyph(btRow.device)
-                                                    color: btRow.ready ? Theme.accent : Theme.text
-                                                    font.family: Theme.iconFont
-                                                    font.pixelSize: Theme.iconSize
-                                                    font.variableAxes: Theme.iconAxes
-                                                }
-                                                Text {
-                                                    anchors {
-                                                        left: btGlyph.right
-                                                        right: btStatus.left
-                                                        leftMargin: 8
-                                                        rightMargin: 8
-                                                        verticalCenter: parent.verticalCenter
-                                                    }
-                                                    text: btRow.device.name
-                                                    elide: Text.ElideRight
-                                                    color: btRow.ready ? Theme.accent : Theme.text
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize
-                                                    font.weight: btRow.ready ? 700 : 500
-                                                    font.letterSpacing: Theme.letterSpacing
-                                                }
-                                                // per-device status (and battery, when the device reports it)
-                                                Text {
-                                                    id: btStatus
-                                                    anchors {
-                                                        right: parent.right
-                                                        rightMargin: 10
-                                                        verticalCenter: parent.verticalCenter
-                                                    }
-                                                    text: btList.stateText(btRow.device) + (btRow.device.batteryAvailable ? "  ·  " + Math.round(btRow.device.battery * 100) + "%" : "")
-                                                    color: btRow.ready ? Theme.green : btRow.device === btList.failedDevice ? Theme.red : btRow.device.connected ? Theme.yellow : Theme.text
-                                                    opacity: btRow.device.connected || btRow.device === btList.failedDevice ? 1 : 0.6
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize * 0.85
-                                                }
-                                                MouseArea {
-                                                    id: btHeaderMouse
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: btList.toggle(btRow.device)
-                                                }
-                                            }
-
-                                            // ── the drop-down: Connect / Disconnect, glides open over 500 ms ──
-                                            Item {
-                                                id: btDrop
-                                                y: btHeader.height
-                                                width: parent.width
-                                                height: btRow.expanded ? btDropContent.implicitHeight + 10 : 0
-                                                clip: true
-
-                                                Behavior on height {
-                                                    NumberAnimation {
-                                                        duration: 500
-                                                        easing.type: Easing.OutCubic
-                                                    }
-                                                }
-
-                                                Column {
-                                                    id: btDropContent
-                                                    x: 10
-                                                    width: parent.width - 20
-                                                    spacing: 6
-
-                                                    Rectangle {
-                                                        id: btAction
-                                                        // red "Disconnect" when connected, green "Connect" otherwise
-                                                        readonly property bool disconnecting: btRow.device.connected
-                                                        readonly property color tint: disconnecting ? Theme.red : Theme.green
-                                                        readonly property bool busy: btList.busy(btRow.device)
-
-                                                        width: parent.width
-                                                        height: 26
-                                                        radius: height / 2
-                                                        color: btActionMouse.containsMouse && !busy ? tint : Theme.bg
-                                                        opacity: busy ? 0.5 : 1
-                                                        scale: btActionMouse.pressed && !busy ? 0.85 : 1
-
-                                                        Behavior on color {
-                                                            ColorAnimation {
-                                                                duration: 120
-                                                            }
-                                                        }
-                                                        Behavior on scale {
-                                                            NumberAnimation {
-                                                                duration: 120
-                                                                easing.type: Easing.OutCubic
-                                                            }
-                                                        }
-
-                                                        Text {
-                                                            anchors.centerIn: parent
-                                                            // while it's working, show what it's doing instead
-                                                            text: btAction.busy ? btList.stateText(btRow.device) : btAction.disconnecting ? "Disconnect" : "Connect"
-                                                            color: btActionMouse.containsMouse && !btAction.busy ? Theme.bg : btAction.tint
-                                                            font.family: Theme.font
-                                                            font.pixelSize: Theme.textSize
-                                                            font.weight: 600
-                                                        }
-                                                        MouseArea {
-                                                            id: btActionMouse
-                                                            anchors.fill: parent
-                                                            hoverEnabled: true
-                                                            cursorShape: btAction.busy ? Qt.ArrowCursor : Qt.PointingHandCursor
-                                                            onClicked: btList.connectOrDisconnect(btRow.device)
-                                                        }
-                                                    }
-                                                }
-                                            }
+                                            width: (disp.width - 6) / 2   // two per row, same size
+                                            label: modelData.label
+                                            selected: disp.filter === modelData.id
+                                            tint: Theme.magenta
+                                            onClicked: disp.setFilter(modelData.id)
                                         }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    // ── Theme: the color themes (the themes block at the top of home.nix) ──
-                    // Icon only, like Bluetooth. Each row shows that theme's own colors;
-                    // click one to switch. The bar fades over, and the theme command does
-                    // the rest (see "Themes" in home.nix). The popup stays open, so you
-                    // can try a few.
-                    Widget {
-                        anchors.verticalCenter: parent.verticalCenter
-                        icon: "palette"
+                        // ── Bluetooth ──
+                        // In the bar: just the icon, no pill. Click it for the device list.
+                        Widget {
+                            anchors.verticalCenter: parent.verticalCenter
+                            // bluetooth_searching (the one with waves) while something is still connecting
+                            icon: !btList.powered ? "bluetooth_disabled" : btList.anyConnected ? "bluetooth_connected" : btList.anyConnecting ? "bluetooth_searching" : "bluetooth"
 
-                        Column {
-                            id: themeList
-                            spacing: 4
-                            width: 280
+                            Column {
+                                id: btList
+                                spacing: 4
 
-                            Item {
-                                width: parent.width
-                                height: 26
+                                readonly property var adapter: Bluetooth.defaultAdapter
+                                readonly property bool powered: !!adapter && adapter.enabled
+                                // "Connected" here means actually usable (see ready() below), not just
+                                // "BlueZ has a radio link".
+                                readonly property bool anyConnected: Bluetooth.devices.values.some(d => ready(d))
+                                readonly property bool anyConnecting: Bluetooth.devices.values.some(d => d.state === BluetoothDeviceState.Connecting || (d.connected && !ready(d)))
 
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "Theme"
-                                    color: Theme.text
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 1.2
-                                    font.weight: 700
-                                    font.letterSpacing: Theme.letterSpacing
+                                // ── When is a device really connected? ──
+                                // BlueZ (and so Quickshell) flips a device to "Connected" as soon as the
+                                // Bluetooth link is up. For headphones and speakers the audio part (A2DP)
+                                // takes a few more seconds; that's the gap you saw with the AirPods.
+                                // WirePlumber only creates the device's audio node once audio is ready,
+                                // and names it after the MAC address with _ for : (from WirePlumber's
+                                // monitor-utils.lua: "bluez_output.C0_1E_7C_D0_1C_84.1", or
+                                // "bluez_input..." for a mic). So an audio device counts as connected
+                                // once a node with its address exists.
+                                // Mice, keyboards, phones etc. have no node; for them BlueZ's
+                                // "Connected" is used as-is.
+                                readonly property var btNodeNames: Pipewire.nodes.values.filter(n => n.name.startsWith("bluez_")).map(n => n.name)
+                                function isAudio(device) {
+                                    return device.icon.startsWith("audio");
                                 }
-                            }
-
-                            Repeater {
-                                model: Theme.order
-
-                                Rectangle {
-                                    id: themeRow
-                                    required property string modelData
-                                    readonly property var info: Theme.themes[modelData]
-                                    readonly property var colors: info.colors
-                                    readonly property bool selected: Theme.current === modelData
-
-                                    width: themeList.width
-                                    height: 44
-                                    radius: Theme.radius
-                                    color: themeMouse.containsMouse || selected ? Theme.pill : "transparent"
-
-                                    Behavior on color {
-                                        ColorAnimation {
-                                            duration: 120
-                                        }
+                                function hasNode(device) {
+                                    const key = device.address.replace(/:/g, "_");
+                                    return btNodeNames.some(n => n.includes(key));
+                                }
+                                // Safety net: if an audio device is linked but never gets a node (say
+                                // it only connected for something other than audio), call it connected
+                                // after 15 s anyway instead of saying "Connecting..." forever.
+                                property var linkedSince: ({})  // address -> time BlueZ said Connected
+                                property double now: Date.now()
+                                function ready(device) {
+                                    if (device.state !== BluetoothDeviceState.Connected)
+                                        return false;
+                                    if (!isAudio(device) || hasNode(device))
+                                        return true;
+                                    const t = linkedSince[device.address];
+                                    return t !== undefined && now - t >= 15000;
+                                }
+                                Timer {
+                                    // only ticks while an audio device is linked but has no node yet
+                                    running: Bluetooth.devices.values.some(d => d.connected && btList.isAudio(d) && !btList.hasNode(d))
+                                    interval: 1000
+                                    repeat: true
+                                    triggeredOnStart: true
+                                    onTriggered: {
+                                        btList.now = Date.now();
+                                        const next = {};
+                                        for (const d of Bluetooth.devices.values)
+                                            if (d.connected)
+                                                next[d.address] = btList.linkedSince[d.address] ?? btList.now;
+                                        btList.linkedSince = next; // reassign so bindings notice
                                     }
+                                }
 
-                                    Item {
-                                        anchors.fill: parent
-                                        scale: themeMouse.pressed ? 0.85 : 1
+                                // Devices that have a name (or that you've paired): connected first, then
+                                // paired, then A to Z. Nameless ones are usually random nearby gadgets.
+                                readonly property var devices: Bluetooth.devices.values.filter(d => d.paired || d.deviceName !== "").sort((a, b) => (b.connected - a.connected) || (b.paired - a.paired) || a.name.localeCompare(b.name))
 
+                                // Like the network list, the open drop-down is remembered here, not in the
+                                // rows: the list re-sorts when a device connects, and rows can be rebuilt.
+                                property var active: null       // the device whose drop-down is open
+                                property var pairingDevice: null // a new device we're pairing, to connect once paired
+                                property var failedDevice: null  // shows "Pairing failed" for a few seconds
+
+                                function toggle(device) {
+                                    active = active === device ? null : device;
+                                }
+                                // Status shown next to each device.
+                                function stateText(device) {
+                                    if (device.state === BluetoothDeviceState.Connected)
+                                        return ready(device) ? "Connected" : "Connecting...";
+                                    if (device.state === BluetoothDeviceState.Connecting)
+                                        return "Connecting...";
+                                    if (device.state === BluetoothDeviceState.Disconnecting)
+                                        return "Disconnecting...";
+                                    if (device.pairing)
+                                        return "Pairing...";
+                                    if (device === failedDevice)
+                                        return "Pairing failed";
+                                    return device.paired ? "Not connected" : "New";
+                                }
+                                function busy(device) {
+                                    return device.pairing || device.state === BluetoothDeviceState.Connecting || device.state === BluetoothDeviceState.Disconnecting;
+                                }
+                                function connectOrDisconnect(device) {
+                                    if (busy(device))
+                                        return;
+                                    if (device.connected) {
+                                        device.disconnect();
+                                    } else if (!device.paired) {
+                                        // never paired: pair first; the Connections below connects afterwards
+                                        device.trusted = true;      // lets it reconnect by itself next time
+                                        failedDevice = null;
+                                        pairingDevice = device;
+                                        device.pair();
+                                    } else {
+                                        device.connect();
+                                    }
+                                }
+                                // Material Symbols icon for the kind of device (BlueZ gives freedesktop icon names).
+                                function glyph(device) {
+                                    const i = device.icon;
+                                    if (i.startsWith("audio-head"))
+                                        return "headphones";
+                                    if (i.startsWith("audio"))
+                                        return "speaker";
+                                    if (i === "input-mouse")
+                                        return "mouse";
+                                    if (i === "input-keyboard")
+                                        return "keyboard";
+                                    if (i === "input-gaming")
+                                        return "sports_esports";
+                                    if (i === "phone")
+                                        return "smartphone";
+                                    if (i === "computer")
+                                        return "computer";
+                                    return "bluetooth";
+                                }
+
+                                Connections {
+                                    target: btList.pairingDevice
+                                    function onPairedChanged() {
+                                        const device = btList.pairingDevice;
+                                        btList.pairingDevice = null;
+                                        pairCheck.stop();
+                                        if (device.paired && !device.connected)
+                                            device.connect();
+                                    }
+                                    // The pairing attempt ended. If it isn't paired a moment later
+                                    // (BlueZ can report "paired" just after), it failed.
+                                    function onPairingChanged() {
+                                        if (!btList.pairingDevice.pairing && !btList.pairingDevice.paired)
+                                            pairCheck.restart();
+                                    }
+                                }
+                                Timer {
+                                    id: pairCheck
+                                    interval: 1500
+                                    onTriggered: {
+                                        const device = btList.pairingDevice;
+                                        if (!device || device.paired)
+                                            return;
+                                        btList.pairingDevice = null;
+                                        btList.failedDevice = device;
+                                        failedReset.restart();
+                                    }
+                                }
+                                // "Pairing failed" goes back to "New" after 4 s
+                                Timer {
+                                    id: failedReset
+                                    interval: 4000
+                                    onTriggered: btList.failedDevice = null
+                                }
+
+                                // Look for nearby devices only while this popup is open (and Bluetooth is on).
+                                Binding {
+                                    when: btList.powered
+                                    target: btList.adapter
+                                    property: "discovering"
+                                    value: !!QsWindow.window && QsWindow.window.visible
+                                }
+
+                                // header: title on the left, on/off switch on the right
+                                Item {
+                                    width: 280
+                                    height: 26
+
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "Bluetooth"
+                                        color: Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 1.2
+                                        font.weight: 700
+                                        font.letterSpacing: Theme.letterSpacing
+                                    }
+                                    Rectangle {
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: !!btList.adapter
+                                        width: btPowerLabel.implicitWidth + 24
+                                        height: 24
+                                        radius: height / 2
+                                        color: btList.powered ? Theme.accent : btPowerMouse.containsMouse ? Theme.pill : "transparent"
+                                        border.width: 1
+                                        border.color: btList.powered ? Theme.accent : Theme.pill
+                                        scale: btPowerMouse.pressed ? 0.85 : 1
+
+                                        Behavior on color {
+                                            ColorAnimation {
+                                                duration: 120
+                                            }
+                                        }
                                         Behavior on scale {
                                             NumberAnimation {
                                                 duration: 120
@@ -2578,1368 +2288,1797 @@ in
                                             }
                                         }
 
-                                        // a little preview: the theme's background with its colors on it
-                                        Rectangle {
-                                            id: themePreview
-                                            anchors.left: parent.left
-                                            anchors.leftMargin: 8
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: 64
-                                            height: 28
-                                            radius: 6
-                                            color: themeRow.colors.bg
-                                            border.width: 1
-                                            border.color: themeRow.colors.overlay
-
-                                            Row {
-                                                anchors.centerIn: parent
-                                                spacing: 3
-
-                                                Repeater {
-                                                    model: ["red", "yellow", "green", "blue", "magenta"]
-
-                                                    Rectangle {
-                                                        required property string modelData
-                                                        width: 8
-                                                        height: 8
-                                                        radius: 4
-                                                        color: themeRow.colors[modelData]
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        Column {
-                                            anchors {
-                                                left: themePreview.right
-                                                right: themeCheck.left
-                                                leftMargin: 10
-                                                rightMargin: 8
-                                                verticalCenter: parent.verticalCenter
-                                            }
-
-                                            Text {
-                                                width: parent.width
-                                                text: themeRow.info.name
-                                                elide: Text.ElideRight
-                                                color: themeRow.selected ? Theme.accent : Theme.text
-                                                font.family: Theme.font
-                                                font.pixelSize: Theme.textSize
-                                                font.weight: themeRow.selected ? 700 : 500
-                                                font.letterSpacing: Theme.letterSpacing
-                                            }
-                                            Text {
-                                                width: parent.width
-                                                text: themeRow.info.variant
-                                                elide: Text.ElideRight
-                                                color: Theme.text
-                                                opacity: 0.6
-                                                font.family: Theme.font
-                                                font.pixelSize: Theme.textSize * 0.85
-                                            }
-                                        }
                                         Text {
-                                            id: themeCheck
-                                            anchors.right: parent.right
-                                            anchors.rightMargin: 10
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: "check"
-                                            opacity: themeRow.selected ? 1 : 0
-                                            color: Theme.accent
-                                            font.family: Theme.iconFont
-                                            font.pixelSize: Theme.iconSize
-                                            font.variableAxes: Theme.iconAxes
-
-                                            Behavior on opacity {
-                                                NumberAnimation {
-                                                    duration: 120
-                                                }
-                                            }
+                                            id: btPowerLabel
+                                            anchors.centerIn: parent
+                                            text: btList.powered ? "On" : "Off"
+                                            color: btList.powered ? Theme.bg : Theme.text
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.9
+                                            font.weight: 700
+                                        }
+                                        MouseArea {
+                                            id: btPowerMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: btList.adapter.enabled = !btList.adapter.enabled
                                         }
                                     }
-                                    MouseArea {
-                                        id: themeMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: Theme.set(themeRow.modelData)
-                                    }
                                 }
-                            }
 
-                            // where this theme's wallpaper comes from
-                            Text {
-                                width: themeList.width
-                                topPadding: 4
-                                leftPadding: 8
-                                rightPadding: 8
-                                wrapMode: Text.Wrap
-                                text: "Wallpaper: the first picture in\n~/Pictures/Wallpapers/" + Theme.current + "/"
-                                color: Theme.text
-                                opacity: 0.6
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize * 0.85
-                            }
-                        }
-                    }
-
-                    Widget {
-                        padding: 16
-                        button: Item {
-                            width: Theme.moduleHeight
-                            height: width
-
-                            // the cover of whatever's playing
-                            Image {
-                                id: barArt
-                                anchors.fill: parent
-                                source: media.player ? media.player.trackArtUrl : ""
-                                fillMode: Image.PreserveAspectCrop
-                                clip: true
-                            }
-                            // No player, no cover, or the cover didn't load: music_off instead.
-                            // (status is Image.Ready only once a picture has actually loaded)
-                            Text {
-                                anchors.centerIn: parent
-                                visible: barArt.status !== Image.Ready
-                                text: "music_off"
-                                color: Theme.text
-                                font.family: Theme.iconFont
-                                font.pixelSize: Theme.iconSize
-                                font.variableAxes: Theme.iconAxes
-                            }
-                        }
-                        Timer {
-                            running: !!media.player && media.player.isPlaying && !control.pressed
-                            interval: 1000
-                            repeat: true
-                            onTriggered: media.player.positionChanged()
-                        }
-                        Row {
-                            spacing: 16
-
-                            // ── Now playing ──
-                            Column {
-                                Image {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    source: media.player ? media.player.trackArtUrl : ""
-                                    width: 144
-                                    height: 144
-                                    fillMode: Image.PreserveAspectCrop
-                                    clip: true
-                                }
+                                // what to show when there's no list
                                 Text {
-                                    padding: 5
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 1
-                                    font.letterSpacing: Theme.letterSpacing
-                                    font.weight: 600
+                                    width: 280
+                                    wrapMode: Text.Wrap
+                                    visible: text !== ""
+                                    text: {
+                                        if (!btList.adapter)
+                                            return "No Bluetooth adapter found.";
+                                        if (!btList.powered)
+                                            return "Bluetooth is off.";
+                                        if (btList.devices.length === 0)
+                                            return btList.adapter.discovering ? "Searching for devices..." : "No devices found.";
+                                        return "";
+                                    }
                                     color: Theme.text
-                                    text: media.player ? media.player.trackTitle : " "
-                                }
-                                Text {
-                                    padding: 5
-                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    opacity: 0.6
                                     font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.75
-                                    font.letterSpacing: Theme.letterSpacing
-                                    font.weight: 600
-                                    color: Theme.text
-                                    text: media.player ? media.player.trackArtist : " "
-                                }
-                                Slider {
-                                    id: control
-                                    // pointing hand over the whole slider, grab hand while dragging.
-                                    // HoverHandler only watches the mouse, so dragging still works.
-                                    HoverHandler {
-                                        cursorShape: control.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
-                                    }
-                                    padding: 8
-                                    width: 400
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    from: 0
-                                    to: media.player ? media.player.length : 1
-                                    value: media.player ? media.player.position : 0
-                                    onMoved: {
-                                        if (media.player && media.player.canSeek && media.player.positionSupported)
-                                            media.player.position = value;
-                                    }
-                                    background: Rectangle {        // the track
-                                        x: control.leftPadding
-                                        y: control.topPadding + control.availableHeight / 2 - height / 2
-                                        implicitWidth: 200
-                                        implicitHeight: 4
-                                        width: control.availableWidth
-                                        height: implicitHeight
-                                        radius: 2
-                                        color: Theme.pill                          // unplayed part
-
-                                        Rectangle {                                // the played part
-                                            width: control.visualPosition * parent.width
-                                            height: parent.height
-                                            radius: 2
-                                            color: Theme.accent
-                                        }
-                                    }
-
-                                    handle: Rectangle {            // the knob
-                                        x: control.leftPadding + control.visualPosition * (control.availableWidth - width)
-                                        y: control.topPadding + control.availableHeight / 2 - height / 2
-                                        implicitWidth: 12
-                                        implicitHeight: 12
-                                        radius: 6
-                                        color: control.pressed ? Theme.accent : Theme.text
-                                    }
-                                }
-                                Text {
-                                    // seconds -> "m:ss"
-                                    function fmt(s) {
-                                        return Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
-                                    }
-
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    color: Theme.text
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.9
-                                    font.letterSpacing: Theme.letterSpacing
-                                    font.weight: 600
-                                    text: media.player ? fmt(media.player.position) + "/" + fmt(media.player.length) : ""
-                                }
-                            }
-
-                            // a thin line between now playing and the library
-                            Rectangle {
-                                width: 1
-                                height: parent.height
-                                color: Theme.pill
-                            }
-
-                            // ── Library and queue ──
-                            Column {
-                                id: lib
-                                width: 360
-                                spacing: 8
-
-                                property string tab: "library"       // or "queue"
-                                // Library views: every song, or songs grouped by artist / album.
-                                // Clicking an artist or album "opens" it (pick); the back arrow closes it.
-                                property string view: "songs"        // "songs", "artists" or "albums"
-                                property var pick: null              // { kind, name, artist, songs } or null
-                                onViewChanged: pick = null
-                                onTabChanged: pick = null
-
-                                // ── sorting the library (the sort button next to Songs/Artists/Albums) ──
-                                // One choice for song lists and one for artist/album lists. "" is the
-                                // default: songs in library order (artist, album, then track order),
-                                // artists and albums A to Z. Clicking the lit choice again goes back
-                                // to the default.
-                                property string songSort: ""
-                                property string groupSort: ""
-                                property bool sortOpen: false        // the list of choices is showing
-                                readonly property var songSorts: [
-                                    { id: "az", name: "A–Z" },
-                                    { id: "za", name: "Z–A" },
-                                    { id: "artist", name: "Artist" },
-                                    { id: "album", name: "Album" },
-                                    { id: "short", name: "Shortest" },
-                                    { id: "long", name: "Longest" },
-                                    { id: "recent", name: "Recently added" },
-                                    { id: "oldest", name: "Oldest added" }
-                                ]
-                                readonly property var groupSorts: [
-                                    { id: "za", name: "Z–A" },
-                                    { id: "most", name: "Most songs" },
-                                    { id: "long", name: "Longest" },
-                                    { id: "recent", name: "Recently added" }
-                                ]
-                                // which list the sort button is about right now
-                                readonly property bool sortingGroups: view !== "songs" && !pick
-                                readonly property string activeSort: sortingGroups ? groupSort : songSort
-                                function pickSort(id) {
-                                    if (sortingGroups)
-                                        groupSort = groupSort === id ? "" : id;
-                                    else
-                                        songSort = songSort === id ? "" : id;
-                                }
-                                // A to Z, ignoring upper/lower case (Qt's JavaScript ignores
-                                // localeCompare's options, so the case is folded by hand). Empty
-                                // tags go last.
-                                function byText(a, b) {
-                                    return (a || "￿").toLowerCase().localeCompare((b || "￿").toLowerCase());
-                                }
-                                function songName(s) {
-                                    return s.title || s.path.split("/").pop();
-                                }
-                                function sortSongs(list, by) {
-                                    const cmp = {
-                                        az: (a, b) => byText(songName(a), songName(b)),
-                                        za: (a, b) => byText(songName(b), songName(a)),
-                                        artist: (a, b) => byText(a.artist, b.artist) || byText(a.album, b.album) || byText(a.path, b.path),
-                                        album: (a, b) => byText(a.album, b.album) || byText(a.path, b.path),
-                                        short: (a, b) => a.length - b.length,
-                                        long: (a, b) => b.length - a.length,
-                                        recent: (a, b) => b.added - a.added,
-                                        oldest: (a, b) => a.added - b.added
-                                    }[by];
-                                    return cmp ? list.slice().sort(cmp) : list;
+                                    font.pixelSize: Theme.textSize
                                 }
 
-                                // the songs listed: the open artist/album, or the library narrowed
-                                // down by the search box, in the chosen order
-                                readonly property var results: {
-                                    let list;
-                                    if (pick) {
-                                        list = pick.songs;
-                                    } else {
-                                        const q = search.text.toLowerCase();
-                                        list = q === "" ? music.songs : music.songs.filter(s => (s.title + " " + s.artist + " " + s.album).toLowerCase().includes(q));
-                                    }
-                                    return sortSongs(list, songSort);
-                                }
-                                // artists or albums, each with its songs (in library order:
-                                // artist, album, then file name, so albums keep track order)
-                                readonly property var groups: {
-                                    if (view === "songs")
-                                        return [];
-                                    const map = {};
-                                    const list = [];
-                                    for (const s of music.songs) {
-                                        const name = view === "artists" ? (s.artist || "Unknown artist") : (s.album || "Unknown album");
-                                        const id = view === "artists" ? name : name + "\n" + s.artist;
-                                        let g = map[id];
-                                        if (!g) {
-                                            g = map[id] = {
-                                                kind: view,
-                                                name: name,
-                                                artist: s.artist,
-                                                cover: "",
-                                                songs: [],
-                                                length: 0,      // all its songs together, in seconds
-                                                added: 0        // its newest song's time
-                                            };
-                                            list.push(g);
-                                        }
-                                        g.songs.push(s);
-                                        g.length += s.length || 0;
-                                        g.added = Math.max(g.added, s.added || 0);
-                                        if (g.cover === "" && s.cover !== "")
-                                            g.cover = s.cover;
-                                    }
-                                    const q = search.text.toLowerCase();
-                                    const shown = q === "" ? list : list.filter(g => (g.name + " " + g.artist).toLowerCase().includes(q));
-                                    const az = (a, b) => byText(a.name, b.name);
-                                    const cmp = {
-                                        za: (a, b) => byText(b.name, a.name),
-                                        most: (a, b) => (b.songs.length - a.songs.length) || az(a, b),
-                                        long: (a, b) => (b.length - a.length) || az(a, b),
-                                        recent: (a, b) => (b.added - a.added) || az(a, b)
-                                    }[groupSort] || az;
-                                    return shown.sort(cmp);
-                                }
-
-                                // seconds -> "m:ss"
-                                function fmt(s) {
-                                    return Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
-                                }
-
-                                // ── tabs on the left, buttons on the right ──
+                                // "Devices", with "Searching..." on the right while it scans
                                 Item {
-                                    width: parent.width
-                                    height: 28
+                                    width: 280
+                                    height: devicesLabel.implicitHeight
+                                    visible: btList.powered && btList.devices.length > 0
 
-                                    Row {
-                                        anchors.left: parent.left
-                                        anchors.verticalCenter: parent.verticalCenter
+                                    Text {
+                                        id: devicesLabel
+                                        text: "Devices"
+                                        color: Theme.text
+                                        opacity: 0.6
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.85
+                                        font.weight: 600
+                                    }
+                                    Text {
+                                        anchors.right: parent.right
+                                        visible: !!btList.adapter && btList.adapter.discovering
+                                        text: "Searching..."
+                                        color: Theme.accent
+                                        opacity: 0.8
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.85
+                                    }
+                                }
+
+                                // Scrolls once the list is taller than 360 px (lots of devices or networks around).
+                                Flickable {
+                                    id: btScroll
+                                    width: 280
+                                    height: Math.min(contentHeight, 360)
+                                    contentHeight: btRows.implicitHeight
+                                    visible: btRows.implicitHeight > 0
+                                    clip: true
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    ScrollBar.vertical: ThinScrollBar {}
+
+                                    // Scrolls just enough to show all of `row` (used while a row's drop-down opens).
+                                    function show(row) {
+                                        if (row.y + row.height > contentY + height)
+                                            contentY = Math.min(row.y + row.height, contentHeight) - height;
+                                        if (row.y < contentY)
+                                            contentY = row.y;
+                                    }
+
+                                    Column {
+                                        id: btRows
+                                        width: btScroll.width
                                         spacing: 4
 
                                         Repeater {
-                                            model: [
-                                                {
-                                                    id: "library",
-                                                    name: "Library"
-                                                },
-                                                {
-                                                    id: "queue",
-                                                    name: "Queue"
-                                                }
-                                            ]
-                                            Rectangle {
-                                                id: tabButton
-                                                required property var modelData
-                                                readonly property bool selected: lib.tab === modelData.id
+                                            // ScriptModel only builds rows for new devices instead of rebuilding them all.
+                                            model: ScriptModel {
+                                                values: btList.powered ? btList.devices : []
+                                            }
 
-                                                width: tabLabel.implicitWidth + 20
-                                                height: 26
-                                                radius: height / 2
-                                                color: selected ? Theme.accent : tabMouse.containsMouse ? Theme.pill : "transparent"
-                                                scale: tabMouse.pressed ? 0.85 : 1
+                                            Rectangle {
+                                                id: btRow
+                                                required property var modelData
+                                                readonly property var device: modelData
+                                                readonly property bool expanded: btList.active === device
+                                                readonly property bool ready: btList.ready(device)  // really connected
+                                                // keep it in view while its drop-down glides open
+                                                onHeightChanged: if (expanded)
+                                                    btScroll.show(btRow)
+
+                                                width: 280
+                                                height: btHeader.height + btDrop.height
+                                                radius: Theme.radius
+                                                // a device that shows up fades in instead of popping in
+                                                NumberAnimation on opacity {
+                                                    from: 0
+                                                    to: 1
+                                                    duration: 200
+                                                }
+                                                color: btHeaderMouse.containsMouse || expanded ? Theme.pill : "transparent"
+                                                clip: true
 
                                                 Behavior on color {
                                                     ColorAnimation {
                                                         duration: 120
                                                     }
                                                 }
-                                                Behavior on scale {
-                                                    NumberAnimation {
-                                                        duration: 120
-                                                        easing.type: Easing.OutCubic
+
+                                                // ── the row itself: icon, name, status ──
+                                                Item {
+                                                    id: btHeader
+                                                    width: parent.width
+                                                    height: 30
+                                                    scale: btHeaderMouse.pressed ? 0.85 : 1
+
+                                                    Behavior on scale {
+                                                        NumberAnimation {
+                                                            duration: 120
+                                                            easing.type: Easing.OutCubic
+                                                        }
+                                                    }
+
+                                                    Text {
+                                                        id: btGlyph
+                                                        anchors.left: parent.left
+                                                        anchors.leftMargin: 10
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        text: btList.glyph(btRow.device)
+                                                        color: btRow.ready ? Theme.accent : Theme.text
+                                                        font.family: Theme.iconFont
+                                                        font.pixelSize: Theme.iconSize
+                                                        font.variableAxes: Theme.iconAxes
+                                                    }
+                                                    Text {
+                                                        anchors {
+                                                            left: btGlyph.right
+                                                            right: btStatus.left
+                                                            leftMargin: 8
+                                                            rightMargin: 8
+                                                            verticalCenter: parent.verticalCenter
+                                                        }
+                                                        text: btRow.device.name
+                                                        elide: Text.ElideRight
+                                                        color: btRow.ready ? Theme.accent : Theme.text
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize
+                                                        font.weight: btRow.ready ? 700 : 500
+                                                        font.letterSpacing: Theme.letterSpacing
+                                                    }
+                                                    // per-device status (and battery, when the device reports it)
+                                                    Text {
+                                                        id: btStatus
+                                                        anchors {
+                                                            right: parent.right
+                                                            rightMargin: 10
+                                                            verticalCenter: parent.verticalCenter
+                                                        }
+                                                        text: btList.stateText(btRow.device) + (btRow.device.batteryAvailable ? "  ·  " + Math.round(btRow.device.battery * 100) + "%" : "")
+                                                        color: btRow.ready ? Theme.green : btRow.device === btList.failedDevice ? Theme.red : btRow.device.connected ? Theme.yellow : Theme.text
+                                                        opacity: btRow.device.connected || btRow.device === btList.failedDevice ? 1 : 0.6
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.85
+                                                    }
+                                                    MouseArea {
+                                                        id: btHeaderMouse
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: btList.toggle(btRow.device)
                                                     }
                                                 }
 
-                                                Text {
-                                                    id: tabLabel
-                                                    anchors.centerIn: parent
-                                                    // the queue tab shows how many songs are in it
-                                                    text: tabButton.modelData.name + (tabButton.modelData.id === "queue" && music.queue.length > 0 ? "  " + music.queue.length : "")
-                                                    color: tabButton.selected ? Theme.bg : Theme.text
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize
-                                                    font.weight: 700
-                                                    font.letterSpacing: Theme.letterSpacing
-                                                }
-                                                MouseArea {
-                                                    id: tabMouse
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: lib.tab = tabButton.modelData.id
+                                                // ── the drop-down: Connect / Disconnect, glides open over 500 ms ──
+                                                Item {
+                                                    id: btDrop
+                                                    y: btHeader.height
+                                                    width: parent.width
+                                                    height: btRow.expanded ? btDropContent.implicitHeight + 10 : 0
+                                                    clip: true
+
+                                                    Behavior on height {
+                                                        NumberAnimation {
+                                                            duration: 500
+                                                            easing.type: Easing.OutCubic
+                                                        }
+                                                    }
+
+                                                    Column {
+                                                        id: btDropContent
+                                                        x: 10
+                                                        width: parent.width - 20
+                                                        spacing: 6
+
+                                                        Rectangle {
+                                                            id: btAction
+                                                            // red "Disconnect" when connected, green "Connect" otherwise
+                                                            readonly property bool disconnecting: btRow.device.connected
+                                                            readonly property color tint: disconnecting ? Theme.red : Theme.green
+                                                            readonly property bool busy: btList.busy(btRow.device)
+
+                                                            width: parent.width
+                                                            height: 26
+                                                            radius: height / 2
+                                                            color: btActionMouse.containsMouse && !busy ? tint : Theme.bg
+                                                            opacity: busy ? 0.5 : 1
+                                                            scale: btActionMouse.pressed && !busy ? 0.85 : 1
+
+                                                            Behavior on color {
+                                                                ColorAnimation {
+                                                                    duration: 120
+                                                                }
+                                                            }
+                                                            Behavior on scale {
+                                                                NumberAnimation {
+                                                                    duration: 120
+                                                                    easing.type: Easing.OutCubic
+                                                                }
+                                                            }
+
+                                                            Text {
+                                                                anchors.centerIn: parent
+                                                                // while it's working, show what it's doing instead
+                                                                text: btAction.busy ? btList.stateText(btRow.device) : btAction.disconnecting ? "Disconnect" : "Connect"
+                                                                color: btActionMouse.containsMouse && !btAction.busy ? Theme.bg : btAction.tint
+                                                                font.family: Theme.font
+                                                                font.pixelSize: Theme.textSize
+                                                                font.weight: 600
+                                                            }
+                                                            MouseArea {
+                                                                id: btActionMouse
+                                                                anchors.fill: parent
+                                                                hoverEnabled: true
+                                                                cursorShape: btAction.busy ? Qt.ArrowCursor : Qt.PointingHandCursor
+                                                                onClicked: btList.connectOrDisconnect(btRow.device)
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-
-                                    Row {
-                                        anchors.right: parent.right
-                                        anchors.verticalCenter: parent.verticalCenter
-
-                                        IconButton {        // play everything that's listed (search applies)
-                                            icon: "playlist_play"
-                                            onClicked: music.playAll(lib.results)
-                                        }
-                                        IconButton {
-                                            icon: "shuffle"
-                                            iconColor: music.shuffled ? Theme.accent : Theme.text
-                                            onClicked: music.toggleShuffle()
-                                        }
-                                        IconButton {
-                                            icon: music.repeat === "one" ? "repeat_one" : "repeat"
-                                            iconColor: music.repeat === "off" ? Theme.text : Theme.accent
-                                            onClicked: music.cycleRepeat()
-                                        }
-                                        IconButton {        // empty the queue (keeps the song that's playing)
-                                            icon: "clear_all"
-                                            onClicked: music.clearQueue()
-                                        }
-                                        IconButton {        // scan ~/Music again
-                                            icon: "refresh"
-                                            iconColor: music.scanning ? Theme.accent : Theme.text
-                                            onClicked: music.rescan()
-                                        }
-                                    }
                                 }
+                            }
+                        }
 
-                                // ── search ──
-                                TextField {
-                                    id: search
-                                    visible: lib.tab === "library" && !lib.pick
-                                    width: parent.width
-                                    placeholderText: lib.view === "artists" ? "Search artists" : lib.view === "albums" ? "Search albums" : "Search songs, artists, albums"
-                                    placeholderTextColor: Theme.pillIcon
-                                    color: Theme.text
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize
-                                    leftPadding: 12
-                                    rightPadding: 12
-                                    background: Rectangle {
-                                        radius: height / 2
-                                        color: Theme.bg
-                                        border.width: 1
-                                        border.color: search.activeFocus ? Theme.accent : Theme.pillIcon
-                                    }
-                                }
+                        // ── Theme: the color themes (the themes block at the top of home.nix) ──
+                        // Icon only, like Bluetooth. Each row shows that theme's own colors;
+                        // click one to switch. The bar fades over, and the theme command does
+                        // the rest (see "Themes" in home.nix). The popup stays open, so you
+                        // can try a few.
+                        Widget {
+                            anchors.verticalCenter: parent.verticalCenter
+                            icon: "palette"
 
-                                // ── Songs / Artists / Albums, and the sort button ──
+                            Column {
+                                id: themeList
+                                spacing: 4
+                                width: 280
+
                                 Item {
-                                    visible: lib.tab === "library" && !lib.pick
                                     width: parent.width
-                                    height: 28
+                                    height: 26
 
-                                    Row {
+                                    Text {
                                         anchors.left: parent.left
                                         anchors.verticalCenter: parent.verticalCenter
+                                        text: "Theme"
+                                        color: Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 1.2
+                                        font.weight: 700
+                                        font.letterSpacing: Theme.letterSpacing
+                                    }
+                                }
+
+                                Repeater {
+                                    model: Theme.order
+
+                                    Rectangle {
+                                        id: themeRow
+                                        required property string modelData
+                                        readonly property var info: Theme.themes[modelData]
+                                        readonly property var colors: info.colors
+                                        readonly property bool selected: Theme.current === modelData
+
+                                        width: themeList.width
+                                        height: 44
+                                        radius: Theme.radius
+                                        color: themeMouse.containsMouse || selected ? Theme.pill : "transparent"
+
+                                        Behavior on color {
+                                            ColorAnimation {
+                                                duration: 120
+                                            }
+                                        }
+
+                                        Item {
+                                            anchors.fill: parent
+                                            scale: themeMouse.pressed ? 0.85 : 1
+
+                                            Behavior on scale {
+                                                NumberAnimation {
+                                                    duration: 120
+                                                    easing.type: Easing.OutCubic
+                                                }
+                                            }
+
+                                            // a little preview: the theme's background with its colors on it
+                                            Rectangle {
+                                                id: themePreview
+                                                anchors.left: parent.left
+                                                anchors.leftMargin: 8
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: 64
+                                                height: 28
+                                                radius: 6
+                                                color: themeRow.colors.bg
+                                                border.width: 1
+                                                border.color: themeRow.colors.overlay
+
+                                                Row {
+                                                    anchors.centerIn: parent
+                                                    spacing: 3
+
+                                                    Repeater {
+                                                        model: ["red", "yellow", "green", "blue", "magenta"]
+
+                                                        Rectangle {
+                                                            required property string modelData
+                                                            width: 8
+                                                            height: 8
+                                                            radius: 4
+                                                            color: themeRow.colors[modelData]
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Column {
+                                                anchors {
+                                                    left: themePreview.right
+                                                    right: themeCheck.left
+                                                    leftMargin: 10
+                                                    rightMargin: 8
+                                                    verticalCenter: parent.verticalCenter
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: themeRow.info.name
+                                                    elide: Text.ElideRight
+                                                    color: themeRow.selected ? Theme.accent : Theme.text
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize
+                                                    font.weight: themeRow.selected ? 700 : 500
+                                                    font.letterSpacing: Theme.letterSpacing
+                                                }
+                                                Text {
+                                                    width: parent.width
+                                                    text: themeRow.info.variant
+                                                    elide: Text.ElideRight
+                                                    color: Theme.text
+                                                    opacity: 0.6
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize * 0.85
+                                                }
+                                            }
+                                            Text {
+                                                id: themeCheck
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: 10
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: "check"
+                                                opacity: themeRow.selected ? 1 : 0
+                                                color: Theme.accent
+                                                font.family: Theme.iconFont
+                                                font.pixelSize: Theme.iconSize
+                                                font.variableAxes: Theme.iconAxes
+
+                                                Behavior on opacity {
+                                                    NumberAnimation {
+                                                        duration: 120
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        MouseArea {
+                                            id: themeMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: Theme.set(themeRow.modelData)
+                                        }
+                                    }
+                                }
+
+                                // where this theme's wallpaper comes from
+                                Text {
+                                    width: themeList.width
+                                    topPadding: 4
+                                    leftPadding: 8
+                                    rightPadding: 8
+                                    wrapMode: Text.Wrap
+                                    text: "Wallpaper: the first picture in\n~/Pictures/Wallpapers/" + Theme.current + "/"
+                                    color: Theme.text
+                                    opacity: 0.6
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                }
+                            }
+                        }
+
+                        Widget {
+                            padding: 16
+                            button: Item {
+                                width: Theme.moduleHeight
+                                height: width
+
+                                // the cover of whatever's playing
+                                Image {
+                                    id: barArt
+                                    anchors.fill: parent
+                                    source: media.player ? media.player.trackArtUrl : ""
+                                    fillMode: Image.PreserveAspectCrop
+                                    clip: true
+                                }
+                                // No player, no cover, or the cover didn't load: music_off instead.
+                                // (status is Image.Ready only once a picture has actually loaded)
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: barArt.status !== Image.Ready
+                                    text: "music_off"
+                                    color: Theme.text
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                            }
+                            Timer {
+                                running: !!media.player && media.player.isPlaying && !control.pressed
+                                interval: 1000
+                                repeat: true
+                                onTriggered: media.player.positionChanged()
+                            }
+                            Row {
+                                spacing: 16
+
+                                // ── Now playing ──
+                                Column {
+                                    Image {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        source: media.player ? media.player.trackArtUrl : ""
+                                        width: 144
+                                        height: 144
+                                        fillMode: Image.PreserveAspectCrop
+                                        clip: true
+                                    }
+                                    Text {
+                                        padding: 5
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 1
+                                        font.letterSpacing: Theme.letterSpacing
+                                        font.weight: 600
+                                        color: Theme.text
+                                        text: media.player ? media.player.trackTitle : " "
+                                    }
+                                    Text {
+                                        padding: 5
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.75
+                                        font.letterSpacing: Theme.letterSpacing
+                                        font.weight: 600
+                                        color: Theme.text
+                                        text: media.player ? media.player.trackArtist : " "
+                                    }
+                                    Slider {
+                                        id: control
+                                        // pointing hand over the whole slider, grab hand while dragging.
+                                        // HoverHandler only watches the mouse, so dragging still works.
+                                        HoverHandler {
+                                            cursorShape: control.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+                                        }
+                                        padding: 8
+                                        width: 400
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        from: 0
+                                        to: media.player ? media.player.length : 1
+                                        value: media.player ? media.player.position : 0
+                                        onMoved: {
+                                            if (media.player && media.player.canSeek && media.player.positionSupported)
+                                                media.player.position = value;
+                                        }
+                                        background: Rectangle {        // the track
+                                            x: control.leftPadding
+                                            y: control.topPadding + control.availableHeight / 2 - height / 2
+                                            implicitWidth: 200
+                                            implicitHeight: 4
+                                            width: control.availableWidth
+                                            height: implicitHeight
+                                            radius: 2
+                                            color: Theme.pill                          // unplayed part
+
+                                            Rectangle {                                // the played part
+                                                width: control.visualPosition * parent.width
+                                                height: parent.height
+                                                radius: 2
+                                                color: Theme.accent
+                                            }
+                                        }
+
+                                        handle: Rectangle {            // the knob
+                                            x: control.leftPadding + control.visualPosition * (control.availableWidth - width)
+                                            y: control.topPadding + control.availableHeight / 2 - height / 2
+                                            implicitWidth: 12
+                                            implicitHeight: 12
+                                            radius: 6
+                                            color: control.pressed ? Theme.accent : Theme.text
+                                        }
+                                    }
+                                    Text {
+                                        // seconds -> "m:ss"
+                                        function fmt(s) {
+                                            return Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+                                        }
+
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        color: Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.9
+                                        font.letterSpacing: Theme.letterSpacing
+                                        font.weight: 600
+                                        text: media.player ? fmt(media.player.position) + "/" + fmt(media.player.length) : ""
+                                    }
+                                }
+
+                                // a thin line between now playing and the library
+                                Rectangle {
+                                    width: 1
+                                    height: parent.height
+                                    color: Theme.pill
+                                }
+
+                                // ── Library and queue ──
+                                Column {
+                                    id: lib
+                                    width: 360
+                                    spacing: 8
+
+                                    property string tab: "library"       // or "queue"
+                                    // Library views: every song, or songs grouped by artist / album.
+                                    // Clicking an artist or album "opens" it (pick); the back arrow closes it.
+                                    property string view: "songs"        // "songs", "artists" or "albums"
+                                    property var pick: null              // { kind, name, artist, songs } or null
+                                    onViewChanged: pick = null
+                                    onTabChanged: pick = null
+
+                                    // ── sorting the library (the sort button next to Songs/Artists/Albums) ──
+                                    // One choice for song lists and one for artist/album lists. "" is the
+                                    // default: songs in library order (artist, album, then track order),
+                                    // artists and albums A to Z. Clicking the lit choice again goes back
+                                    // to the default.
+                                    property string songSort: ""
+                                    property string groupSort: ""
+                                    property bool sortOpen: false        // the list of choices is showing
+                                    readonly property var songSorts: [
+                                        { id: "az", name: "A–Z" },
+                                        { id: "za", name: "Z–A" },
+                                        { id: "artist", name: "Artist" },
+                                        { id: "album", name: "Album" },
+                                        { id: "short", name: "Shortest" },
+                                        { id: "long", name: "Longest" },
+                                        { id: "recent", name: "Recently added" },
+                                        { id: "oldest", name: "Oldest added" }
+                                    ]
+                                    readonly property var groupSorts: [
+                                        { id: "za", name: "Z–A" },
+                                        { id: "most", name: "Most songs" },
+                                        { id: "long", name: "Longest" },
+                                        { id: "recent", name: "Recently added" }
+                                    ]
+                                    // which list the sort button is about right now
+                                    readonly property bool sortingGroups: view !== "songs" && !pick
+                                    readonly property string activeSort: sortingGroups ? groupSort : songSort
+                                    function pickSort(id) {
+                                        if (sortingGroups)
+                                            groupSort = groupSort === id ? "" : id;
+                                        else
+                                            songSort = songSort === id ? "" : id;
+                                    }
+                                    // A to Z, ignoring upper/lower case (Qt's JavaScript ignores
+                                    // localeCompare's options, so the case is folded by hand). Empty
+                                    // tags go last.
+                                    function byText(a, b) {
+                                        return (a || "￿").toLowerCase().localeCompare((b || "￿").toLowerCase());
+                                    }
+                                    function songName(s) {
+                                        return s.title || s.path.split("/").pop();
+                                    }
+                                    function sortSongs(list, by) {
+                                        const cmp = {
+                                            az: (a, b) => byText(songName(a), songName(b)),
+                                            za: (a, b) => byText(songName(b), songName(a)),
+                                            artist: (a, b) => byText(a.artist, b.artist) || byText(a.album, b.album) || byText(a.path, b.path),
+                                            album: (a, b) => byText(a.album, b.album) || byText(a.path, b.path),
+                                            short: (a, b) => a.length - b.length,
+                                            long: (a, b) => b.length - a.length,
+                                            recent: (a, b) => b.added - a.added,
+                                            oldest: (a, b) => a.added - b.added
+                                        }[by];
+                                        return cmp ? list.slice().sort(cmp) : list;
+                                    }
+
+                                    // the songs listed: the open artist/album, or the library narrowed
+                                    // down by the search box, in the chosen order
+                                    readonly property var results: {
+                                        let list;
+                                        if (pick) {
+                                            list = pick.songs;
+                                        } else {
+                                            const q = search.text.toLowerCase();
+                                            list = q === "" ? music.songs : music.songs.filter(s => (s.title + " " + s.artist + " " + s.album).toLowerCase().includes(q));
+                                        }
+                                        return sortSongs(list, songSort);
+                                    }
+                                    // artists or albums, each with its songs (in library order:
+                                    // artist, album, then file name, so albums keep track order)
+                                    readonly property var groups: {
+                                        if (view === "songs")
+                                            return [];
+                                        const map = {};
+                                        const list = [];
+                                        for (const s of music.songs) {
+                                            const name = view === "artists" ? (s.artist || "Unknown artist") : (s.album || "Unknown album");
+                                            const id = view === "artists" ? name : name + "\n" + s.artist;
+                                            let g = map[id];
+                                            if (!g) {
+                                                g = map[id] = {
+                                                    kind: view,
+                                                    name: name,
+                                                    artist: s.artist,
+                                                    cover: "",
+                                                    songs: [],
+                                                    length: 0,      // all its songs together, in seconds
+                                                    added: 0        // its newest song's time
+                                                };
+                                                list.push(g);
+                                            }
+                                            g.songs.push(s);
+                                            g.length += s.length || 0;
+                                            g.added = Math.max(g.added, s.added || 0);
+                                            if (g.cover === "" && s.cover !== "")
+                                                g.cover = s.cover;
+                                        }
+                                        const q = search.text.toLowerCase();
+                                        const shown = q === "" ? list : list.filter(g => (g.name + " " + g.artist).toLowerCase().includes(q));
+                                        const az = (a, b) => byText(a.name, b.name);
+                                        const cmp = {
+                                            za: (a, b) => byText(b.name, a.name),
+                                            most: (a, b) => (b.songs.length - a.songs.length) || az(a, b),
+                                            long: (a, b) => (b.length - a.length) || az(a, b),
+                                            recent: (a, b) => (b.added - a.added) || az(a, b)
+                                        }[groupSort] || az;
+                                        return shown.sort(cmp);
+                                    }
+
+                                    // seconds -> "m:ss"
+                                    function fmt(s) {
+                                        return Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+                                    }
+
+                                    // ── tabs on the left, buttons on the right ──
+                                    Item {
+                                        width: parent.width
+                                        height: 28
+
+                                        Row {
+                                            anchors.left: parent.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 4
+
+                                            Repeater {
+                                                model: [
+                                                    {
+                                                        id: "library",
+                                                        name: "Library"
+                                                    },
+                                                    {
+                                                        id: "queue",
+                                                        name: "Queue"
+                                                    }
+                                                ]
+                                                Rectangle {
+                                                    id: tabButton
+                                                    required property var modelData
+                                                    readonly property bool selected: lib.tab === modelData.id
+
+                                                    width: tabLabel.implicitWidth + 20
+                                                    height: 26
+                                                    radius: height / 2
+                                                    color: selected ? Theme.accent : tabMouse.containsMouse ? Theme.pill : "transparent"
+                                                    scale: tabMouse.pressed ? 0.85 : 1
+
+                                                    Behavior on color {
+                                                        ColorAnimation {
+                                                            duration: 120
+                                                        }
+                                                    }
+                                                    Behavior on scale {
+                                                        NumberAnimation {
+                                                            duration: 120
+                                                            easing.type: Easing.OutCubic
+                                                        }
+                                                    }
+
+                                                    Text {
+                                                        id: tabLabel
+                                                        anchors.centerIn: parent
+                                                        // the queue tab shows how many songs are in it
+                                                        text: tabButton.modelData.name + (tabButton.modelData.id === "queue" && music.queue.length > 0 ? "  " + music.queue.length : "")
+                                                        color: tabButton.selected ? Theme.bg : Theme.text
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize
+                                                        font.weight: 700
+                                                        font.letterSpacing: Theme.letterSpacing
+                                                    }
+                                                    MouseArea {
+                                                        id: tabMouse
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: lib.tab = tabButton.modelData.id
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Row {
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+
+                                            IconButton {        // play everything that's listed (search applies)
+                                                icon: "playlist_play"
+                                                onClicked: music.playAll(lib.results)
+                                            }
+                                            IconButton {
+                                                icon: "shuffle"
+                                                iconColor: music.shuffled ? Theme.accent : Theme.text
+                                                onClicked: music.toggleShuffle()
+                                            }
+                                            IconButton {
+                                                icon: music.repeat === "one" ? "repeat_one" : "repeat"
+                                                iconColor: music.repeat === "off" ? Theme.text : Theme.accent
+                                                onClicked: music.cycleRepeat()
+                                            }
+                                            IconButton {        // empty the queue (keeps the song that's playing)
+                                                icon: "clear_all"
+                                                onClicked: music.clearQueue()
+                                            }
+                                            IconButton {        // scan ~/Music again
+                                                icon: "refresh"
+                                                iconColor: music.scanning ? Theme.accent : Theme.text
+                                                onClicked: music.rescan()
+                                            }
+                                        }
+                                    }
+
+                                    // ── search ──
+                                    TextField {
+                                        id: search
+                                        visible: lib.tab === "library" && !lib.pick
+                                        width: parent.width
+                                        placeholderText: lib.view === "artists" ? "Search artists" : lib.view === "albums" ? "Search albums" : "Search songs, artists, albums"
+                                        placeholderTextColor: Theme.pillIcon
+                                        color: Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize
+                                        leftPadding: 12
+                                        rightPadding: 12
+                                        background: Rectangle {
+                                            radius: height / 2
+                                            color: Theme.bg
+                                            border.width: 1
+                                            border.color: search.activeFocus ? Theme.accent : Theme.pillIcon
+                                        }
+                                    }
+
+                                    // ── Songs / Artists / Albums, and the sort button ──
+                                    Item {
+                                        visible: lib.tab === "library" && !lib.pick
+                                        width: parent.width
+                                        height: 28
+
+                                        Row {
+                                            anchors.left: parent.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 4
+                                            Repeater {
+                                                model: [
+                                                    {
+                                                        id: "songs",
+                                                        name: "Songs"
+                                                    },
+                                                    {
+                                                        id: "artists",
+                                                        name: "Artists"
+                                                    },
+                                                    {
+                                                        id: "albums",
+                                                        name: "Albums"
+                                                    }
+                                                ]
+                                                Chip {
+                                                    required property var modelData
+                                                    label: modelData.name
+                                                    selected: lib.view === modelData.id   // Songs, to start with
+                                                    onClicked: lib.view = modelData.id
+                                                }
+                                            }
+                                        }
+
+                                        // the sort button: lit while a sort other than the default is on,
+                                        // with its name next to it
+                                        Row {
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 2
+
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: {
+                                                    const all = lib.sortingGroups ? lib.groupSorts : lib.songSorts;
+                                                    const s = all.find(x => x.id === lib.activeSort);
+                                                    return s ? s.name : "";
+                                                }
+                                                color: Theme.accent
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize * 0.85
+                                                font.weight: 600
+                                            }
+                                            IconButton {
+                                                icon: "sort"
+                                                iconColor: lib.sortOpen || lib.activeSort !== "" ? Theme.accent : Theme.text
+                                                onClicked: lib.sortOpen = !lib.sortOpen
+                                            }
+                                        }
+                                    }
+
+                                    // ── inside an artist or album: back arrow, name, play it all ──
+                                    Item {
+                                        visible: lib.tab === "library" && lib.pick !== null
+                                        width: parent.width
+                                        height: 36
+                                        IconButton {
+                                            id: backButton
+                                            anchors.left: parent.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            icon: "arrow_back"
+                                            onClicked: lib.pick = null
+                                        }
+                                        Column {
+                                            anchors.left: backButton.right
+                                            anchors.leftMargin: 6
+                                            anchors.right: pickPlay.left
+                                            anchors.rightMargin: 6
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            Text {
+                                                width: parent.width
+                                                elide: Text.ElideRight
+                                                text: lib.pick ? lib.pick.name : ""
+                                                color: Theme.text
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize * 1.1
+                                                font.weight: 700
+                                                font.letterSpacing: Theme.letterSpacing
+                                            }
+                                            Text {
+                                                width: parent.width
+                                                elide: Text.ElideRight
+                                                text: !lib.pick ? "" : (lib.pick.kind === "albums" && lib.pick.artist ? lib.pick.artist + "  ·  " : "") + lib.pick.songs.length + (lib.pick.songs.length === 1 ? " song" : " songs")
+                                                color: Theme.text
+                                                opacity: 0.6
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize * 0.85
+                                            }
+                                        }
+                                        IconButton {
+                                            id: pickPlay
+                                            anchors.right: pickSort.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            icon: "play_circle"
+                                            onClicked: music.playAll(lib.results)
+                                        }
+                                        // an artist's songs can be sorted too (an album keeps its track order)
+                                        IconButton {
+                                            id: pickSort
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            visible: !!lib.pick && lib.pick.kind === "artists"
+                                            width: visible ? implicitWidth : 0
+                                            icon: "sort"
+                                            iconColor: lib.sortOpen || lib.songSort !== "" ? Theme.accent : Theme.text
+                                            onClicked: lib.sortOpen = !lib.sortOpen
+                                        }
+                                    }
+
+                                    // ── the sort choices (open with the sort button) ──
+                                    Flow {
+                                        visible: lib.sortOpen && lib.tab === "library" && (!lib.pick || lib.pick.kind === "artists")
+                                        width: parent.width
                                         spacing: 4
+
+                                        Repeater {
+                                            model: lib.sortingGroups ? lib.groupSorts : lib.songSorts
+                                            Chip {
+                                                required property var modelData
+                                                label: modelData.name
+                                                selected: lib.activeSort === modelData.id
+                                                onClicked: lib.pickSort(modelData.id)   // again = back to the default
+                                            }
+                                        }
+                                    }
+
+                                    // ── queue: sort it ──
+                                    Row {
+                                        visible: lib.tab === "queue" && music.queue.length > 1
+                                        spacing: 4
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "Sort by"
+                                            color: Theme.text
+                                            opacity: 0.6
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.9
+                                            rightPadding: 4
+                                        }
                                         Repeater {
                                             model: [
                                                 {
-                                                    id: "songs",
-                                                    name: "Songs"
+                                                    id: "album",
+                                                    name: "Album"
                                                 },
                                                 {
-                                                    id: "artists",
-                                                    name: "Artists"
+                                                    id: "artist",
+                                                    name: "Artist"
                                                 },
                                                 {
-                                                    id: "albums",
-                                                    name: "Albums"
+                                                    id: "title",
+                                                    name: "Title"
                                                 }
                                             ]
                                             Chip {
                                                 required property var modelData
                                                 label: modelData.name
-                                                selected: lib.view === modelData.id   // Songs, to start with
-                                                onClicked: lib.view = modelData.id
+                                                // lit while the queue is kept sorted this way; click it
+                                                // again to put the queue back how it was
+                                                selected: music.queueSort === modelData.id
+                                                onClicked: music.setQueueSort(modelData.id)
                                             }
                                         }
                                     }
 
-                                    // the sort button: lit while a sort other than the default is on,
-                                    // with its name next to it
-                                    Row {
-                                        anchors.right: parent.right
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 2
-
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: {
-                                                const all = lib.sortingGroups ? lib.groupSorts : lib.songSorts;
-                                                const s = all.find(x => x.id === lib.activeSort);
-                                                return s ? s.name : "";
-                                            }
-                                            color: Theme.accent
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize * 0.85
-                                            font.weight: 600
-                                        }
-                                        IconButton {
-                                            icon: "sort"
-                                            iconColor: lib.sortOpen || lib.activeSort !== "" ? Theme.accent : Theme.text
-                                            onClicked: lib.sortOpen = !lib.sortOpen
-                                        }
-                                    }
-                                }
-
-                                // ── inside an artist or album: back arrow, name, play it all ──
-                                Item {
-                                    visible: lib.tab === "library" && lib.pick !== null
-                                    width: parent.width
-                                    height: 36
-                                    IconButton {
-                                        id: backButton
-                                        anchors.left: parent.left
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        icon: "arrow_back"
-                                        onClicked: lib.pick = null
-                                    }
-                                    Column {
-                                        anchors.left: backButton.right
-                                        anchors.leftMargin: 6
-                                        anchors.right: pickPlay.left
-                                        anchors.rightMargin: 6
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        Text {
-                                            width: parent.width
-                                            elide: Text.ElideRight
-                                            text: lib.pick ? lib.pick.name : ""
-                                            color: Theme.text
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize * 1.1
-                                            font.weight: 700
-                                            font.letterSpacing: Theme.letterSpacing
-                                        }
-                                        Text {
-                                            width: parent.width
-                                            elide: Text.ElideRight
-                                            text: !lib.pick ? "" : (lib.pick.kind === "albums" && lib.pick.artist ? lib.pick.artist + "  ·  " : "") + lib.pick.songs.length + (lib.pick.songs.length === 1 ? " song" : " songs")
-                                            color: Theme.text
-                                            opacity: 0.6
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize * 0.85
-                                        }
-                                    }
-                                    IconButton {
-                                        id: pickPlay
-                                        anchors.right: pickSort.left
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        icon: "play_circle"
-                                        onClicked: music.playAll(lib.results)
-                                    }
-                                    // an artist's songs can be sorted too (an album keeps its track order)
-                                    IconButton {
-                                        id: pickSort
-                                        anchors.right: parent.right
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        visible: !!lib.pick && lib.pick.kind === "artists"
-                                        width: visible ? implicitWidth : 0
-                                        icon: "sort"
-                                        iconColor: lib.sortOpen || lib.songSort !== "" ? Theme.accent : Theme.text
-                                        onClicked: lib.sortOpen = !lib.sortOpen
-                                    }
-                                }
-
-                                // ── the sort choices (open with the sort button) ──
-                                Flow {
-                                    visible: lib.sortOpen && lib.tab === "library" && (!lib.pick || lib.pick.kind === "artists")
-                                    width: parent.width
-                                    spacing: 4
-
-                                    Repeater {
-                                        model: lib.sortingGroups ? lib.groupSorts : lib.songSorts
-                                        Chip {
-                                            required property var modelData
-                                            label: modelData.name
-                                            selected: lib.activeSort === modelData.id
-                                            onClicked: lib.pickSort(modelData.id)   // again = back to the default
-                                        }
-                                    }
-                                }
-
-                                // ── queue: sort it ──
-                                Row {
-                                    visible: lib.tab === "queue" && music.queue.length > 1
-                                    spacing: 4
+                                    // ── messages when there's nothing to list ──
                                     Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: "Sort by"
+                                        width: parent.width
+                                        wrapMode: Text.Wrap
+                                        visible: text !== ""
+                                        text: {
+                                            if (!music.connected)
+                                                return "The player isn't running. Start it with:\nsystemctl --user start music-player";
+                                            if (lib.tab === "queue")
+                                                return music.queue.length === 0 ? "The queue is empty." : "";
+                                            if (music.songs.length === 0)
+                                                return music.scanning ? "Scanning ~/Music..." : "No songs found in ~/Music.";
+                                            if (lib.view !== "songs" && !lib.pick)
+                                                return lib.groups.length === 0 ? "No matches." : "";
+                                            return lib.results.length === 0 ? "No matches." : "";
+                                        }
                                         color: Theme.text
                                         opacity: 0.6
                                         font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 0.9
-                                        rightPadding: 4
-                                    }
-                                    Repeater {
-                                        model: [
-                                            {
-                                                id: "album",
-                                                name: "Album"
-                                            },
-                                            {
-                                                id: "artist",
-                                                name: "Artist"
-                                            },
-                                            {
-                                                id: "title",
-                                                name: "Title"
-                                            }
-                                        ]
-                                        Chip {
-                                            required property var modelData
-                                            label: modelData.name
-                                            // lit while the queue is kept sorted this way; click it
-                                            // again to put the queue back how it was
-                                            selected: music.queueSort === modelData.id
-                                            onClicked: music.setQueueSort(modelData.id)
-                                        }
-                                    }
-                                }
-
-                                // ── messages when there's nothing to list ──
-                                Text {
-                                    width: parent.width
-                                    wrapMode: Text.Wrap
-                                    visible: text !== ""
-                                    text: {
-                                        if (!music.connected)
-                                            return "The player isn't running. Start it with:\nsystemctl --user start music-player";
-                                        if (lib.tab === "queue")
-                                            return music.queue.length === 0 ? "The queue is empty." : "";
-                                        if (music.songs.length === 0)
-                                            return music.scanning ? "Scanning ~/Music..." : "No songs found in ~/Music.";
-                                        if (lib.view !== "songs" && !lib.pick)
-                                            return lib.groups.length === 0 ? "No matches." : "";
-                                        return lib.results.length === 0 ? "No matches." : "";
-                                    }
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize
-                                }
-
-                                // ── the library list ──
-                                // ListView only creates rows that are on screen, so thousands of songs are fine.
-                                ListView {
-                                    id: songList
-                                    visible: lib.tab === "library" && (lib.view === "songs" || lib.pick !== null) && lib.results.length > 0
-                                    width: parent.width
-                                    height: 320
-                                    clip: true
-                                    spacing: 2
-                                    model: lib.results
-                                    boundsBehavior: Flickable.StopAtBounds
-                                    ScrollBar.vertical: ScrollBar {
-                                        id: songBar
-                                        contentItem: Rectangle {
-                                            implicitWidth: 4
-                                            radius: 2
-                                            color: Theme.pillIcon
-                                            // hidden when everything fits, faint until you scroll or hover
-                                            opacity: songBar.size < 1 ? (songBar.active ? 1 : 0.4) : 0
-                                            Behavior on opacity {
-                                                NumberAnimation {
-                                                    duration: 200
-                                                }
-                                            }
-                                        }
+                                        font.pixelSize: Theme.textSize
                                     }
 
-                                    delegate: Rectangle {
-                                        id: song
-                                        required property var modelData      // { path, title, artist, album, length, cover }
-                                        // is this the song mpv is playing right now?
-                                        readonly property bool playing: music.current >= 0 && music.queue[music.current].filename === modelData.path
-
-                                        // Queueing takes two clicks: pick "next" or "end", then confirm.
-                                        property string pending: ""    // "", "next" or "end": waiting for confirm
-                                        property bool added: false     // shows "Added" for a moment afterwards
-
-                                        function confirm() {
-                                            if (pending === "next")
-                                                music.playNext(modelData.path);
-                                            else
-                                                music.enqueue(modelData.path);
-                                            pending = "";
-                                            added = true;
-                                            resetTimer.restart();
-                                        }
-
-                                        // an unconfirmed choice gives up after 3 s; "Added" fades after 1.5 s
-                                        Timer {
-                                            id: resetTimer
-                                            interval: song.added ? 1500 : 3000
-                                            onTriggered: {
-                                                song.pending = "";
-                                                song.added = false;
-                                            }
-                                        }
-
-                                        width: ListView.view.width - 8           // room for the scrollbar
-                                        height: 46
-                                        radius: Theme.radius
-                                        color: songMouse.containsMouse ? Theme.pill : "transparent"
-                                        scale: songMouse.pressed ? 0.95 : 1
-
-                                        Behavior on color {
-                                            ColorAnimation {
-                                                duration: 120
-                                            }
-                                        }
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 120
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        // Click the row to play it now. Everything else sits inside this
-                                        // MouseArea, so hovering the buttons still counts as hovering the row.
-                                        MouseArea {
-                                            id: songMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: music.playNow(song.modelData.path)
-
-                                            // album cover with rounded corners
-                                            ClippingRectangle {
-                                                id: songCover
-                                                x: 5
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: 36
-                                                height: 36
-                                                radius: 6
-                                                color: Theme.pill
-
-                                                Image {
-                                                    anchors.fill: parent
-                                                    source: song.modelData.cover
-                                                    sourceSize: Qt.size(72, 72)       // load a small copy, not the full image
-                                                    fillMode: Image.PreserveAspectCrop
-                                                    asynchronous: true
-                                                }
-                                                Text {                                 // when there's no cover
-                                                    anchors.centerIn: parent
-                                                    visible: song.modelData.cover === ""
-                                                    text: "music_note"
-                                                    color: Theme.pillIcon
-                                                    font.family: Theme.iconFont
-                                                    font.pixelSize: Theme.iconSize
-                                                }
-                                            }
-
-                                            Column {
-                                                anchors.left: songCover.right
-                                                anchors.leftMargin: 10
-                                                anchors.right: songSide.left
-                                                anchors.rightMargin: 8
-                                                anchors.verticalCenter: parent.verticalCenter
-
-                                                Text {
-                                                    width: parent.width
-                                                    text: song.modelData.title
-                                                    elide: Text.ElideRight
-                                                    color: song.playing ? Theme.accent : Theme.text
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize
-                                                    font.weight: 700
-                                                    font.letterSpacing: Theme.letterSpacing
-                                                }
-                                                Text {
-                                                    width: parent.width
-                                                    text: [song.modelData.artist, song.modelData.album].filter(s => s).join("  ·  ")
-                                                    elide: Text.ElideRight
-                                                    color: Theme.text
-                                                    opacity: 0.6
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize * 0.85
-                                                }
-                                            }
-
-                                            // Right side. Only one of these shows at a time:
-                                            //   "Added"            just after confirming
-                                            //   confirm / cancel   after picking a queue button
-                                            //   queue buttons      while hovered
-                                            //   the song's length  otherwise
-                                            Item {
-                                                id: songSide
-                                                anchors.right: parent.right
-                                                anchors.rightMargin: 4
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: Math.max(songButtons.width, confirmRow.visible ? confirmRow.width : 0)
-                                                height: 26
-
-                                                Text {
-                                                    anchors.right: parent.right
-                                                    anchors.rightMargin: 6
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    visible: !songMouse.containsMouse && song.pending === "" && !song.added
-                                                    text: song.modelData.length > 0 ? lib.fmt(song.modelData.length) : ""
-                                                    color: Theme.text
-                                                    opacity: 0.6
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize * 0.85
-                                                }
-
-                                                // step 1: pick where it goes
-                                                Row {
-                                                    id: songButtons
-                                                    anchors.right: parent.right
-                                                    visible: songMouse.containsMouse && song.pending === "" && !song.added
-                                                    IconButton {
-                                                        icon: "queue_play_next"         // play after the current song
-                                                        onClicked: {
-                                                            song.pending = "next";
-                                                            resetTimer.restart();
-                                                        }
-                                                    }
-                                                    IconButton {
-                                                        icon: "playlist_add"            // add to the end of the queue
-                                                        onClicked: {
-                                                            song.pending = "end";
-                                                            resetTimer.restart();
-                                                        }
-                                                    }
-                                                }
-
-                                                // step 2: confirm it (or cancel)
-                                                Row {
-                                                    id: confirmRow
-                                                    anchors.right: parent.right
-                                                    spacing: 2
-                                                    visible: song.pending !== ""
-
-                                                    Rectangle {
-                                                        width: confirmLabel.implicitWidth + 30
-                                                        height: 26
-                                                        radius: height / 2
-                                                        color: confirmMouse.containsMouse ? Theme.green : Theme.bg
-                                                        border.width: 1
-                                                        border.color: Theme.green
-                                                        scale: confirmMouse.pressed ? 0.85 : 1
-
-                                                        Behavior on color {
-                                                            ColorAnimation {
-                                                                duration: 120
-                                                            }
-                                                        }
-                                                        Behavior on scale {
-                                                            NumberAnimation {
-                                                                duration: 120
-                                                                easing.type: Easing.OutCubic
-                                                            }
-                                                        }
-
-                                                        Row {
-                                                            anchors.centerIn: parent
-                                                            spacing: 4
-                                                            Text {
-                                                                anchors.verticalCenter: parent.verticalCenter
-                                                                text: "check"
-                                                                color: confirmMouse.containsMouse ? Theme.bg : Theme.green
-                                                                font.family: Theme.iconFont
-                                                                font.pixelSize: Theme.iconSize * 0.9
-                                                                font.variableAxes: Theme.iconAxes
-                                                            }
-                                                            Text {
-                                                                id: confirmLabel
-                                                                anchors.verticalCenter: parent.verticalCenter
-                                                                text: song.pending === "next" ? "Play next" : "Add to queue"
-                                                                color: confirmMouse.containsMouse ? Theme.bg : Theme.green
-                                                                font.family: Theme.font
-                                                                font.pixelSize: Theme.textSize * 0.85
-                                                                font.weight: 700
-                                                            }
-                                                        }
-                                                        MouseArea {
-                                                            id: confirmMouse
-                                                            anchors.fill: parent
-                                                            hoverEnabled: true
-                                                            cursorShape: Qt.PointingHandCursor
-                                                            onClicked: song.confirm()
-                                                        }
-                                                    }
-                                                    IconButton {
-                                                        icon: "close"
-                                                        iconColor: Theme.red
-                                                        onClicked: song.pending = ""
-                                                    }
-                                                }
-
-                                                // step 3: a short "Added"
-                                                Text {
-                                                    anchors.right: parent.right
-                                                    anchors.rightMargin: 6
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    visible: song.added
-                                                    text: "Added"
-                                                    color: Theme.green
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize * 0.85
-                                                    font.weight: 700
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // ── artists / albums ──
-                                // Click one to see its songs; the play button plays all of them.
-                                ListView {
-                                    id: groupList
-                                    visible: lib.tab === "library" && lib.view !== "songs" && !lib.pick && lib.groups.length > 0
-                                    width: parent.width
-                                    height: 320
-                                    clip: true
-                                    spacing: 2
-                                    model: lib.groups
-                                    boundsBehavior: Flickable.StopAtBounds
-                                    ScrollBar.vertical: ScrollBar {
-                                        id: groupBar
-                                        contentItem: Rectangle {
-                                            implicitWidth: 4
-                                            radius: 2
-                                            color: Theme.pillIcon
-                                            opacity: groupBar.size < 1 ? (groupBar.active ? 1 : 0.4) : 0
-                                            Behavior on opacity {
-                                                NumberAnimation {
-                                                    duration: 200
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    delegate: Rectangle {
-                                        id: group
-                                        required property var modelData      // { kind, name, artist, cover, songs }
-                                        width: ListView.view.width - 8
-                                        height: 46
-                                        radius: Theme.radius
-                                        color: groupMouse.containsMouse ? Theme.pill : "transparent"
-                                        scale: groupMouse.pressed ? 0.95 : 1
-                                        Behavior on color {
-                                            ColorAnimation {
-                                                duration: 120
-                                            }
-                                        }
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 120
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        MouseArea {
-                                            id: groupMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: lib.pick = group.modelData
-
-                                            // artists get a round picture, albums a rounded square
-                                            ClippingRectangle {
-                                                id: groupCover
-                                                x: 5
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: 36
-                                                height: 36
-                                                radius: group.modelData.kind === "artists" ? 18 : 6
-                                                color: Theme.pill
-                                                Image {
-                                                    anchors.fill: parent
-                                                    source: group.modelData.cover
-                                                    sourceSize: Qt.size(72, 72)
-                                                    fillMode: Image.PreserveAspectCrop
-                                                    asynchronous: true
-                                                }
-                                                Text {
-                                                    anchors.centerIn: parent
-                                                    visible: group.modelData.cover === ""
-                                                    text: group.modelData.kind === "artists" ? "person" : "album"
-                                                    color: Theme.pillIcon
-                                                    font.family: Theme.iconFont
-                                                    font.pixelSize: Theme.iconSize
-                                                }
-                                            }
-                                            Column {
-                                                anchors.left: groupCover.right
-                                                anchors.leftMargin: 10
-                                                anchors.right: groupPlay.left
-                                                anchors.rightMargin: 8
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                Text {
-                                                    width: parent.width
-                                                    text: group.modelData.name
-                                                    elide: Text.ElideRight
-                                                    color: Theme.text
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize
-                                                    font.weight: 700
-                                                    font.letterSpacing: Theme.letterSpacing
-                                                }
-                                                Text {
-                                                    width: parent.width
-                                                    text: (group.modelData.kind === "albums" && group.modelData.artist ? group.modelData.artist + "  ·  " : "") + group.modelData.songs.length + (group.modelData.songs.length === 1 ? " song" : " songs")
-                                                    elide: Text.ElideRight
-                                                    color: Theme.text
-                                                    opacity: 0.6
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize * 0.85
-                                                }
-                                            }
-                                            IconButton {        // play everything by this artist / on this album
-                                                id: groupPlay
-                                                anchors.right: parent.right
-                                                anchors.rightMargin: 4
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                visible: groupMouse.containsMouse
-                                                icon: "play_arrow"
-                                                onClicked: music.playAll(group.modelData.songs)
-                                            }
-                                            Text {
-                                                anchors.right: parent.right
-                                                anchors.rightMargin: 10
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                visible: !groupMouse.containsMouse
-                                                text: "chevron_right"
+                                    // ── the library list ──
+                                    // ListView only creates rows that are on screen, so thousands of songs are fine.
+                                    ListView {
+                                        id: songList
+                                        visible: lib.tab === "library" && (lib.view === "songs" || lib.pick !== null) && lib.results.length > 0
+                                        width: parent.width
+                                        height: 320
+                                        clip: true
+                                        spacing: 2
+                                        model: lib.results
+                                        boundsBehavior: Flickable.StopAtBounds
+                                        ScrollBar.vertical: ScrollBar {
+                                            id: songBar
+                                            contentItem: Rectangle {
+                                                implicitWidth: 4
+                                                radius: 2
                                                 color: Theme.pillIcon
-                                                font.family: Theme.iconFont
-                                                font.pixelSize: Theme.iconSize
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // ── the queue ──
-                                ListView {
-                                    id: queueList
-                                    visible: lib.tab === "queue" && music.queue.length > 0
-                                    width: parent.width
-                                    height: 356
-                                    clip: true
-                                    spacing: 2
-                                    // ScriptModel compares the new queue with the old one and only
-                                    // updates the rows that changed. A plain array (model: music.queue)
-                                    // makes the ListView throw every row away and rebuild the list on
-                                    // each mpv update, which is what jumped it back to the top after a drop.
-                                    model: ScriptModel {
-                                        values: music.queue
-                                    }
-                                    boundsBehavior: Flickable.StopAtBounds
-                                    // no flicking the list while a row is being dragged
-                                    // (it scrolls by itself near the edges instead, see edgeScroll)
-                                    interactive: dragFrom < 0
-                                    // The ListView deletes rows that are far off screen. While dragging,
-                                    // keep them all, so the row in your hand isn't deleted when the list
-                                    // scrolls a long way.
-                                    cacheBuffer: dragFrom >= 0 ? Math.max(400, contentHeight) : 400
-
-                                    // ── drag to reorder ──
-                                    // Kept here, not in the rows, so every row can see the drag.
-                                    property int dragFrom: -1      // row being dragged, -1 = none
-                                    property int dragTo: -1        // where it would land if dropped now
-                                    property real dragOffset: 0    // how far it has moved from its spot
-                                    property bool settling: false  // just dropped: skip the slide-back animation
-                                    readonly property real rowStep: 46 + spacing   // row height + gap
-                                    property real grabY: 0         // where you grabbed it, in list-content coordinates
-                                    property real dragMouseY: 0    // the mouse, measured from the list's top edge
-                                    property real grabInRow: 0     // where in the row you grabbed it
-                                    property var dragSong: null    // the song being dragged (mpv entry)
-                                    property var dragInfo: null    // ...and its library info, for the floating copy
-                                    property bool dropping: false  // let go, waiting for mpv to send the new order
-                                    property real dropViewY: 0     // where the dropped row lands, from the list's top edge
-
-                                    // Let go: the floating copy glides into the gap and everything stays
-                                    // as it looks until mpv sends the new order (a few ms). Then the real
-                                    // rows take over, scrolled so nothing on screen moves.
-                                    function drop() {
-                                        const from = dragFrom, to = dragTo;
-                                        if (from < 0 || from === to) {
-                                            endDrag();
-                                            return;
-                                        }
-                                        // the gap = where the row now at `to` sits normally
-                                        const slot = itemAtIndex(to);
-                                        dropViewY = (slot ? slot.y : originY + to * rowStep) - contentY;
-                                        dropping = true;
-                                        dropTimeout.restart();
-                                        music.move(from, to);
-                                    }
-                                    function finishDrop() {
-                                        if (!dropping)
-                                            return;
-                                        const to = dragTo, viewY = dropViewY;
-                                        endDrag();
-                                        forceLayout();
-                                        const row = itemAtIndex(to);
-                                        if (row) {
-                                            const top = originY;
-                                            const bottom = originY + Math.max(0, contentHeight - height);
-                                            contentY = Math.max(top, Math.min(bottom, row.y - viewY));
-                                        }
-                                    }
-                                    function endDrag() {
-                                        dropTimeout.stop();
-                                        settling = true;      // rows jump to their new places, no slide
-                                        dropping = false;
-                                        dragFrom = -1;
-                                        dragTo = -1;
-                                        dragOffset = 0;
-                                    }
-                                    Connections {
-                                        target: music
-                                        // after the list has caught up with the new order
-                                        function onQueueChanged() {
-                                            if (queueList.dropping)
-                                                Qt.callLater(queueList.finishDrop);
-                                        }
-                                    }
-                                    // mpv didn't answer: put things back
-                                    Timer {
-                                        id: dropTimeout
-                                        interval: 800
-                                        onTriggered: queueList.endDrag()
-                                    }
-
-                                    // Content coordinates count from the top of the whole queue, not the
-                                    // visible part, so the offset stays right while the list scrolls.
-                                    function updateDrag() {
-                                        dragOffset = dragMouseY + contentY - grabY;
-                                        // the slot under the middle of the dragged row
-                                        const slot = Math.round(dragFrom + dragOffset / rowStep);
-                                        dragTo = Math.max(0, Math.min(count - 1, slot));
-                                    }
-
-                                    // While dragging, hold the row near the top or bottom edge (or past
-                                    // it) and the list scrolls that way; the closer to the edge, the faster.
-                                    Timer {
-                                        id: edgeScroll
-                                        interval: 16          // about once a frame
-                                        repeat: true
-                                        running: queueList.dragFrom >= 0 && !queueList.dropping
-                                        onTriggered: {
-                                            const zone = 48;      // px from each edge where it starts scrolling
-                                            const maxSpeed = 12;  // px per tick at the very edge
-                                            const y = queueList.dragMouseY;
-                                            let push = 0;
-                                            if (y < zone)
-                                                push = -(zone - y) / zone;
-                                            else if (y > queueList.height - zone)
-                                                push = (y - (queueList.height - zone)) / zone;
-                                            if (push === 0)
-                                                return;
-                                            push = Math.max(-1, Math.min(1, push));
-                                            const top = queueList.originY;
-                                            const bottom = queueList.originY + Math.max(0, queueList.contentHeight - queueList.height);
-                                            const next = Math.max(top, Math.min(bottom, queueList.contentY + push * maxSpeed));
-                                            if (next === queueList.contentY)
-                                                return;
-                                            queueList.contentY = next;
-                                            queueList.updateDrag();
-                                        }
-                                    }
-
-                                    ScrollBar.vertical: ScrollBar {
-                                        id: queueBar
-                                        contentItem: Rectangle {
-                                            implicitWidth: 4
-                                            radius: 2
-                                            color: Theme.pillIcon
-                                            // hidden when everything fits, faint until you scroll or hover
-                                            opacity: queueBar.size < 1 ? (queueBar.active ? 1 : 0.4) : 0
-                                            Behavior on opacity {
-                                                NumberAnimation {
-                                                    duration: 200
+                                                // hidden when everything fits, faint until you scroll or hover
+                                                opacity: songBar.size < 1 ? (songBar.active ? 1 : 0.4) : 0
+                                                Behavior on opacity {
+                                                    NumberAnimation {
+                                                        duration: 200
+                                                    }
                                                 }
                                             }
                                         }
-                                    }
 
-                                    delegate: Rectangle {
-                                        id: entry
-                                        required property var modelData      // { filename, current, ... } from mpv
-                                        required property int index
-                                        // the library's info for this file (title, cover...), if it's in the library
-                                        readonly property var info: music.byPath[modelData.filename] ?? null
+                                        delegate: Rectangle {
+                                            id: song
+                                            required property var modelData      // { path, title, artist, album, length, cover }
+                                            // is this the song mpv is playing right now?
+                                            readonly property bool playing: music.current >= 0 && music.queue[music.current].filename === modelData.path
 
-                                        // Where this row should sit while something is dragged:
-                                        // the dragged row follows the mouse, the rows it passes
-                                        // step aside by one row to make room for it.
-                                        readonly property bool dragged: queueList.dragFrom === index
-                                        readonly property real shift: {
-                                            const f = queueList.dragFrom, t = queueList.dragTo;
-                                            if (f < 0 || dragged)
-                                                return 0;
-                                            if (f < t && index > f && index <= t)
-                                                return -queueList.rowStep;   // dragged one is moving down past me
-                                            if (f > t && index >= t && index < f)
-                                                return queueList.rowStep;    // dragged one is moving up past me
-                                            return 0;
-                                        }
+                                            // Queueing takes two clicks: pick "next" or "end", then confirm.
+                                            property string pending: ""    // "", "next" or "end": waiting for confirm
+                                            property bool added: false     // shows "Added" for a moment afterwards
 
-                                        width: ListView.view.width - 8
-                                        height: 46
-                                        radius: Theme.radius
-                                        color: entryMouse.containsMouse || dragged ? Theme.pill : "transparent"
-                                        border.width: 1
-                                        border.color: entry.modelData.current ? Theme.accent : "transparent"
-                                        scale: entryMouse.pressed && !dragged ? 0.95 : 1
-                                        // The row you're dragging stays in its slot, invisible; a floating
-                                        // copy (dragGhost, below the delegate) follows the mouse instead.
-                                        // The list stops drawing rows that scroll out of view, so a row
-                                        // that moved itself would vanish once its slot scrolled away.
-                                        opacity: dragged ? 0 : 1
+                                            function confirm() {
+                                                if (pending === "next")
+                                                    music.playNext(modelData.path);
+                                                else
+                                                    music.enqueue(modelData.path);
+                                                pending = "";
+                                                added = true;
+                                                resetTimer.restart();
+                                            }
 
-                                        transform: Translate {
-                                            y: entry.dragged ? 0 : entry.shift
-                                            Behavior on y {
-                                                enabled: !entry.dragged && !queueList.settling
+                                            // an unconfirmed choice gives up after 3 s; "Added" fades after 1.5 s
+                                            Timer {
+                                                id: resetTimer
+                                                interval: song.added ? 1500 : 3000
+                                                onTriggered: {
+                                                    song.pending = "";
+                                                    song.added = false;
+                                                }
+                                            }
+
+                                            width: ListView.view.width - 8           // room for the scrollbar
+                                            height: 46
+                                            radius: Theme.radius
+                                            color: songMouse.containsMouse ? Theme.pill : "transparent"
+                                            scale: songMouse.pressed ? 0.95 : 1
+
+                                            Behavior on color {
+                                                ColorAnimation {
+                                                    duration: 120
+                                                }
+                                            }
+                                            Behavior on scale {
                                                 NumberAnimation {
-                                                    duration: 150
+                                                    duration: 120
                                                     easing.type: Easing.OutCubic
                                                 }
                                             }
-                                        }
 
-                                        Behavior on color {
-                                            ColorAnimation {
-                                                duration: 120
+                                            // Click the row to play it now. Everything else sits inside this
+                                            // MouseArea, so hovering the buttons still counts as hovering the row.
+                                            MouseArea {
+                                                id: songMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: music.playNow(song.modelData.path)
+
+                                                // album cover with rounded corners
+                                                ClippingRectangle {
+                                                    id: songCover
+                                                    x: 5
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 36
+                                                    height: 36
+                                                    radius: 6
+                                                    color: Theme.pill
+
+                                                    Image {
+                                                        anchors.fill: parent
+                                                        source: song.modelData.cover
+                                                        sourceSize: Qt.size(72, 72)       // load a small copy, not the full image
+                                                        fillMode: Image.PreserveAspectCrop
+                                                        asynchronous: true
+                                                    }
+                                                    Text {                                 // when there's no cover
+                                                        anchors.centerIn: parent
+                                                        visible: song.modelData.cover === ""
+                                                        text: "music_note"
+                                                        color: Theme.pillIcon
+                                                        font.family: Theme.iconFont
+                                                        font.pixelSize: Theme.iconSize
+                                                    }
+                                                }
+
+                                                Column {
+                                                    anchors.left: songCover.right
+                                                    anchors.leftMargin: 10
+                                                    anchors.right: songSide.left
+                                                    anchors.rightMargin: 8
+                                                    anchors.verticalCenter: parent.verticalCenter
+
+                                                    Text {
+                                                        width: parent.width
+                                                        text: song.modelData.title
+                                                        elide: Text.ElideRight
+                                                        color: song.playing ? Theme.accent : Theme.text
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize
+                                                        font.weight: 700
+                                                        font.letterSpacing: Theme.letterSpacing
+                                                    }
+                                                    Text {
+                                                        width: parent.width
+                                                        text: [song.modelData.artist, song.modelData.album].filter(s => s).join("  ·  ")
+                                                        elide: Text.ElideRight
+                                                        color: Theme.text
+                                                        opacity: 0.6
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.85
+                                                    }
+                                                }
+
+                                                // Right side. Only one of these shows at a time:
+                                                //   "Added"            just after confirming
+                                                //   confirm / cancel   after picking a queue button
+                                                //   queue buttons      while hovered
+                                                //   the song's length  otherwise
+                                                Item {
+                                                    id: songSide
+                                                    anchors.right: parent.right
+                                                    anchors.rightMargin: 4
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: Math.max(songButtons.width, confirmRow.visible ? confirmRow.width : 0)
+                                                    height: 26
+
+                                                    Text {
+                                                        anchors.right: parent.right
+                                                        anchors.rightMargin: 6
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        visible: !songMouse.containsMouse && song.pending === "" && !song.added
+                                                        text: song.modelData.length > 0 ? lib.fmt(song.modelData.length) : ""
+                                                        color: Theme.text
+                                                        opacity: 0.6
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.85
+                                                    }
+
+                                                    // step 1: pick where it goes
+                                                    Row {
+                                                        id: songButtons
+                                                        anchors.right: parent.right
+                                                        visible: songMouse.containsMouse && song.pending === "" && !song.added
+                                                        IconButton {
+                                                            icon: "queue_play_next"         // play after the current song
+                                                            onClicked: {
+                                                                song.pending = "next";
+                                                                resetTimer.restart();
+                                                            }
+                                                        }
+                                                        IconButton {
+                                                            icon: "playlist_add"            // add to the end of the queue
+                                                            onClicked: {
+                                                                song.pending = "end";
+                                                                resetTimer.restart();
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // step 2: confirm it (or cancel)
+                                                    Row {
+                                                        id: confirmRow
+                                                        anchors.right: parent.right
+                                                        spacing: 2
+                                                        visible: song.pending !== ""
+
+                                                        Rectangle {
+                                                            width: confirmLabel.implicitWidth + 30
+                                                            height: 26
+                                                            radius: height / 2
+                                                            color: confirmMouse.containsMouse ? Theme.green : Theme.bg
+                                                            border.width: 1
+                                                            border.color: Theme.green
+                                                            scale: confirmMouse.pressed ? 0.85 : 1
+
+                                                            Behavior on color {
+                                                                ColorAnimation {
+                                                                    duration: 120
+                                                                }
+                                                            }
+                                                            Behavior on scale {
+                                                                NumberAnimation {
+                                                                    duration: 120
+                                                                    easing.type: Easing.OutCubic
+                                                                }
+                                                            }
+
+                                                            Row {
+                                                                anchors.centerIn: parent
+                                                                spacing: 4
+                                                                Text {
+                                                                    anchors.verticalCenter: parent.verticalCenter
+                                                                    text: "check"
+                                                                    color: confirmMouse.containsMouse ? Theme.bg : Theme.green
+                                                                    font.family: Theme.iconFont
+                                                                    font.pixelSize: Theme.iconSize * 0.9
+                                                                    font.variableAxes: Theme.iconAxes
+                                                                }
+                                                                Text {
+                                                                    id: confirmLabel
+                                                                    anchors.verticalCenter: parent.verticalCenter
+                                                                    text: song.pending === "next" ? "Play next" : "Add to queue"
+                                                                    color: confirmMouse.containsMouse ? Theme.bg : Theme.green
+                                                                    font.family: Theme.font
+                                                                    font.pixelSize: Theme.textSize * 0.85
+                                                                    font.weight: 700
+                                                                }
+                                                            }
+                                                            MouseArea {
+                                                                id: confirmMouse
+                                                                anchors.fill: parent
+                                                                hoverEnabled: true
+                                                                cursorShape: Qt.PointingHandCursor
+                                                                onClicked: song.confirm()
+                                                            }
+                                                        }
+                                                        IconButton {
+                                                            icon: "close"
+                                                            iconColor: Theme.red
+                                                            onClicked: song.pending = ""
+                                                        }
+                                                    }
+
+                                                    // step 3: a short "Added"
+                                                    Text {
+                                                        anchors.right: parent.right
+                                                        anchors.rightMargin: 6
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        visible: song.added
+                                                        text: "Added"
+                                                        color: Theme.green
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.85
+                                                        font.weight: 700
+                                                    }
+                                                }
                                             }
                                         }
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 120
-                                                easing.type: Easing.OutCubic
+                                    }
+
+                                    // ── artists / albums ──
+                                    // Click one to see its songs; the play button plays all of them.
+                                    ListView {
+                                        id: groupList
+                                        visible: lib.tab === "library" && lib.view !== "songs" && !lib.pick && lib.groups.length > 0
+                                        width: parent.width
+                                        height: 320
+                                        clip: true
+                                        spacing: 2
+                                        model: lib.groups
+                                        boundsBehavior: Flickable.StopAtBounds
+                                        ScrollBar.vertical: ScrollBar {
+                                            id: groupBar
+                                            contentItem: Rectangle {
+                                                implicitWidth: 4
+                                                radius: 2
+                                                color: Theme.pillIcon
+                                                opacity: groupBar.size < 1 ? (groupBar.active ? 1 : 0.4) : 0
+                                                Behavior on opacity {
+                                                    NumberAnimation {
+                                                        duration: 200
+                                                    }
+                                                }
                                             }
                                         }
 
-                                        // click a song in the queue to jump to it
-                                        MouseArea {
-                                            id: entryMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: music.jumpTo(entry.index)
+                                        delegate: Rectangle {
+                                            id: group
+                                            required property var modelData      // { kind, name, artist, cover, songs }
+                                            width: ListView.view.width - 8
+                                            height: 46
+                                            radius: Theme.radius
+                                            color: groupMouse.containsMouse ? Theme.pill : "transparent"
+                                            scale: groupMouse.pressed ? 0.95 : 1
+                                            Behavior on color {
+                                                ColorAnimation {
+                                                    duration: 120
+                                                }
+                                            }
+                                            Behavior on scale {
+                                                NumberAnimation {
+                                                    duration: 120
+                                                    easing.type: Easing.OutCubic
+                                                }
+                                            }
 
-                                            // grab here and drag up or down to move the song
+                                            MouseArea {
+                                                id: groupMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: lib.pick = group.modelData
+
+                                                // artists get a round picture, albums a rounded square
+                                                ClippingRectangle {
+                                                    id: groupCover
+                                                    x: 5
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 36
+                                                    height: 36
+                                                    radius: group.modelData.kind === "artists" ? 18 : 6
+                                                    color: Theme.pill
+                                                    Image {
+                                                        anchors.fill: parent
+                                                        source: group.modelData.cover
+                                                        sourceSize: Qt.size(72, 72)
+                                                        fillMode: Image.PreserveAspectCrop
+                                                        asynchronous: true
+                                                    }
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        visible: group.modelData.cover === ""
+                                                        text: group.modelData.kind === "artists" ? "person" : "album"
+                                                        color: Theme.pillIcon
+                                                        font.family: Theme.iconFont
+                                                        font.pixelSize: Theme.iconSize
+                                                    }
+                                                }
+                                                Column {
+                                                    anchors.left: groupCover.right
+                                                    anchors.leftMargin: 10
+                                                    anchors.right: groupPlay.left
+                                                    anchors.rightMargin: 8
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    Text {
+                                                        width: parent.width
+                                                        text: group.modelData.name
+                                                        elide: Text.ElideRight
+                                                        color: Theme.text
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize
+                                                        font.weight: 700
+                                                        font.letterSpacing: Theme.letterSpacing
+                                                    }
+                                                    Text {
+                                                        width: parent.width
+                                                        text: (group.modelData.kind === "albums" && group.modelData.artist ? group.modelData.artist + "  ·  " : "") + group.modelData.songs.length + (group.modelData.songs.length === 1 ? " song" : " songs")
+                                                        elide: Text.ElideRight
+                                                        color: Theme.text
+                                                        opacity: 0.6
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.85
+                                                    }
+                                                }
+                                                IconButton {        // play everything by this artist / on this album
+                                                    id: groupPlay
+                                                    anchors.right: parent.right
+                                                    anchors.rightMargin: 4
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    visible: groupMouse.containsMouse
+                                                    icon: "play_arrow"
+                                                    onClicked: music.playAll(group.modelData.songs)
+                                                }
+                                                Text {
+                                                    anchors.right: parent.right
+                                                    anchors.rightMargin: 10
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    visible: !groupMouse.containsMouse
+                                                    text: "chevron_right"
+                                                    color: Theme.pillIcon
+                                                    font.family: Theme.iconFont
+                                                    font.pixelSize: Theme.iconSize
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // ── the queue ──
+                                    ListView {
+                                        id: queueList
+                                        visible: lib.tab === "queue" && music.queue.length > 0
+                                        width: parent.width
+                                        height: 356
+                                        clip: true
+                                        spacing: 2
+                                        // ScriptModel compares the new queue with the old one and only
+                                        // updates the rows that changed. A plain array (model: music.queue)
+                                        // makes the ListView throw every row away and rebuild the list on
+                                        // each mpv update, which is what jumped it back to the top after a drop.
+                                        model: ScriptModel {
+                                            values: music.queue
+                                        }
+                                        boundsBehavior: Flickable.StopAtBounds
+                                        // no flicking the list while a row is being dragged
+                                        // (it scrolls by itself near the edges instead, see edgeScroll)
+                                        interactive: dragFrom < 0
+                                        // The ListView deletes rows that are far off screen. While dragging,
+                                        // keep them all, so the row in your hand isn't deleted when the list
+                                        // scrolls a long way.
+                                        cacheBuffer: dragFrom >= 0 ? Math.max(400, contentHeight) : 400
+
+                                        // ── drag to reorder ──
+                                        // Kept here, not in the rows, so every row can see the drag.
+                                        property int dragFrom: -1      // row being dragged, -1 = none
+                                        property int dragTo: -1        // where it would land if dropped now
+                                        property real dragOffset: 0    // how far it has moved from its spot
+                                        property bool settling: false  // just dropped: skip the slide-back animation
+                                        readonly property real rowStep: 46 + spacing   // row height + gap
+                                        property real grabY: 0         // where you grabbed it, in list-content coordinates
+                                        property real dragMouseY: 0    // the mouse, measured from the list's top edge
+                                        property real grabInRow: 0     // where in the row you grabbed it
+                                        property var dragSong: null    // the song being dragged (mpv entry)
+                                        property var dragInfo: null    // ...and its library info, for the floating copy
+                                        property bool dropping: false  // let go, waiting for mpv to send the new order
+                                        property real dropViewY: 0     // where the dropped row lands, from the list's top edge
+
+                                        // Let go: the floating copy glides into the gap and everything stays
+                                        // as it looks until mpv sends the new order (a few ms). Then the real
+                                        // rows take over, scrolled so nothing on screen moves.
+                                        function drop() {
+                                            const from = dragFrom, to = dragTo;
+                                            if (from < 0 || from === to) {
+                                                endDrag();
+                                                return;
+                                            }
+                                            // the gap = where the row now at `to` sits normally
+                                            const slot = itemAtIndex(to);
+                                            dropViewY = (slot ? slot.y : originY + to * rowStep) - contentY;
+                                            dropping = true;
+                                            dropTimeout.restart();
+                                            music.move(from, to);
+                                        }
+                                        function finishDrop() {
+                                            if (!dropping)
+                                                return;
+                                            const to = dragTo, viewY = dropViewY;
+                                            endDrag();
+                                            forceLayout();
+                                            const row = itemAtIndex(to);
+                                            if (row) {
+                                                const top = originY;
+                                                const bottom = originY + Math.max(0, contentHeight - height);
+                                                contentY = Math.max(top, Math.min(bottom, row.y - viewY));
+                                            }
+                                        }
+                                        function endDrag() {
+                                            dropTimeout.stop();
+                                            settling = true;      // rows jump to their new places, no slide
+                                            dropping = false;
+                                            dragFrom = -1;
+                                            dragTo = -1;
+                                            dragOffset = 0;
+                                        }
+                                        Connections {
+                                            target: music
+                                            // after the list has caught up with the new order
+                                            function onQueueChanged() {
+                                                if (queueList.dropping)
+                                                    Qt.callLater(queueList.finishDrop);
+                                            }
+                                        }
+                                        // mpv didn't answer: put things back
+                                        Timer {
+                                            id: dropTimeout
+                                            interval: 800
+                                            onTriggered: queueList.endDrag()
+                                        }
+
+                                        // Content coordinates count from the top of the whole queue, not the
+                                        // visible part, so the offset stays right while the list scrolls.
+                                        function updateDrag() {
+                                            dragOffset = dragMouseY + contentY - grabY;
+                                            // the slot under the middle of the dragged row
+                                            const slot = Math.round(dragFrom + dragOffset / rowStep);
+                                            dragTo = Math.max(0, Math.min(count - 1, slot));
+                                        }
+
+                                        // While dragging, hold the row near the top or bottom edge (or past
+                                        // it) and the list scrolls that way; the closer to the edge, the faster.
+                                        Timer {
+                                            id: edgeScroll
+                                            interval: 16          // about once a frame
+                                            repeat: true
+                                            running: queueList.dragFrom >= 0 && !queueList.dropping
+                                            onTriggered: {
+                                                const zone = 48;      // px from each edge where it starts scrolling
+                                                const maxSpeed = 12;  // px per tick at the very edge
+                                                const y = queueList.dragMouseY;
+                                                let push = 0;
+                                                if (y < zone)
+                                                    push = -(zone - y) / zone;
+                                                else if (y > queueList.height - zone)
+                                                    push = (y - (queueList.height - zone)) / zone;
+                                                if (push === 0)
+                                                    return;
+                                                push = Math.max(-1, Math.min(1, push));
+                                                const top = queueList.originY;
+                                                const bottom = queueList.originY + Math.max(0, queueList.contentHeight - queueList.height);
+                                                const next = Math.max(top, Math.min(bottom, queueList.contentY + push * maxSpeed));
+                                                if (next === queueList.contentY)
+                                                    return;
+                                                queueList.contentY = next;
+                                                queueList.updateDrag();
+                                            }
+                                        }
+
+                                        ScrollBar.vertical: ScrollBar {
+                                            id: queueBar
+                                            contentItem: Rectangle {
+                                                implicitWidth: 4
+                                                radius: 2
+                                                color: Theme.pillIcon
+                                                // hidden when everything fits, faint until you scroll or hover
+                                                opacity: queueBar.size < 1 ? (queueBar.active ? 1 : 0.4) : 0
+                                                Behavior on opacity {
+                                                    NumberAnimation {
+                                                        duration: 200
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        delegate: Rectangle {
+                                            id: entry
+                                            required property var modelData      // { filename, current, ... } from mpv
+                                            required property int index
+                                            // the library's info for this file (title, cover...), if it's in the library
+                                            readonly property var info: music.byPath[modelData.filename] ?? null
+
+                                            // Where this row should sit while something is dragged:
+                                            // the dragged row follows the mouse, the rows it passes
+                                            // step aside by one row to make room for it.
+                                            readonly property bool dragged: queueList.dragFrom === index
+                                            readonly property real shift: {
+                                                const f = queueList.dragFrom, t = queueList.dragTo;
+                                                if (f < 0 || dragged)
+                                                    return 0;
+                                                if (f < t && index > f && index <= t)
+                                                    return -queueList.rowStep;   // dragged one is moving down past me
+                                                if (f > t && index >= t && index < f)
+                                                    return queueList.rowStep;    // dragged one is moving up past me
+                                                return 0;
+                                            }
+
+                                            width: ListView.view.width - 8
+                                            height: 46
+                                            radius: Theme.radius
+                                            color: entryMouse.containsMouse || dragged ? Theme.pill : "transparent"
+                                            border.width: 1
+                                            border.color: entry.modelData.current ? Theme.accent : "transparent"
+                                            scale: entryMouse.pressed && !dragged ? 0.95 : 1
+                                            // The row you're dragging stays in its slot, invisible; a floating
+                                            // copy (dragGhost, below the delegate) follows the mouse instead.
+                                            // The list stops drawing rows that scroll out of view, so a row
+                                            // that moved itself would vanish once its slot scrolled away.
+                                            opacity: dragged ? 0 : 1
+
+                                            transform: Translate {
+                                                y: entry.dragged ? 0 : entry.shift
+                                                Behavior on y {
+                                                    enabled: !entry.dragged && !queueList.settling
+                                                    NumberAnimation {
+                                                        duration: 150
+                                                        easing.type: Easing.OutCubic
+                                                    }
+                                                }
+                                            }
+
+                                            Behavior on color {
+                                                ColorAnimation {
+                                                    duration: 120
+                                                }
+                                            }
+                                            Behavior on scale {
+                                                NumberAnimation {
+                                                    duration: 120
+                                                    easing.type: Easing.OutCubic
+                                                }
+                                            }
+
+                                            // click a song in the queue to jump to it
+                                            MouseArea {
+                                                id: entryMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: music.jumpTo(entry.index)
+
+                                                // grab here and drag up or down to move the song
+                                                Text {
+                                                    id: dragHandle
+                                                    x: 4
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: "drag_indicator"
+                                                    color: Theme.text
+                                                    opacity: entryMouse.containsMouse || entry.dragged ? 0.8 : 0.3
+                                                    font.family: Theme.iconFont
+                                                    font.pixelSize: Theme.iconSize
+                                                    font.variableAxes: Theme.iconAxes
+
+                                                    MouseArea {
+                                                        anchors.fill: parent
+                                                        anchors.margins: -6               // a bit easier to grab
+                                                        cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                                                        preventStealing: true             // keep the list from scrolling instead
+
+                                                        onPressed: mouse => {
+                                                            if (queueList.dropping)
+                                                                return;
+                                                            queueList.dragMouseY = mapToItem(queueList, 0, mouse.y).y;
+                                                            queueList.grabInRow = mapToItem(entry, 0, mouse.y).y;
+                                                            queueList.dragSong = entry.modelData;
+                                                            queueList.dragInfo = entry.info;
+                                                            queueList.grabY = queueList.dragMouseY + queueList.contentY;
+                                                            queueList.settling = false;
+                                                            queueList.dragOffset = 0;
+                                                            queueList.dragTo = entry.index;
+                                                            queueList.dragFrom = entry.index;
+                                                        }
+                                                        onPositionChanged: mouse => {
+                                                            if (queueList.dragFrom < 0 || queueList.dropping)
+                                                                return;
+                                                            queueList.dragMouseY = mapToItem(queueList, 0, mouse.y).y;
+                                                            queueList.updateDrag();
+                                                        }
+                                                        onReleased: queueList.drop()
+                                                        onCanceled: queueList.endDrag()
+                                                    }
+                                                }
+
+                                                ClippingRectangle {
+                                                    id: entryCover
+                                                    x: 28
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 36
+                                                    height: 36
+                                                    radius: 6
+                                                    color: Theme.pill
+
+                                                    Image {
+                                                        anchors.fill: parent
+                                                        source: entry.info ? entry.info.cover : ""
+                                                        sourceSize: Qt.size(72, 72)
+                                                        fillMode: Image.PreserveAspectCrop
+                                                        asynchronous: true
+                                                    }
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        visible: !entry.info || entry.info.cover === ""
+                                                        text: "music_note"
+                                                        color: Theme.pillIcon
+                                                        font.family: Theme.iconFont
+                                                        font.pixelSize: Theme.iconSize
+                                                    }
+                                                }
+
+                                                Column {
+                                                    anchors.left: entryCover.right
+                                                    anchors.leftMargin: 10
+                                                    anchors.right: removeButton.left
+                                                    anchors.rightMargin: 8
+                                                    anchors.verticalCenter: parent.verticalCenter
+
+                                                    Text {
+                                                        width: parent.width
+                                                        // not in the library: show the file name
+                                                        text: entry.info ? entry.info.title : entry.modelData.filename.split("/").pop()
+                                                        elide: Text.ElideRight
+                                                        color: entry.modelData.current ? Theme.accent : Theme.text
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize
+                                                        font.weight: 700
+                                                        font.letterSpacing: Theme.letterSpacing
+                                                    }
+                                                    Text {
+                                                        width: parent.width
+                                                        visible: text !== ""
+                                                        text: entry.info ? entry.info.artist : ""
+                                                        elide: Text.ElideRight
+                                                        color: Theme.text
+                                                        opacity: 0.6
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.85
+                                                    }
+                                                }
+
+                                                IconButton {
+                                                    id: removeButton
+                                                    anchors.right: parent.right
+                                                    anchors.rightMargin: 4
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    visible: entryMouse.containsMouse        // only while hovered
+                                                    icon: "close"
+                                                    iconColor: Theme.red
+                                                    onClicked: music.remove(entry.index)
+                                                }
+                                            }
+                                        }
+
+                                        // the floating copy of the row being dragged
+                                        Rectangle {
+                                            id: dragGhost
+                                            parent: queueList          // the list itself, not its scrolling content
+                                            visible: queueList.dragFrom >= 0
+                                            z: 10
+                                            x: 0
+                                            y: queueList.dropping ? queueList.dropViewY : queueList.dragMouseY - queueList.grabInRow
+                                            width: queueList.width - 8
+                                            height: 46
+                                            radius: Theme.radius
+                                            color: Theme.pill
+                                            border.width: 1
+                                            border.color: queueList.dragSong && queueList.dragSong.current ? Theme.accent : "transparent"
+                                            scale: queueList.dropping ? 1 : 1.03
+
+                                            // only animates the glide into the gap, not following the mouse
+                                            Behavior on y {
+                                                enabled: queueList.dropping
+                                                NumberAnimation {
+                                                    duration: 120
+                                                    easing.type: Easing.OutCubic
+                                                }
+                                            }
+                                            Behavior on scale {
+                                                NumberAnimation {
+                                                    duration: 120
+                                                    easing.type: Easing.OutCubic
+                                                }
+                                            }
+
                                             Text {
-                                                id: dragHandle
                                                 x: 4
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 text: "drag_indicator"
                                                 color: Theme.text
-                                                opacity: entryMouse.containsMouse || entry.dragged ? 0.8 : 0.3
+                                                opacity: 0.8
                                                 font.family: Theme.iconFont
                                                 font.pixelSize: Theme.iconSize
                                                 font.variableAxes: Theme.iconAxes
-
-                                                MouseArea {
-                                                    anchors.fill: parent
-                                                    anchors.margins: -6               // a bit easier to grab
-                                                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
-                                                    preventStealing: true             // keep the list from scrolling instead
-
-                                                    onPressed: mouse => {
-                                                        if (queueList.dropping)
-                                                            return;
-                                                        queueList.dragMouseY = mapToItem(queueList, 0, mouse.y).y;
-                                                        queueList.grabInRow = mapToItem(entry, 0, mouse.y).y;
-                                                        queueList.dragSong = entry.modelData;
-                                                        queueList.dragInfo = entry.info;
-                                                        queueList.grabY = queueList.dragMouseY + queueList.contentY;
-                                                        queueList.settling = false;
-                                                        queueList.dragOffset = 0;
-                                                        queueList.dragTo = entry.index;
-                                                        queueList.dragFrom = entry.index;
-                                                    }
-                                                    onPositionChanged: mouse => {
-                                                        if (queueList.dragFrom < 0 || queueList.dropping)
-                                                            return;
-                                                        queueList.dragMouseY = mapToItem(queueList, 0, mouse.y).y;
-                                                        queueList.updateDrag();
-                                                    }
-                                                    onReleased: queueList.drop()
-                                                    onCanceled: queueList.endDrag()
-                                                }
                                             }
-
                                             ClippingRectangle {
-                                                id: entryCover
+                                                id: ghostCover
                                                 x: 28
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 width: 36
                                                 height: 36
                                                 radius: 6
-                                                color: Theme.pill
+                                                color: Theme.bg
 
                                                 Image {
                                                     anchors.fill: parent
-                                                    source: entry.info ? entry.info.cover : ""
+                                                    source: queueList.dragInfo ? queueList.dragInfo.cover : ""
                                                     sourceSize: Qt.size(72, 72)
                                                     fillMode: Image.PreserveAspectCrop
-                                                    asynchronous: true
                                                 }
                                                 Text {
                                                     anchors.centerIn: parent
-                                                    visible: !entry.info || entry.info.cover === ""
+                                                    visible: !queueList.dragInfo || queueList.dragInfo.cover === ""
                                                     text: "music_note"
                                                     color: Theme.pillIcon
                                                     font.family: Theme.iconFont
                                                     font.pixelSize: Theme.iconSize
                                                 }
                                             }
-
                                             Column {
-                                                anchors.left: entryCover.right
+                                                anchors.left: ghostCover.right
                                                 anchors.leftMargin: 10
-                                                anchors.right: removeButton.left
-                                                anchors.rightMargin: 8
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: 12
                                                 anchors.verticalCenter: parent.verticalCenter
 
                                                 Text {
                                                     width: parent.width
-                                                    // not in the library: show the file name
-                                                    text: entry.info ? entry.info.title : entry.modelData.filename.split("/").pop()
+                                                    text: queueList.dragInfo ? queueList.dragInfo.title : queueList.dragSong ? queueList.dragSong.filename.split("/").pop() : ""
                                                     elide: Text.ElideRight
-                                                    color: entry.modelData.current ? Theme.accent : Theme.text
+                                                    color: queueList.dragSong && queueList.dragSong.current ? Theme.accent : Theme.text
                                                     font.family: Theme.font
                                                     font.pixelSize: Theme.textSize
                                                     font.weight: 700
@@ -3948,7 +4087,7 @@ in
                                                 Text {
                                                     width: parent.width
                                                     visible: text !== ""
-                                                    text: entry.info ? entry.info.artist : ""
+                                                    text: queueList.dragInfo ? queueList.dragInfo.artist : ""
                                                     elide: Text.ElideRight
                                                     color: Theme.text
                                                     opacity: 0.6
@@ -3956,42 +4095,568 @@ in
                                                     font.pixelSize: Theme.textSize * 0.85
                                                 }
                                             }
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
-                                            IconButton {
-                                                id: removeButton
-                                                anchors.right: parent.right
-                                                anchors.rightMargin: 4
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                visible: entryMouse.containsMouse        // only while hovered
-                                                icon: "close"
-                                                iconColor: Theme.red
-                                                onClicked: music.remove(entry.index)
+                        Rectangle {
+                            id: media
+                            property var player: Mpris.players.values.find(p => p.isPlaying) ?? Mpris.players.values[0]
+
+                            width: mediaButtons.width + 12
+                            height: Theme.moduleHeight
+                            radius: Theme.radius
+                            color: Theme.pill
+                            visible: media.player != undefined
+
+                            Row {
+                                id: mediaButtons
+                                anchors.centerIn: parent
+
+                                IconButton {
+                                    icon: "skip_previous"
+                                    implicitWidth: 16
+                                    onClicked: if (media.player && media.player.canGoPrevious)
+                                        media.player.previous()
+                                }
+                                IconButton {
+                                    icon: media.player && media.player.isPlaying ? "pause" : "play_arrow"
+                                    implicitWidth: 16
+                                    onClicked: if (media.player && media.player.canTogglePlaying)
+                                        media.player.togglePlaying()
+                                }
+                                IconButton {
+                                    icon: "skip_next"
+                                    implicitWidth: 16
+                                    onClicked: if (media.player && media.player.canGoNext)
+                                        media.player.next()
+                                }
+                            }
+                        }
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            Text {
+                                visible: media.player != undefined
+                                text: media.player ? media.player.trackTitle : " "
+                                color: Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize
+                                font.weight: 600
+                                font.letterSpacing: Theme.letterSpacing
+                            }
+                            Text {
+                                visible: media.player != undefined
+                                text: media.player ? media.player.trackArtist : " "
+                                color: Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.75
+                                font.weight: 600
+                                font.letterSpacing: Theme.letterSpacing
+                            }
+                        }
+                    }
+                    Row {
+                        anchors.right: parent.right
+                        anchors.rightMargin: Theme.spacing
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Theme.spacing
+
+                        // ── Open apps + system tray ── (right side, just left of the weather)
+                        // In the bar: one icon per app that has a window open (the one you're
+                        // in is brighter). Click for the list: every window (click one to go to
+                        // it, x to close it), and under it the tray icons apps put up. In the
+                        // tray: left click = the app's action, middle click = its second
+                        // action, right click = its menu, shown right here in the popup.
+                        Widget {
+                            id: appsWidget
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            // one entry per app, in the order they were opened
+                            readonly property var apps: {
+                                const byId = {};
+                                const out = [];
+                                for (const t of ToplevelManager.toplevels.values) {
+                                    const id = t.appId || t.title;
+                                    if (!byId[id]) {
+                                        byId[id] = {
+                                            "id": id,
+                                            "active": false
+                                        };
+                                        out.push(byId[id]);
+                                    }
+                                    if (t.activated)
+                                        byId[id].active = true;
+                                }
+                                return out;
+                            }
+                            readonly property int maxIcons: 5   // icons in the bar; more than this shows "…"
+                            // the app's icon from its .desktop file, else a generic one
+                            function iconFor(appId) {
+                                const e = DesktopEntries.heuristicLookup(appId);
+                                return Quickshell.iconPath(e && e.icon !== "" ? e.icon : appId, "application-x-executable");
+                            }
+                            function nameFor(appId) {
+                                const e = DesktopEntries.heuristicLookup(appId);
+                                return e && e.name !== "" ? e.name : appId;
+                            }
+
+                            button: Row {
+                                spacing: 6
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: appsWidget.apps.length === 0
+                                    text: "apps"
+                                    color: Theme.text
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                                Repeater {
+                                    model: appsWidget.apps.slice(0, appsWidget.maxIcons)
+                                    Image {
+                                        required property var modelData
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 16
+                                        height: 16
+                                        sourceSize.width: 32
+                                        sourceSize.height: 32
+                                        source: appsWidget.iconFor(modelData.id)
+                                        opacity: modelData.active ? 1 : 0.55
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: 150
                                             }
                                         }
                                     }
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: appsWidget.apps.length > appsWidget.maxIcons
+                                    text: "…"      // more open; the popup lists them all
+                                    color: Theme.text
+                                    opacity: 0.7
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize
+                                    font.weight: 700
+                                }
+                            }
 
-                                    // the floating copy of the row being dragged
+                            Column {
+                                id: appsList
+                                spacing: 4
+                                width: 300
+
+                                // the tray menu being shown: the tray item, and the menu (or
+                                // submenu) path into it; empty = none
+                                property var menuItem: null
+                                property var menuStack: []
+                                function openMenu(item) {
+                                    if (menuItem === item) {
+                                        closeMenu();
+                                        return;
+                                    }
+                                    menuItem = item;
+                                    menuStack = [item.menu];
+                                }
+                                function closeMenu() {
+                                    menuItem = null;
+                                    menuStack = [];
+                                }
+
+                                // header
+                                Item {
+                                    width: parent.width
+                                    height: 26
+
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "Open apps"
+                                        color: Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 1.2
+                                        font.weight: 700
+                                        font.letterSpacing: Theme.letterSpacing
+                                    }
+                                    Text {
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: ToplevelManager.toplevels.values.length + (ToplevelManager.toplevels.values.length === 1 ? " window" : " windows")
+                                        color: Theme.text
+                                        opacity: 0.6
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.85
+                                    }
+                                }
+
+                                Text {
+                                    visible: ToplevelManager.toplevels.values.length === 0
+                                    text: "Nothing open."
+                                    color: Theme.text
+                                    opacity: 0.6
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize
+                                }
+
+                                // every window; scrolls past 320 px
+                                Flickable {
+                                    id: winScroll
+                                    width: parent.width
+                                    height: Math.min(contentHeight, 320)
+                                    contentHeight: winRows.implicitHeight
+                                    visible: winRows.implicitHeight > 0
+                                    clip: true
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    ScrollBar.vertical: ThinScrollBar {}
+
+                                    Column {
+                                        id: winRows
+                                        width: winScroll.width
+                                        spacing: 2
+
+                                        Repeater {
+                                            model: ScriptModel {
+                                                values: [...ToplevelManager.toplevels.values]
+                                            }
+
+                                            Rectangle {
+                                                id: winRow
+                                                required property var modelData
+                                                width: winRows.width
+                                                height: 36
+                                                radius: Theme.radius
+                                                color: winHover.hovered || modelData.activated ? Theme.pill : "transparent"
+                                                NumberAnimation on opacity {
+                                                    from: 0
+                                                    to: 1
+                                                    duration: 200
+                                                }
+                                                Behavior on color {
+                                                    ColorAnimation {
+                                                        duration: 120
+                                                    }
+                                                }
+
+                                                HoverHandler {
+                                                    id: winHover
+                                                }
+                                                // click: go to that window
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        winRow.modelData.activate();
+                                                        appsWidget.closePopup();
+                                                    }
+                                                }
+                                                Image {
+                                                    id: winIcon
+                                                    anchors.left: parent.left
+                                                    anchors.leftMargin: 8
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 20
+                                                    height: 20
+                                                    sourceSize.width: 40
+                                                    sourceSize.height: 40
+                                                    source: appsWidget.iconFor(winRow.modelData.appId)
+                                                }
+                                                Column {
+                                                    anchors {
+                                                        left: winIcon.right
+                                                        right: winClose.left
+                                                        leftMargin: 10
+                                                        rightMargin: 6
+                                                        verticalCenter: parent.verticalCenter
+                                                    }
+                                                    Text {
+                                                        width: parent.width
+                                                        text: winRow.modelData.title || appsWidget.nameFor(winRow.modelData.appId)
+                                                        elide: Text.ElideRight
+                                                        color: winRow.modelData.activated ? Theme.accent : Theme.text
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.95
+                                                        font.weight: winRow.modelData.activated ? 700 : 500
+                                                        font.letterSpacing: Theme.letterSpacing
+                                                    }
+                                                    Text {
+                                                        width: parent.width
+                                                        text: appsWidget.nameFor(winRow.modelData.appId)
+                                                        elide: Text.ElideRight
+                                                        color: Theme.text
+                                                        opacity: 0.6
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.8
+                                                    }
+                                                }
+                                                // x: close the window (shows on hover)
+                                                IconButton {
+                                                    id: winClose
+                                                    anchors.right: parent.right
+                                                    anchors.rightMargin: 4
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    icon: "close"
+                                                    iconColor: Theme.red
+                                                    opacity: winHover.hovered ? 1 : 0
+                                                    enabled: winHover.hovered
+                                                    Behavior on opacity {
+                                                        NumberAnimation {
+                                                            duration: 120
+                                                        }
+                                                    }
+                                                    onClicked: winRow.modelData.close()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // ── the tray ──
+                                Text {
+                                    visible: SystemTray.items.values.length > 0
+                                    topPadding: 6
+                                    text: "Tray"
+                                    color: Theme.text
+                                    opacity: 0.6
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                    font.weight: 600
+                                }
+                                Flow {
+                                    visible: SystemTray.items.values.length > 0
+                                    width: parent.width
+                                    spacing: 4
+
+                                    Repeater {
+                                        model: SystemTray.items
+
+                                        Rectangle {
+                                            id: trayBtn
+                                            required property var modelData
+                                            readonly property bool menuOpen: appsList.menuItem === modelData
+                                            width: 34
+                                            height: 34
+                                            radius: Theme.radius
+                                            color: menuOpen ? Theme.pill : trayMouse.containsMouse ? Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, 0.6) : "transparent"
+                                            border.width: menuOpen ? 1 : 0
+                                            border.color: Theme.accent
+                                            scale: trayMouse.pressed ? 0.85 : 1
+                                            Behavior on scale {
+                                                NumberAnimation {
+                                                    duration: 120
+                                                    easing.type: Easing.OutCubic
+                                                }
+                                            }
+
+                                            Image {
+                                                anchors.centerIn: parent
+                                                width: 18
+                                                height: 18
+                                                sourceSize.width: 36
+                                                sourceSize.height: 36
+                                                source: trayBtn.modelData.icon
+                                            }
+                                            MouseArea {
+                                                id: trayMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                                                onClicked: mouse => {
+                                                    const item = trayBtn.modelData;
+                                                    if (mouse.button === Qt.MiddleButton)
+                                                        item.secondaryActivate();
+                                                    else if (item.hasMenu && (mouse.button === Qt.RightButton || item.onlyMenu))
+                                                        appsList.openMenu(item);
+                                                    else
+                                                        item.activate();
+                                                }
+                                                onWheel: wheel => trayBtn.modelData.scroll(wheel.angleDelta.y, false)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // ── the open tray menu ──
+                                QsMenuOpener {
+                                    id: trayMenu
+                                    menu: appsList.menuStack.length > 0 ? appsList.menuStack[appsList.menuStack.length - 1] : null
+                                }
+                                Rectangle {
+                                    visible: appsList.menuItem !== null
+                                    width: parent.width
+                                    height: menuCol.implicitHeight + 8
+                                    radius: Theme.radius
+                                    color: Theme.pill
+
+                                    Column {
+                                        id: menuCol
+                                        x: 4
+                                        y: 4
+                                        width: parent.width - 8
+
+                                        // title, with a back arrow inside a submenu
+                                        Item {
+                                            width: parent.width
+                                            height: 28
+                                            IconButton {
+                                                id: menuBack
+                                                anchors.left: parent.left
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                visible: appsList.menuStack.length > 1
+                                                width: visible ? implicitWidth : 0
+                                                icon: "arrow_back"
+                                                onClicked: appsList.menuStack = appsList.menuStack.slice(0, -1)
+                                            }
+                                            Text {
+                                                anchors.left: menuBack.right
+                                                anchors.leftMargin: 6
+                                                anchors.right: parent.right
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: appsList.menuItem ? (appsList.menuItem.tooltipTitle || appsList.menuItem.title || appsList.menuItem.id) : ""
+                                                elide: Text.ElideRight
+                                                color: Theme.text
+                                                opacity: 0.7
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize * 0.85
+                                                font.weight: 600
+                                            }
+                                        }
+
+                                        Repeater {
+                                            model: trayMenu.children
+
+                                            Item {
+                                                id: entry
+                                                required property var modelData
+                                                width: menuCol.width
+                                                height: modelData.isSeparator ? 9 : 28
+
+                                                Rectangle {
+                                                    visible: entry.modelData.isSeparator
+                                                    anchors.centerIn: parent
+                                                    width: parent.width - 16
+                                                    height: 1
+                                                    color: Theme.pillIcon
+                                                }
+                                                Rectangle {
+                                                    visible: !entry.modelData.isSeparator
+                                                    anchors.fill: parent
+                                                    radius: Theme.radius
+                                                    color: entryMouse.containsMouse && entry.modelData.enabled ? Theme.bg : "transparent"
+                                                    opacity: entry.modelData.enabled ? 1 : 0.4
+
+                                                    // check box / radio button entries
+                                                    Text {
+                                                        id: entryCheck
+                                                        anchors.left: parent.left
+                                                        anchors.leftMargin: 8
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        visible: entry.modelData.buttonType !== QsMenuButtonType.None
+                                                        width: visible ? implicitWidth : 0
+                                                        text: entry.modelData.checkState === Qt.Checked ? (entry.modelData.buttonType === QsMenuButtonType.RadioButton ? "radio_button_checked" : "check_box") : (entry.modelData.buttonType === QsMenuButtonType.RadioButton ? "radio_button_unchecked" : "check_box_outline_blank")
+                                                        color: Theme.accent
+                                                        font.family: Theme.iconFont
+                                                        font.pixelSize: Theme.iconSize
+                                                        font.variableAxes: Theme.iconAxes
+                                                    }
+                                                    Text {
+                                                        anchors.left: entryCheck.right
+                                                        anchors.leftMargin: 8
+                                                        anchors.right: entryMore.left
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        text: entry.modelData.text.replace(/_(?!_)/g, "")   // drop the underline-the-next-letter marks
+                                                        elide: Text.ElideRight
+                                                        color: Theme.text
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.95
+                                                    }
+                                                    Text {
+                                                        id: entryMore
+                                                        anchors.right: parent.right
+                                                        anchors.rightMargin: 6
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        visible: entry.modelData.hasChildren
+                                                        text: "chevron_right"
+                                                        color: Theme.text
+                                                        font.family: Theme.iconFont
+                                                        font.pixelSize: Theme.iconSize
+                                                        font.variableAxes: Theme.iconAxes
+                                                    }
+                                                    MouseArea {
+                                                        id: entryMouse
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: entry.modelData.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                                        onClicked: {
+                                                            const m = entry.modelData;
+                                                            if (!m.enabled)
+                                                                return;
+                                                            if (m.hasChildren) {
+                                                                appsList.menuStack = appsList.menuStack.concat([m]);
+                                                            } else {
+                                                                m.triggered();
+                                                                appsList.closeMenu();
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Weather {
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        // ── Notification center ──
+                        Widget {
+                            anchors.verticalCenter: parent.verticalCenter
+                            button: Pill {
+                                icon: notifs.unreadCount > 0 ? "notifications_unread" : "notifications"
+                                iconColor: Theme.yellow
+                                text: notifs.unreadCount
+                            }
+
+                            Column {
+                                spacing: 10
+
+                                // header: title on the left, "Mark all read" on the right
+                                Item {
+                                    width: 340
+                                    height: 26
+
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "Notifications"
+                                        color: Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 1.2
+                                        font.weight: 700
+                                        font.letterSpacing: Theme.letterSpacing
+                                    }
                                     Rectangle {
-                                        id: dragGhost
-                                        parent: queueList          // the list itself, not its scrolling content
-                                        visible: queueList.dragFrom >= 0
-                                        z: 10
-                                        x: 0
-                                        y: queueList.dropping ? queueList.dropViewY : queueList.dragMouseY - queueList.grabInRow
-                                        width: queueList.width - 8
-                                        height: 46
-                                        radius: Theme.radius
-                                        color: Theme.pill
+                                        id: markRead
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: markReadLabel.implicitWidth + 20
+                                        height: 24
+                                        radius: height / 2
+                                        color: markReadMouse.containsMouse ? Theme.pill : "transparent"
                                         border.width: 1
-                                        border.color: queueList.dragSong && queueList.dragSong.current ? Theme.accent : "transparent"
-                                        scale: queueList.dropping ? 1 : 1.03
+                                        border.color: Theme.pill
+                                        opacity: notifs.unreadCount > 0 ? 1 : 0.4     // dim when nothing is unread
+                                        scale: markReadMouse.pressed ? 0.85 : 1
 
-                                        // only animates the glide into the gap, not following the mouse
-                                        Behavior on y {
-                                            enabled: queueList.dropping
-                                            NumberAnimation {
+                                        Behavior on color {
+                                            ColorAnimation {
                                                 duration: 120
-                                                easing.type: Easing.OutCubic
                                             }
                                         }
                                         Behavior on scale {
@@ -4002,51 +4667,117 @@ in
                                         }
 
                                         Text {
-                                            x: 4
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: "drag_indicator"
-                                            color: Theme.text
-                                            opacity: 0.8
-                                            font.family: Theme.iconFont
-                                            font.pixelSize: Theme.iconSize
-                                            font.variableAxes: Theme.iconAxes
+                                            id: markReadLabel
+                                            anchors.centerIn: parent
+                                            text: "Mark all read"
+                                            color: Theme.accent
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.9
+                                            font.weight: 600
                                         }
-                                        ClippingRectangle {
-                                            id: ghostCover
-                                            x: 28
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: 36
-                                            height: 36
-                                            radius: 6
-                                            color: Theme.bg
+                                        MouseArea {
+                                            id: markReadMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: notifs.markAllRead()
+                                        }
+                                    }
+                                }
 
-                                            Image {
-                                                anchors.fill: parent
-                                                source: queueList.dragInfo ? queueList.dragInfo.cover : ""
-                                                sourceSize: Qt.size(72, 72)
-                                                fillMode: Image.PreserveAspectCrop
-                                            }
-                                            Text {
-                                                anchors.centerIn: parent
-                                                visible: !queueList.dragInfo || queueList.dragInfo.cover === ""
-                                                text: "music_note"
-                                                color: Theme.pillIcon
-                                                font.family: Theme.iconFont
-                                                font.pixelSize: Theme.iconSize
+                                Text {
+                                    visible: notifs.trackedNotifications.values.length === 0
+                                    text: "No notifications"
+                                    color: Theme.text
+                                    opacity: 0.5
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize
+                                }
+
+                                // The list scrolls once it's taller than 400 px.
+                                ListView {
+                                    width: 340
+                                    height: Math.min(contentHeight, 400)
+                                    visible: count > 0
+                                    clip: true
+                                    spacing: 6
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    ScrollBar.vertical: ThinScrollBar {}
+
+                                    // newest first; ScriptModel keeps existing cards when one is added
+                                    model: ScriptModel {
+                                        values: [...notifs.trackedNotifications.values].reverse()
+                                    }
+
+                                    delegate: Rectangle {
+                                        id: card
+                                        required property var modelData
+                                        readonly property bool isUnread: notifs.unread.includes(modelData.id)
+                                        readonly property date arrivedAt: notifs.arrived[modelData.id] ?? new Date(NaN)
+
+                                        width: ListView.view.width
+                                        height: cardContent.implicitHeight + 20
+                                        radius: Theme.radius
+                                        color: Theme.pill
+                                        border.width: 1
+                                        border.color: isUnread ? Theme.accent : "transparent"
+
+                                        Behavior on border.color {
+                                            ColorAnimation {
+                                                duration: 200
                                             }
                                         }
+
                                         Column {
-                                            anchors.left: ghostCover.right
-                                            anchors.leftMargin: 10
-                                            anchors.right: parent.right
-                                            anchors.rightMargin: 12
-                                            anchors.verticalCenter: parent.verticalCenter
+                                            id: cardContent
+                                            x: 12
+                                            y: 10
+                                            width: parent.width - 24
+                                            spacing: 3
 
+                                            // app name · time, with the dismiss × on the right
+                                            Item {
+                                                width: parent.width
+                                                height: appLine.implicitHeight
+
+                                                Text {
+                                                    id: appLine
+                                                    anchors.left: parent.left
+                                                    anchors.right: dismiss.left
+                                                    anchors.rightMargin: 8
+                                                    text: (card.modelData.appName || "Notification") + (isNaN(card.arrivedAt) ? "" : "  ·  " + Qt.formatDateTime(card.arrivedAt, "h:mm AP"))
+                                                    elide: Text.ElideRight
+                                                    color: card.isUnread ? Theme.accent : Theme.text
+                                                    opacity: card.isUnread ? 1 : 0.6
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize * 0.8
+                                                    font.weight: 600
+                                                }
+                                                Text {
+                                                    id: dismiss
+                                                    anchors.right: parent.right
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: "close"                      // Material Symbols ×
+                                                    color: dismissMouse.containsMouse ? Theme.red : Theme.text
+                                                    opacity: dismissMouse.containsMouse ? 1 : 0.5
+                                                    font.family: Theme.iconFont
+                                                    font.pixelSize: Theme.iconSize * 0.9
+                                                    MouseArea {
+                                                        id: dismissMouse
+                                                        anchors.fill: parent
+                                                        anchors.margins: -4
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: card.modelData.dismiss()   // removes it for good
+                                                    }
+                                                }
+                                            }
                                             Text {
                                                 width: parent.width
-                                                text: queueList.dragInfo ? queueList.dragInfo.title : queueList.dragSong ? queueList.dragSong.filename.split("/").pop() : ""
-                                                elide: Text.ElideRight
-                                                color: queueList.dragSong && queueList.dragSong.current ? Theme.accent : Theme.text
+                                                text: card.modelData.summary
+                                                textFormat: Text.PlainText
+                                                wrapMode: Text.Wrap
+                                                color: Theme.text
                                                 font.family: Theme.font
                                                 font.pixelSize: Theme.textSize
                                                 font.weight: 700
@@ -4055,1895 +4786,915 @@ in
                                             Text {
                                                 width: parent.width
                                                 visible: text !== ""
-                                                text: queueList.dragInfo ? queueList.dragInfo.artist : ""
+                                                text: card.modelData.body
+                                                textFormat: Text.PlainText   // apps may send markup; show it as plain text
+                                                wrapMode: Text.Wrap
+                                                maximumLineCount: 3
                                                 elide: Text.ElideRight
                                                 color: Theme.text
-                                                opacity: 0.6
+                                                opacity: 0.8
                                                 font.family: Theme.font
-                                                font.pixelSize: Theme.textSize * 0.85
+                                                font.pixelSize: Theme.textSize * 0.9
                                             }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    Rectangle {
-                        id: media
-                        property var player: Mpris.players.values.find(p => p.isPlaying) ?? Mpris.players.values[0]
-
-                        width: mediaButtons.width + 12
-                        height: Theme.moduleHeight
-                        radius: Theme.radius
-                        color: Theme.pill
-                        visible: media.player != undefined
-
-                        Row {
-                            id: mediaButtons
-                            anchors.centerIn: parent
-
-                            IconButton {
-                                icon: "skip_previous"
-                                implicitWidth: 16
-                                onClicked: if (media.player && media.player.canGoPrevious)
-                                    media.player.previous()
-                            }
-                            IconButton {
-                                icon: media.player && media.player.isPlaying ? "pause" : "play_arrow"
-                                implicitWidth: 16
-                                onClicked: if (media.player && media.player.canTogglePlaying)
-                                    media.player.togglePlaying()
-                            }
-                            IconButton {
-                                icon: "skip_next"
-                                implicitWidth: 16
-                                onClicked: if (media.player && media.player.canGoNext)
-                                    media.player.next()
-                            }
-                        }
-                    }
-                    Column {
-                        anchors.verticalCenter: parent.verticalCenter
-                        Text {
-                            visible: media.player != undefined
-                            text: media.player ? media.player.trackTitle : " "
-                            color: Theme.text
-                            font.family: Theme.font
-                            font.pixelSize: Theme.textSize
-                            font.weight: 600
-                            font.letterSpacing: Theme.letterSpacing
-                        }
-                        Text {
-                            visible: media.player != undefined
-                            text: media.player ? media.player.trackArtist : " "
-                            color: Theme.text
-                            font.family: Theme.font
-                            font.pixelSize: Theme.textSize * 0.75
-                            font.weight: 600
-                            font.letterSpacing: Theme.letterSpacing
-                        }
-                    }
-                }
-                Row {
-                    anchors.right: parent.right
-                    anchors.rightMargin: Theme.spacing
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: Theme.spacing
-
-                    // ── Open apps + system tray ── (right side, just left of the weather)
-                    // In the bar: one icon per app that has a window open (the one you're
-                    // in is brighter). Click for the list: every window (click one to go to
-                    // it, x to close it), and under it the tray icons apps put up. In the
-                    // tray: left click = the app's action, middle click = its second
-                    // action, right click = its menu, shown right here in the popup.
-                    Widget {
-                        id: appsWidget
-                        anchors.verticalCenter: parent.verticalCenter
-
-                        // one entry per app, in the order they were opened
-                        readonly property var apps: {
-                            const byId = {};
-                            const out = [];
-                            for (const t of ToplevelManager.toplevels.values) {
-                                const id = t.appId || t.title;
-                                if (!byId[id]) {
-                                    byId[id] = {
-                                        "id": id,
-                                        "active": false
-                                    };
-                                    out.push(byId[id]);
-                                }
-                                if (t.activated)
-                                    byId[id].active = true;
-                            }
-                            return out;
-                        }
-                        readonly property int maxIcons: 5   // icons in the bar; more than this shows "…"
-                        // the app's icon from its .desktop file, else a generic one
-                        function iconFor(appId) {
-                            const e = DesktopEntries.heuristicLookup(appId);
-                            return Quickshell.iconPath(e && e.icon !== "" ? e.icon : appId, "application-x-executable");
-                        }
-                        function nameFor(appId) {
-                            const e = DesktopEntries.heuristicLookup(appId);
-                            return e && e.name !== "" ? e.name : appId;
-                        }
-
-                        button: Row {
-                            spacing: 6
-
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                visible: appsWidget.apps.length === 0
-                                text: "apps"
-                                color: Theme.text
-                                font.family: Theme.iconFont
-                                font.pixelSize: Theme.iconSize
-                                font.variableAxes: Theme.iconAxes
-                            }
-                            Repeater {
-                                model: appsWidget.apps.slice(0, appsWidget.maxIcons)
-                                Image {
-                                    required property var modelData
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: 16
-                                    height: 16
-                                    sourceSize.width: 32
-                                    sourceSize.height: 32
-                                    source: appsWidget.iconFor(modelData.id)
-                                    opacity: modelData.active ? 1 : 0.55
-                                    Behavior on opacity {
-                                        NumberAnimation {
-                                            duration: 150
-                                        }
-                                    }
-                                }
-                            }
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                visible: appsWidget.apps.length > appsWidget.maxIcons
-                                text: "…"      // more open; the popup lists them all
-                                color: Theme.text
-                                opacity: 0.7
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize
-                                font.weight: 700
-                            }
-                        }
-
-                        Column {
-                            id: appsList
-                            spacing: 4
-                            width: 300
-
-                            // the tray menu being shown: the tray item, and the menu (or
-                            // submenu) path into it; empty = none
-                            property var menuItem: null
-                            property var menuStack: []
-                            function openMenu(item) {
-                                if (menuItem === item) {
-                                    closeMenu();
-                                    return;
-                                }
-                                menuItem = item;
-                                menuStack = [item.menu];
-                            }
-                            function closeMenu() {
-                                menuItem = null;
-                                menuStack = [];
-                            }
-
-                            // header
-                            Item {
-                                width: parent.width
-                                height: 26
-
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "Open apps"
-                                    color: Theme.text
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 1.2
-                                    font.weight: 700
-                                    font.letterSpacing: Theme.letterSpacing
-                                }
-                                Text {
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: ToplevelManager.toplevels.values.length + (ToplevelManager.toplevels.values.length === 1 ? " window" : " windows")
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
-                                }
-                            }
-
-                            Text {
-                                visible: ToplevelManager.toplevels.values.length === 0
-                                text: "Nothing open."
-                                color: Theme.text
-                                opacity: 0.6
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize
-                            }
-
-                            // every window; scrolls past 320 px
-                            Flickable {
-                                id: winScroll
-                                width: parent.width
-                                height: Math.min(contentHeight, 320)
-                                contentHeight: winRows.implicitHeight
-                                visible: winRows.implicitHeight > 0
-                                clip: true
-                                boundsBehavior: Flickable.StopAtBounds
-                                ScrollBar.vertical: ThinScrollBar {}
-
-                                Column {
-                                    id: winRows
-                                    width: winScroll.width
-                                    spacing: 2
-
-                                    Repeater {
-                                        model: ScriptModel {
-                                            values: [...ToplevelManager.toplevels.values]
-                                        }
-
-                                        Rectangle {
-                                            id: winRow
-                                            required property var modelData
-                                            width: winRows.width
-                                            height: 36
-                                            radius: Theme.radius
-                                            color: winHover.hovered || modelData.activated ? Theme.pill : "transparent"
-                                            NumberAnimation on opacity {
-                                                from: 0
-                                                to: 1
-                                                duration: 200
-                                            }
-                                            Behavior on color {
-                                                ColorAnimation {
-                                                    duration: 120
-                                                }
-                                            }
-
-                                            HoverHandler {
-                                                id: winHover
-                                            }
-                                            // click: go to that window
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: {
-                                                    winRow.modelData.activate();
-                                                    appsWidget.closePopup();
-                                                }
-                                            }
-                                            Image {
-                                                id: winIcon
-                                                anchors.left: parent.left
-                                                anchors.leftMargin: 8
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: 20
-                                                height: 20
-                                                sourceSize.width: 40
-                                                sourceSize.height: 40
-                                                source: appsWidget.iconFor(winRow.modelData.appId)
-                                            }
-                                            Column {
-                                                anchors {
-                                                    left: winIcon.right
-                                                    right: winClose.left
-                                                    leftMargin: 10
-                                                    rightMargin: 6
-                                                    verticalCenter: parent.verticalCenter
-                                                }
-                                                Text {
-                                                    width: parent.width
-                                                    text: winRow.modelData.title || appsWidget.nameFor(winRow.modelData.appId)
-                                                    elide: Text.ElideRight
-                                                    color: winRow.modelData.activated ? Theme.accent : Theme.text
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize * 0.95
-                                                    font.weight: winRow.modelData.activated ? 700 : 500
-                                                    font.letterSpacing: Theme.letterSpacing
-                                                }
-                                                Text {
-                                                    width: parent.width
-                                                    text: appsWidget.nameFor(winRow.modelData.appId)
-                                                    elide: Text.ElideRight
-                                                    color: Theme.text
-                                                    opacity: 0.6
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize * 0.8
-                                                }
-                                            }
-                                            // x: close the window (shows on hover)
-                                            IconButton {
-                                                id: winClose
-                                                anchors.right: parent.right
-                                                anchors.rightMargin: 4
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                icon: "close"
-                                                iconColor: Theme.red
-                                                opacity: winHover.hovered ? 1 : 0
-                                                enabled: winHover.hovered
-                                                Behavior on opacity {
-                                                    NumberAnimation {
-                                                        duration: 120
-                                                    }
-                                                }
-                                                onClicked: winRow.modelData.close()
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // ── the tray ──
-                            Text {
-                                visible: SystemTray.items.values.length > 0
-                                topPadding: 6
-                                text: "Tray"
-                                color: Theme.text
-                                opacity: 0.6
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize * 0.85
-                                font.weight: 600
-                            }
-                            Flow {
-                                visible: SystemTray.items.values.length > 0
-                                width: parent.width
-                                spacing: 4
-
-                                Repeater {
-                                    model: SystemTray.items
-
-                                    Rectangle {
-                                        id: trayBtn
-                                        required property var modelData
-                                        readonly property bool menuOpen: appsList.menuItem === modelData
-                                        width: 34
-                                        height: 34
-                                        radius: Theme.radius
-                                        color: menuOpen ? Theme.pill : trayMouse.containsMouse ? Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, 0.6) : "transparent"
-                                        border.width: menuOpen ? 1 : 0
-                                        border.color: Theme.accent
-                                        scale: trayMouse.pressed ? 0.85 : 1
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 120
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        Image {
-                                            anchors.centerIn: parent
-                                            width: 18
-                                            height: 18
-                                            sourceSize.width: 36
-                                            sourceSize.height: 36
-                                            source: trayBtn.modelData.icon
-                                        }
-                                        MouseArea {
-                                            id: trayMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
-                                            onClicked: mouse => {
-                                                const item = trayBtn.modelData;
-                                                if (mouse.button === Qt.MiddleButton)
-                                                    item.secondaryActivate();
-                                                else if (item.hasMenu && (mouse.button === Qt.RightButton || item.onlyMenu))
-                                                    appsList.openMenu(item);
-                                                else
-                                                    item.activate();
-                                            }
-                                            onWheel: wheel => trayBtn.modelData.scroll(wheel.angleDelta.y, false)
-                                        }
-                                    }
-                                }
-                            }
-
-                            // ── the open tray menu ──
-                            QsMenuOpener {
-                                id: trayMenu
-                                menu: appsList.menuStack.length > 0 ? appsList.menuStack[appsList.menuStack.length - 1] : null
-                            }
-                            Rectangle {
-                                visible: appsList.menuItem !== null
-                                width: parent.width
-                                height: menuCol.implicitHeight + 8
-                                radius: Theme.radius
-                                color: Theme.pill
-
-                                Column {
-                                    id: menuCol
-                                    x: 4
-                                    y: 4
-                                    width: parent.width - 8
-
-                                    // title, with a back arrow inside a submenu
-                                    Item {
-                                        width: parent.width
-                                        height: 28
-                                        IconButton {
-                                            id: menuBack
-                                            anchors.left: parent.left
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            visible: appsList.menuStack.length > 1
-                                            width: visible ? implicitWidth : 0
-                                            icon: "arrow_back"
-                                            onClicked: appsList.menuStack = appsList.menuStack.slice(0, -1)
-                                        }
-                                        Text {
-                                            anchors.left: menuBack.right
-                                            anchors.leftMargin: 6
-                                            anchors.right: parent.right
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: appsList.menuItem ? (appsList.menuItem.tooltipTitle || appsList.menuItem.title || appsList.menuItem.id) : ""
-                                            elide: Text.ElideRight
-                                            color: Theme.text
-                                            opacity: 0.7
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize * 0.85
-                                            font.weight: 600
-                                        }
-                                    }
-
-                                    Repeater {
-                                        model: trayMenu.children
-
-                                        Item {
-                                            id: entry
-                                            required property var modelData
-                                            width: menuCol.width
-                                            height: modelData.isSeparator ? 9 : 28
-
-                                            Rectangle {
-                                                visible: entry.modelData.isSeparator
-                                                anchors.centerIn: parent
-                                                width: parent.width - 16
-                                                height: 1
-                                                color: Theme.pillIcon
-                                            }
-                                            Rectangle {
-                                                visible: !entry.modelData.isSeparator
-                                                anchors.fill: parent
-                                                radius: Theme.radius
-                                                color: entryMouse.containsMouse && entry.modelData.enabled ? Theme.bg : "transparent"
-                                                opacity: entry.modelData.enabled ? 1 : 0.4
-
-                                                // check box / radio button entries
-                                                Text {
-                                                    id: entryCheck
-                                                    anchors.left: parent.left
-                                                    anchors.leftMargin: 8
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    visible: entry.modelData.buttonType !== QsMenuButtonType.None
-                                                    width: visible ? implicitWidth : 0
-                                                    text: entry.modelData.checkState === Qt.Checked ? (entry.modelData.buttonType === QsMenuButtonType.RadioButton ? "radio_button_checked" : "check_box") : (entry.modelData.buttonType === QsMenuButtonType.RadioButton ? "radio_button_unchecked" : "check_box_outline_blank")
-                                                    color: Theme.accent
-                                                    font.family: Theme.iconFont
-                                                    font.pixelSize: Theme.iconSize
-                                                    font.variableAxes: Theme.iconAxes
-                                                }
-                                                Text {
-                                                    anchors.left: entryCheck.right
-                                                    anchors.leftMargin: 8
-                                                    anchors.right: entryMore.left
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    text: entry.modelData.text.replace(/_(?!_)/g, "")   // drop the underline-the-next-letter marks
-                                                    elide: Text.ElideRight
-                                                    color: Theme.text
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize * 0.95
-                                                }
-                                                Text {
-                                                    id: entryMore
-                                                    anchors.right: parent.right
-                                                    anchors.rightMargin: 6
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    visible: entry.modelData.hasChildren
-                                                    text: "chevron_right"
-                                                    color: Theme.text
-                                                    font.family: Theme.iconFont
-                                                    font.pixelSize: Theme.iconSize
-                                                    font.variableAxes: Theme.iconAxes
-                                                }
-                                                MouseArea {
-                                                    id: entryMouse
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    cursorShape: entry.modelData.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                                    onClicked: {
-                                                        const m = entry.modelData;
-                                                        if (!m.enabled)
-                                                            return;
-                                                        if (m.hasChildren) {
-                                                            appsList.menuStack = appsList.menuStack.concat([m]);
-                                                        } else {
-                                                            m.triggered();
-                                                            appsList.closeMenu();
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Weather {
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-
-                    // ── Notification center ──
-                    Widget {
-                        anchors.verticalCenter: parent.verticalCenter
-                        button: Pill {
-                            icon: notifs.unreadCount > 0 ? "notifications_unread" : "notifications"
-                            iconColor: Theme.yellow
-                            text: notifs.unreadCount
-                        }
-
-                        Column {
-                            spacing: 10
-
-                            // header: title on the left, "Mark all read" on the right
-                            Item {
-                                width: 340
-                                height: 26
-
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "Notifications"
-                                    color: Theme.text
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 1.2
-                                    font.weight: 700
-                                    font.letterSpacing: Theme.letterSpacing
-                                }
-                                Rectangle {
-                                    id: markRead
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: markReadLabel.implicitWidth + 20
-                                    height: 24
-                                    radius: height / 2
-                                    color: markReadMouse.containsMouse ? Theme.pill : "transparent"
-                                    border.width: 1
-                                    border.color: Theme.pill
-                                    opacity: notifs.unreadCount > 0 ? 1 : 0.4     // dim when nothing is unread
-                                    scale: markReadMouse.pressed ? 0.85 : 1
-
-                                    Behavior on color {
-                                        ColorAnimation {
-                                            duration: 120
-                                        }
-                                    }
-                                    Behavior on scale {
-                                        NumberAnimation {
-                                            duration: 120
-                                            easing.type: Easing.OutCubic
-                                        }
-                                    }
-
-                                    Text {
-                                        id: markReadLabel
-                                        anchors.centerIn: parent
-                                        text: "Mark all read"
-                                        color: Theme.accent
-                                        font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 0.9
-                                        font.weight: 600
-                                    }
-                                    MouseArea {
-                                        id: markReadMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: notifs.markAllRead()
-                                    }
-                                }
-                            }
-
-                            Text {
-                                visible: notifs.trackedNotifications.values.length === 0
-                                text: "No notifications"
-                                color: Theme.text
-                                opacity: 0.5
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize
-                            }
-
-                            // The list scrolls once it's taller than 400 px.
-                            ListView {
-                                width: 340
-                                height: Math.min(contentHeight, 400)
-                                visible: count > 0
-                                clip: true
-                                spacing: 6
-                                boundsBehavior: Flickable.StopAtBounds
-                                ScrollBar.vertical: ThinScrollBar {}
-
-                                // newest first; ScriptModel keeps existing cards when one is added
-                                model: ScriptModel {
-                                    values: [...notifs.trackedNotifications.values].reverse()
-                                }
-
-                                delegate: Rectangle {
-                                    id: card
-                                    required property var modelData
-                                    readonly property bool isUnread: notifs.unread.includes(modelData.id)
-                                    readonly property date arrivedAt: notifs.arrived[modelData.id] ?? new Date(NaN)
-
-                                    width: ListView.view.width
-                                    height: cardContent.implicitHeight + 20
-                                    radius: Theme.radius
-                                    color: Theme.pill
-                                    border.width: 1
-                                    border.color: isUnread ? Theme.accent : "transparent"
-
-                                    Behavior on border.color {
-                                        ColorAnimation {
-                                            duration: 200
-                                        }
-                                    }
-
-                                    Column {
-                                        id: cardContent
-                                        x: 12
-                                        y: 10
-                                        width: parent.width - 24
-                                        spacing: 3
-
-                                        // app name · time, with the dismiss × on the right
-                                        Item {
-                                            width: parent.width
-                                            height: appLine.implicitHeight
-
-                                            Text {
-                                                id: appLine
-                                                anchors.left: parent.left
-                                                anchors.right: dismiss.left
-                                                anchors.rightMargin: 8
-                                                text: (card.modelData.appName || "Notification") + (isNaN(card.arrivedAt) ? "" : "  ·  " + Qt.formatDateTime(card.arrivedAt, "h:mm AP"))
-                                                elide: Text.ElideRight
-                                                color: card.isUnread ? Theme.accent : Theme.text
-                                                opacity: card.isUnread ? 1 : 0.6
-                                                font.family: Theme.font
-                                                font.pixelSize: Theme.textSize * 0.8
-                                                font.weight: 600
-                                            }
-                                            Text {
-                                                id: dismiss
-                                                anchors.right: parent.right
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                text: "close"                      // Material Symbols ×
-                                                color: dismissMouse.containsMouse ? Theme.red : Theme.text
-                                                opacity: dismissMouse.containsMouse ? 1 : 0.5
-                                                font.family: Theme.iconFont
-                                                font.pixelSize: Theme.iconSize * 0.9
-                                                MouseArea {
-                                                    id: dismissMouse
-                                                    anchors.fill: parent
-                                                    anchors.margins: -4
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: card.modelData.dismiss()   // removes it for good
-                                                }
-                                            }
-                                        }
-                                        Text {
-                                            width: parent.width
-                                            text: card.modelData.summary
-                                            textFormat: Text.PlainText
-                                            wrapMode: Text.Wrap
-                                            color: Theme.text
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize
-                                            font.weight: 700
-                                            font.letterSpacing: Theme.letterSpacing
-                                        }
-                                        Text {
-                                            width: parent.width
-                                            visible: text !== ""
-                                            text: card.modelData.body
-                                            textFormat: Text.PlainText   // apps may send markup; show it as plain text
-                                            wrapMode: Text.Wrap
-                                            maximumLineCount: 3
-                                            elide: Text.ElideRight
-                                            color: Theme.text
-                                            opacity: 0.8
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize * 0.9
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Widget {
-                        anchors.verticalCenter: parent.verticalCenter
-                        button: Pill {
-                            // Volume and mute straight from PipeWire. These are bindings, so the
-                            // pill redraws the moment PipeWire reports a change (keyboard keys,
-                            // the slider, pavucontrol...) instead of waiting for a timer.
-                            readonly property var sink: Pipewire.defaultAudioSink
-                            readonly property bool ready: !!sink && !!sink.audio
-                            readonly property bool muted: ready && sink.audio.muted
-
-                            icon: muted ? "volume_off" : "volume_up"
-                            iconColor: muted ? Theme.red : Theme.cyan
-                            text: ready ? Math.round(sink.audio.volume * 100) + "%" : "--"
-
-                            // PipeWire only sends live volume updates for nodes something is
-                            // tracking; this keeps the current output device tracked.
-                            PwObjectTracker {
-                                objects: [Pipewire.defaultAudioSink].filter(n => n)
-                            }
-                        }
-                        Row {
-                            spacing: 14
-
-                            Column {
-                                spacing: 4
-
-                                // Binds the device nodes so their names and details are filled in.
-                                PwObjectTracker {
-                                    objects: Pipewire.nodes.values.filter(n => n.audio && !n.isStream)
-                                }
-
-                                Text {
-                                    text: "Output"
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
-                                    font.weight: 600
-                                }
-                                Repeater {
-                                    // hardware devices that accept audio = speakers, headphones
-                                    model: Pipewire.nodes.values.filter(n => n.audio && !n.isStream && n.isSink)
-
-                                    Rectangle {
-                                        id: row
-                                        required property var modelData
-                                        readonly property bool isDefault: modelData === Pipewire.defaultAudioSink
-
-                                        width: 260
-                                        height: 28
-                                        radius: Theme.radius
-                                        color: rowMouse.containsMouse ? Theme.pill : "transparent"   // highlight on hover
-                                        scale: rowMouse.pressed ? 0.85 : 1                           // shrink while clicked
-
-                                        Behavior on color {
-                                            ColorAnimation {
-                                                duration: 120
-                                            }
-                                        }
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 120
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        Text {
-                                            anchors {
-                                                left: parent.left
-                                                right: parent.right
-                                                leftMargin: 10
-                                                rightMargin: 10
-                                                verticalCenter: parent.verticalCenter
-                                            }
-                                            // nickname and description can be empty; fall back to the raw name
-                                            text: row.modelData.nickname || row.modelData.description || row.modelData.name
-                                            elide: Text.ElideRight
-                                            color: row.isDefault ? Theme.accent : Theme.text
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize
-                                            font.weight: row.isDefault ? 700 : 500
-                                            font.letterSpacing: Theme.letterSpacing
-                                        }
-
-                                        MouseArea {
-                                            id: rowMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: Pipewire.preferredDefaultAudioSink = row.modelData
-                                        }
-                                    }
-                                }
-
-                                Text {
-                                    topPadding: 8
-                                    text: "Input"
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
-                                    font.weight: 600
-                                }
-                                Repeater {
-                                    // hardware devices that produce audio = microphones
-                                    model: Pipewire.nodes.values.filter(n => n.audio && !n.isStream && !n.isSink)
-
-                                    Rectangle {
-                                        id: row
-                                        required property var modelData
-                                        readonly property bool isDefault: modelData === Pipewire.defaultAudioSource
-
-                                        width: 260
-                                        height: 28
-                                        radius: Theme.radius
-                                        color: rowMouse.containsMouse ? Theme.pill : "transparent"   // highlight on hover
-                                        scale: rowMouse.pressed ? 0.85 : 1                           // shrink while clicked
-
-                                        Behavior on color {
-                                            ColorAnimation {
-                                                duration: 120
-                                            }
-                                        }
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 120
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        Text {
-                                            anchors {
-                                                left: parent.left
-                                                right: parent.right
-                                                leftMargin: 10
-                                                rightMargin: 10
-                                                verticalCenter: parent.verticalCenter
-                                            }
-                                            // nickname and description can be empty; fall back to the raw name
-                                            text: row.modelData.nickname || row.modelData.description || row.modelData.name
-                                            elide: Text.ElideRight
-                                            color: row.isDefault ? Theme.accent : Theme.text
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize
-                                            font.weight: row.isDefault ? 700 : 500
-                                            font.letterSpacing: Theme.letterSpacing
-                                        }
-
-                                        MouseArea {
-                                            id: rowMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: Pipewire.preferredDefaultAudioSource = row.modelData
-                                        }
-                                    }
-                                }
-                            }
-
-                            // a thin line between the device lists and the slider
-                            Rectangle {
-                                width: 1
-                                height: parent.height
-                                color: Theme.pill
-                            }
-
-                            // ── Volume slider ──
-                            Column {
-                                id: vol
-                                spacing: 6
-
-                                // The current output device. The PwObjectTracker above already
-                                // binds it, so its volume is filled in.
+                        Widget {
+                            anchors.verticalCenter: parent.verticalCenter
+                            button: Pill {
+                                // Volume and mute straight from PipeWire. These are bindings, so the
+                                // pill redraws the moment PipeWire reports a change (keyboard keys,
+                                // the slider, pavucontrol...) instead of waiting for a timer.
                                 readonly property var sink: Pipewire.defaultAudioSink
                                 readonly property bool ready: !!sink && !!sink.audio
                                 readonly property bool muted: ready && sink.audio.muted
 
-                                // percentage on top
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: vol.ready ? Math.round(vol.sink.audio.volume * 100) + "%" : "--"
-                                    color: vol.muted ? Theme.pillIcon : Theme.text
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize
-                                    font.weight: 700
-                                    font.letterSpacing: Theme.letterSpacing
-                                }
+                                icon: muted ? "volume_off" : "volume_up"
+                                iconColor: muted ? Theme.red : Theme.cyan
+                                text: ready ? Math.round(sink.audio.volume * 100) + "%" : "--"
 
-                                Slider {
-                                    id: volSlider
-                                    // pointing hand over the whole slider, grab hand while dragging.
-                                    // HoverHandler only watches the mouse, so dragging still works.
-                                    HoverHandler {
-                                        cursorShape: volSlider.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
-                                    }
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    orientation: Qt.Vertical       // top = loud, bottom = silent
-                                    width: 24
-                                    height: 170
-                                    from: 0
-                                    to: 1                          // 1 = 100%
-                                    value: vol.ready ? vol.sink.audio.volume : 0
-                                    onMoved: if (vol.ready)
-                                        vol.sink.audio.volume = value
-
-                                    background: Rectangle {        // the track
-                                        x: volSlider.leftPadding + volSlider.availableWidth / 2 - width / 2
-                                        y: volSlider.topPadding
-                                        implicitWidth: 6
-                                        implicitHeight: 160
-                                        width: implicitWidth
-                                        height: volSlider.availableHeight
-                                        radius: 3
-                                        color: Theme.pill
-
-                                        // The filled part grows up from the bottom. On a vertical
-                                        // slider visualPosition is 0 at the top, so it's flipped.
-                                        Rectangle {
-                                            anchors.bottom: parent.bottom
-                                            width: parent.width
-                                            height: (1 - volSlider.visualPosition) * parent.height
-                                            radius: 3
-                                            color: vol.muted ? Theme.pillIcon : Theme.cyan
-                                        }
-                                    }
-
-                                    handle: Rectangle {            // the knob
-                                        x: volSlider.leftPadding + volSlider.availableWidth / 2 - width / 2
-                                        y: volSlider.topPadding + volSlider.visualPosition * (volSlider.availableHeight - height)
-                                        implicitWidth: 14
-                                        implicitHeight: 14
-                                        radius: 7
-                                        color: volSlider.pressed ? Theme.cyan : Theme.text
-                                    }
-                                }
-
-                                // mute toggle under the slider
-                                IconButton {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    icon: vol.muted ? "volume_off" : "volume_up"
-                                    iconColor: vol.muted ? Theme.red : Theme.text
-                                    onClicked: if (vol.ready)
-                                        vol.sink.audio.muted = !vol.sink.audio.muted
+                                // PipeWire only sends live volume updates for nodes something is
+                                // tracking; this keeps the current output device tracked.
+                                PwObjectTracker {
+                                    objects: [Pipewire.defaultAudioSink].filter(n => n)
                                 }
                             }
-                        }
-                    }
-                    // ── Battery ──
-                    Widget {
-                        id: battery
-                        anchors.verticalCenter: parent.verticalCenter
-                        // hidden on machines without a laptop battery (this desktop)
-                        visible: battery.present
-
-                        // UPower's combined battery. percentage is 0..1 (Quickshell converts UPower's 0-100).
-                        readonly property var device: UPower.displayDevice
-                        readonly property bool present: !!device && device.ready && device.isLaptopBattery
-                        readonly property int percent: present ? Math.round(device.percentage * 100) : 0
-                        readonly property bool pluggedIn: !UPower.onBattery
-                        // Plugged in: a lightning bolt, whatever the level.
-                        // On battery: Material Symbols' battery_0_bar ... battery_6_bar, then battery_full.
-                        readonly property string glyph: {
-                            if (!present)
-                                return "battery_unknown";
-                            if (pluggedIn)
-                                return "bolt";
-                            if (percent >= 95)
-                                return "battery_full";
-                            return "battery_" + Math.min(6, Math.floor(percent / 100 * 7)) + "_bar";
-                        }
-
-                        button: Pill {
-                            icon: battery.glyph
-                            // green bolt while charging, red when low, yellow otherwise
-                            iconColor: battery.pluggedIn ? Theme.green : battery.present && battery.percent <= 15 ? Theme.red : Theme.yellow
-                            text: battery.present ? battery.percent + "%" : "--"
-                        }
-
-                        Column {
-                            spacing: 4
-
-                            // percentage
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: battery.present ? battery.percent + "%" : "No battery"
-                                color: Theme.text
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize * 2.4
-                                font.weight: 700
-                                font.letterSpacing: Theme.letterSpacing
-                            }
-                            // plugged in / on battery
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: battery.pluggedIn ? "Plugged in" : "Running off battery"
-                                color: battery.pluggedIn ? Theme.green : Theme.yellow
-                                opacity: 0.8
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize
-                                font.weight: 600
-                                font.letterSpacing: Theme.letterSpacing
-                            }
-                            // the battery ligature, big
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                topPadding: 6
-                                text: battery.glyph
-                                color: battery.pluggedIn ? Theme.green : battery.present && battery.percent <= 15 ? Theme.red : Theme.text
-                                font.family: Theme.iconFont
-                                font.pixelSize: Theme.iconSize * 3
-                                font.variableAxes: Theme.iconAxes
-                            }
-                        }
-                    }
-                    Widget {
-                        anchors.verticalCenter: parent.verticalCenter
-                        // What the pill shows, straight from NetworkManager (it changes the moment
-                        // you connect or disconnect, no polling): the Wi-Fi network when Wi-Fi is
-                        // connected, else wired, else offline. Wi-Fi wins when both are up (it
-                        // used to show whichever device nmcli listed first, which was always
-                        // the wired one).
-                        button: Pill {
-                            readonly property var wifi: {
-                                for (const d of Networking.devices.values)
-                                    if (d.type === DeviceType.Wifi)
-                                        for (const n of d.networks.values)
-                                            if (n.connected)
-                                                return n;
-                                return null;
-                            }
-                            readonly property bool wired: Networking.devices.values.some(d => d.type === DeviceType.Wired && d.connected)
-
-                            icon: wifi ? "wifi" : wired ? "lan" : "wifi_off"
-                            iconColor: Theme.green
-                            text: wifi ? wifi.name : wired ? "Wired" : "offline"
-                        }
-
-                        Column {
-                            id: netList
-                            spacing: 4
-
-                            // Every network from every device (Wi-Fi and wired): connected first,
-                            // then strongest signal, then A to Z. Signal is counted in steps of 25%,
-                            // not to the exact percent: it wobbles all the time, and sorting on the
-                            // exact number kept reshuffling the rows. Wired networks have no
-                            // signalStrength, hence ?? 0.
-                            function bars(n) {
-                                return Math.round((n.signalStrength ?? 0) * 4);
-                            }
-                            readonly property var networks: [].concat(...Networking.devices.values.map(d => d.networks.values)).sort((a, b) => (b.connected - a.connected) || (bars(b) - bars(a)) || a.name.localeCompare(b.name))
-
-                            // ── The connect flow, for one network at a time ──
-                            // It lives here and not in the rows: the list re-sorts whenever a network
-                            // connects or its signal changes, and rows can be rebuilt when that happens.
-                            property var active: null          // the network whose drop-down is open
-                            property string phase: "idle"      // prompt, connecting, success, failed, connected
-                            property bool usedPassword: false
-                            property string password: ""
-
-                            function isWifi(network) {
-                                return !!network.device && network.device.type === DeviceType.Wifi;
-                            }
-                            // a saved Wi-Fi network already has its password; an open one needs none
-                            function needsPassword(network) {
-                                return isWifi(network) && !network.known && network.security !== WifiSecurityType.Open;
-                            }
-                            function toggle(network) {
-                                if (active === network) {
-                                    close();
-                                    return;
-                                }
-                                active = network;
-                                if (network.connected) {
-                                    phase = "connected";
-                                } else if (needsPassword(network)) {
-                                    askPassword();
-                                } else {
-                                    // wired, open, or saved: try without a password first
-                                    usedPassword = false;
-                                    phase = "connecting";
-                                    network.connect();
-                                }
-                            }
-                            function askPassword() {
-                                password = "";
-                                phase = "prompt";
-                            }
-                            function submit() {
-                                if (password === "")
-                                    return;
-                                usedPassword = true;
-                                phase = "connecting";
-                                active.connectWithPsk(password);
-                            }
-                            function disconnectActive() {
-                                active.disconnect();
-                                close();
-                            }
-                            function close() {
-                                retryTimer.stop();
-                                active = null;
-                                phase = "idle";
-                                password = "";
-                            }
-
-                            Connections {
-                                target: netList.active
-                                function onConnectedChanged() {
-                                    if (netList.phase === "connecting" && netList.active.connected)
-                                        netList.phase = "success";
-                                }
-                                function onConnectionFailed(reason) {
-                                    if (netList.phase !== "connecting")
-                                        return;
-                                    // a saved network whose password no longer works: ask for it
-                                    if (!netList.usedPassword && netList.isWifi(netList.active) && reason === ConnectionFailReason.NoSecrets) {
-                                        netList.askPassword();
-                                        return;
-                                    }
-                                    netList.phase = "failed";
-                                    retryTimer.restart();
-                                }
-                            }
-
-                            // "Incorrect Password." stays up alone for 2 s, then the prompt comes back.
-                            Timer {
-                                id: retryTimer
-                                interval: 2000
-                                onTriggered: netList.usedPassword ? netList.askPassword() : netList.close()
-                            }
-
-                            // Wi-Fi devices only list nearby networks while scanning,
-                            // so scan while this popup is open and stop when it closes.
-                            Repeater {
-                                model: Networking.devices.values.filter(d => d.type === DeviceType.Wifi)
-                                Item {
-                                    required property var modelData
-                                    Binding {
-                                        target: modelData
-                                        property: "scannerEnabled"
-                                        value: !!QsWindow.window && QsWindow.window.visible
-                                    }
-                                }
-                            }
-
-                            Text {
-                                text: "Networks"
-                                color: Theme.text
-                                opacity: 0.6
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize * 0.85
-                                font.weight: 600
-                            }
-                            // A wired port only has a network to connect to while a cable is
-                            // plugged in (NetworkManager sees a link); this says so instead of
-                            // the port just not being there.
-                            Repeater {
-                                model: Networking.devices.values.filter(d => d.type === DeviceType.Wired && !d.hasLink)
-                                Text {
-                                    required property var modelData
-                                    leftPadding: 10
-                                    text: "Wired  (" + modelData.name + "): no cable"
-                                    color: Theme.text
-                                    opacity: 0.5
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.9
-                                }
-                            }
-
-                            // Scrolls once the list is taller than 360 px (lots of devices or networks around).
-                            Flickable {
-                                id: netScroll
-                                width: 280
-                                height: Math.min(contentHeight, 360)
-                                contentHeight: netRows.implicitHeight
-                                visible: netRows.implicitHeight > 0
-                                clip: true
-                                boundsBehavior: Flickable.StopAtBounds
-                                ScrollBar.vertical: ThinScrollBar {}
-
-                                // Scrolls just enough to show all of `row` (used while a row's drop-down opens).
-                                function show(row) {
-                                    if (row.y + row.height > contentY + height)
-                                        contentY = Math.min(row.y + row.height, contentHeight) - height;
-                                    if (row.y < contentY)
-                                        contentY = row.y;
-                                }
+                            Row {
+                                spacing: 14
 
                                 Column {
-                                    id: netRows
-                                    width: netScroll.width
                                     spacing: 4
 
+                                    // Binds the device nodes so their names and details are filled in.
+                                    PwObjectTracker {
+                                        objects: Pipewire.nodes.values.filter(n => n.audio && !n.isStream)
+                                    }
+
+                                    Text {
+                                        text: "Output"
+                                        color: Theme.text
+                                        opacity: 0.6
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.85
+                                        font.weight: 600
+                                    }
                                     Repeater {
-                                        // ScriptModel only creates rows for networks that are new, instead of
-                                        // rebuilding every row each time the list changes.
-                                        model: ScriptModel {
-                                            values: netList.networks
-                                        }
+                                        // hardware devices that accept audio = speakers, headphones
+                                        model: Pipewire.nodes.values.filter(n => n.audio && !n.isStream && n.isSink)
 
                                         Rectangle {
-                                            id: netRow
+                                            id: row
                                             required property var modelData
-                                            readonly property var network: modelData
-                                            readonly property bool isWifi: netList.isWifi(network)
-                                            readonly property string phase: netList.active === network ? netList.phase : "idle"
-                                            readonly property bool expanded: phase !== "idle"
-                                            // keep it in view while its drop-down glides open
-                                            onHeightChanged: if (expanded)
-                                                netScroll.show(netRow)
+                                            readonly property bool isDefault: modelData === Pipewire.defaultAudioSink
 
-                                            width: 280
-                                            height: header.height + drop.height
+                                            width: 260
+                                            height: 28
                                             radius: Theme.radius
-                                            // a network that shows up fades in instead of popping in
-                                            NumberAnimation on opacity {
-                                                from: 0
-                                                to: 1
-                                                duration: 200
-                                            }
-                                            color: headerMouse.containsMouse || expanded ? Theme.pill : "transparent"
-                                            clip: true
+                                            color: rowMouse.containsMouse ? Theme.pill : "transparent"   // highlight on hover
+                                            scale: rowMouse.pressed ? 0.85 : 1                           // shrink while clicked
 
                                             Behavior on color {
                                                 ColorAnimation {
                                                     duration: 120
                                                 }
                                             }
-
-                                            // ── the row itself ──
-                                            Item {
-                                                id: header
-                                                width: parent.width
-                                                height: 28
-                                                scale: headerMouse.pressed ? 0.85 : 1
-
-                                                Behavior on scale {
-                                                    NumberAnimation {
-                                                        duration: 120
-                                                        easing.type: Easing.OutCubic
-                                                    }
-                                                }
-
-                                                Text {
-                                                    anchors {
-                                                        left: parent.left
-                                                        right: strength.left
-                                                        leftMargin: 10
-                                                        rightMargin: 8
-                                                        verticalCenter: parent.verticalCenter
-                                                    }
-                                                    // wired: its network is named after the port (enp5s0...)
-                                                    text: netRow.isWifi ? netRow.network.name : "Wired  (" + netRow.network.name + ")"
-                                                    elide: Text.ElideRight
-                                                    color: netRow.network.connected ? Theme.accent : Theme.text
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize
-                                                    font.weight: netRow.network.connected ? 700 : 500
-                                                    font.letterSpacing: Theme.letterSpacing
-                                                }
-                                                Text {
-                                                    id: strength
-                                                    anchors {
-                                                        right: parent.right
-                                                        rightMargin: 10
-                                                        verticalCenter: parent.verticalCenter
-                                                    }
-                                                    text: netRow.isWifi ? Math.round(netRow.network.signalStrength * 100) + "%" : "wired"
-                                                    color: Theme.text
-                                                    opacity: 0.6
-                                                    font.family: Theme.font
-                                                    font.pixelSize: Theme.textSize * 0.85
-                                                }
-                                                MouseArea {
-                                                    id: headerMouse
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: netList.toggle(netRow.network)
+                                            Behavior on scale {
+                                                NumberAnimation {
+                                                    duration: 120
+                                                    easing.type: Easing.OutCubic
                                                 }
                                             }
 
-                                            // ── the drop-down: glides open over 500 ms ──
-                                            Item {
-                                                id: drop
-                                                y: header.height
-                                                width: parent.width
-                                                height: netRow.expanded ? dropContent.implicitHeight + 10 : 0
-                                                clip: true
-
-                                                Behavior on height {
-                                                    NumberAnimation {
-                                                        duration: 500
-                                                        easing.type: Easing.OutCubic
-                                                    }
+                                            Text {
+                                                anchors {
+                                                    left: parent.left
+                                                    right: parent.right
+                                                    leftMargin: 10
+                                                    rightMargin: 10
+                                                    verticalCenter: parent.verticalCenter
                                                 }
+                                                // nickname and description can be empty; fall back to the raw name
+                                                text: row.modelData.nickname || row.modelData.description || row.modelData.name
+                                                elide: Text.ElideRight
+                                                color: row.isDefault ? Theme.accent : Theme.text
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize
+                                                font.weight: row.isDefault ? 700 : 500
+                                                font.letterSpacing: Theme.letterSpacing
+                                            }
 
-                                                Column {
-                                                    id: dropContent
-                                                    x: 10
-                                                    width: parent.width - 20
-                                                    spacing: 6
+                                            MouseArea {
+                                                id: rowMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: Pipewire.preferredDefaultAudioSink = row.modelData
+                                            }
+                                        }
+                                    }
 
-                                                    Text {
-                                                        visible: netRow.phase === "prompt"
-                                                        text: "Enter password:"
-                                                        color: Theme.text
-                                                        font.family: Theme.font
-                                                        font.pixelSize: Theme.textSize * 0.9
-                                                    }
-                                                    TextField {
-                                                        id: passwordField
-                                                        visible: netRow.phase === "prompt"
-                                                        width: parent.width
-                                                        text: netList.password
-                                                        onTextEdited: netList.password = text
-                                                        onAccepted: netList.submit()       // Enter
-                                                        onVisibleChanged: if (visible)
-                                                            forceActiveFocus()
-                                                        echoMode: TextInput.Password      // letters show as dots
-                                                        color: Theme.text
-                                                        font.family: Theme.font
-                                                        font.pixelSize: Theme.textSize
-                                                        leftPadding: 12
-                                                        rightPadding: 12
-                                                        background: Rectangle {
-                                                            radius: height / 2                // fully rounded ends
-                                                            color: Theme.bg
-                                                            border.width: 1
-                                                            border.color: passwordField.activeFocus ? Theme.accent : Theme.pillIcon
-                                                        }
-                                                    }
-                                                    Text {
-                                                        visible: netRow.phase === "connecting"
-                                                        text: "Attempting to connect..."
-                                                        color: Theme.text
-                                                        font.family: Theme.font
-                                                        font.pixelSize: Theme.textSize * 0.9
-                                                    }
-                                                    Text {
-                                                        visible: netRow.phase === "success"
-                                                        text: "Connected Successfully."
-                                                        color: Theme.green
-                                                        font.family: Theme.font
-                                                        font.pixelSize: Theme.textSize * 0.9
-                                                    }
-                                                    Text {
-                                                        visible: netRow.phase === "failed"
-                                                        text: netList.usedPassword ? "Incorrect Password." : "Could not connect."
-                                                        color: Theme.red
-                                                        font.family: Theme.font
-                                                        font.pixelSize: Theme.textSize * 0.9
-                                                    }
+                                    Text {
+                                        topPadding: 8
+                                        text: "Input"
+                                        color: Theme.text
+                                        opacity: 0.6
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.85
+                                        font.weight: 600
+                                    }
+                                    Repeater {
+                                        // hardware devices that produce audio = microphones
+                                        model: Pipewire.nodes.values.filter(n => n.audio && !n.isStream && !n.isSink)
 
-                                                    // Disconnect, shown once connected
-                                                    Rectangle {
-                                                        visible: netRow.phase === "success" || netRow.phase === "connected"
-                                                        width: parent.width
-                                                        height: 26
-                                                        radius: height / 2
-                                                        color: disconnectMouse.containsMouse ? Theme.red : Theme.bg
-                                                        scale: disconnectMouse.pressed ? 0.85 : 1
+                                        Rectangle {
+                                            id: row
+                                            required property var modelData
+                                            readonly property bool isDefault: modelData === Pipewire.defaultAudioSource
 
-                                                        Behavior on color {
-                                                            ColorAnimation {
-                                                                duration: 120
-                                                            }
-                                                        }
-                                                        Behavior on scale {
-                                                            NumberAnimation {
-                                                                duration: 120
-                                                                easing.type: Easing.OutCubic
-                                                            }
-                                                        }
+                                            width: 260
+                                            height: 28
+                                            radius: Theme.radius
+                                            color: rowMouse.containsMouse ? Theme.pill : "transparent"   // highlight on hover
+                                            scale: rowMouse.pressed ? 0.85 : 1                           // shrink while clicked
 
-                                                        Text {
-                                                            anchors.centerIn: parent
-                                                            text: "Disconnect"
-                                                            color: disconnectMouse.containsMouse ? Theme.bg : Theme.red
-                                                            font.family: Theme.font
-                                                            font.pixelSize: Theme.textSize
-                                                            font.weight: 600
-                                                        }
-                                                        MouseArea {
-                                                            id: disconnectMouse
-                                                            anchors.fill: parent
-                                                            hoverEnabled: true
-                                                            cursorShape: Qt.PointingHandCursor
-                                                            onClicked: netList.disconnectActive()
-                                                        }
-                                                    }
+                                            Behavior on color {
+                                                ColorAnimation {
+                                                    duration: 120
                                                 }
+                                            }
+                                            Behavior on scale {
+                                                NumberAnimation {
+                                                    duration: 120
+                                                    easing.type: Easing.OutCubic
+                                                }
+                                            }
+
+                                            Text {
+                                                anchors {
+                                                    left: parent.left
+                                                    right: parent.right
+                                                    leftMargin: 10
+                                                    rightMargin: 10
+                                                    verticalCenter: parent.verticalCenter
+                                                }
+                                                // nickname and description can be empty; fall back to the raw name
+                                                text: row.modelData.nickname || row.modelData.description || row.modelData.name
+                                                elide: Text.ElideRight
+                                                color: row.isDefault ? Theme.accent : Theme.text
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize
+                                                font.weight: row.isDefault ? 700 : 500
+                                                font.letterSpacing: Theme.letterSpacing
+                                            }
+
+                                            MouseArea {
+                                                id: rowMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: Pipewire.preferredDefaultAudioSource = row.modelData
                                             }
                                         }
                                     }
                                 }
+
+                                // a thin line between the device lists and the slider
+                                Rectangle {
+                                    width: 1
+                                    height: parent.height
+                                    color: Theme.pill
+                                }
+
+                                // ── Volume slider ──
+                                Column {
+                                    id: vol
+                                    spacing: 6
+
+                                    // The current output device. The PwObjectTracker above already
+                                    // binds it, so its volume is filled in.
+                                    readonly property var sink: Pipewire.defaultAudioSink
+                                    readonly property bool ready: !!sink && !!sink.audio
+                                    readonly property bool muted: ready && sink.audio.muted
+
+                                    // percentage on top
+                                    Text {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        text: vol.ready ? Math.round(vol.sink.audio.volume * 100) + "%" : "--"
+                                        color: vol.muted ? Theme.pillIcon : Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize
+                                        font.weight: 700
+                                        font.letterSpacing: Theme.letterSpacing
+                                    }
+
+                                    Slider {
+                                        id: volSlider
+                                        // pointing hand over the whole slider, grab hand while dragging.
+                                        // HoverHandler only watches the mouse, so dragging still works.
+                                        HoverHandler {
+                                            cursorShape: volSlider.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+                                        }
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        orientation: Qt.Vertical       // top = loud, bottom = silent
+                                        width: 24
+                                        height: 170
+                                        from: 0
+                                        to: 1                          // 1 = 100%
+                                        value: vol.ready ? vol.sink.audio.volume : 0
+                                        onMoved: if (vol.ready)
+                                            vol.sink.audio.volume = value
+
+                                        background: Rectangle {        // the track
+                                            x: volSlider.leftPadding + volSlider.availableWidth / 2 - width / 2
+                                            y: volSlider.topPadding
+                                            implicitWidth: 6
+                                            implicitHeight: 160
+                                            width: implicitWidth
+                                            height: volSlider.availableHeight
+                                            radius: 3
+                                            color: Theme.pill
+
+                                            // The filled part grows up from the bottom. On a vertical
+                                            // slider visualPosition is 0 at the top, so it's flipped.
+                                            Rectangle {
+                                                anchors.bottom: parent.bottom
+                                                width: parent.width
+                                                height: (1 - volSlider.visualPosition) * parent.height
+                                                radius: 3
+                                                color: vol.muted ? Theme.pillIcon : Theme.cyan
+                                            }
+                                        }
+
+                                        handle: Rectangle {            // the knob
+                                            x: volSlider.leftPadding + volSlider.availableWidth / 2 - width / 2
+                                            y: volSlider.topPadding + volSlider.visualPosition * (volSlider.availableHeight - height)
+                                            implicitWidth: 14
+                                            implicitHeight: 14
+                                            radius: 7
+                                            color: volSlider.pressed ? Theme.cyan : Theme.text
+                                        }
+                                    }
+
+                                    // mute toggle under the slider
+                                    IconButton {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        icon: vol.muted ? "volume_off" : "volume_up"
+                                        iconColor: vol.muted ? Theme.red : Theme.text
+                                        onClicked: if (vol.ready)
+                                            vol.sink.audio.muted = !vol.sink.audio.muted
+                                    }
+                                }
                             }
                         }
-                    }
-                    Widget {
-                        anchors.verticalCenter: parent.verticalCenter
+                        // ── Battery ──
+                        Widget {
+                            id: battery
+                            anchors.verticalCenter: parent.verticalCenter
+                            // hidden on machines without a laptop battery (this desktop)
+                            visible: battery.present
 
-                        button: Pill {
-                            icon: "schedule"
-                            iconColor: Theme.red
-                            text: Qt.formatDateTime(clock.date, "hh:mm AP")
+                            // UPower's combined battery. percentage is 0..1 (Quickshell converts UPower's 0-100).
+                            readonly property var device: UPower.displayDevice
+                            readonly property bool present: !!device && device.ready && device.isLaptopBattery
+                            readonly property int percent: present ? Math.round(device.percentage * 100) : 0
+                            readonly property bool pluggedIn: !UPower.onBattery
+                            // Plugged in: a lightning bolt, whatever the level.
+                            // On battery: Material Symbols' battery_0_bar ... battery_6_bar, then battery_full.
+                            readonly property string glyph: {
+                                if (!present)
+                                    return "battery_unknown";
+                                if (pluggedIn)
+                                    return "bolt";
+                                if (percent >= 95)
+                                    return "battery_full";
+                                return "battery_" + Math.min(6, Math.floor(percent / 100 * 7)) + "_bar";
+                            }
+
+                            button: Pill {
+                                icon: battery.glyph
+                                // green bolt while charging, red when low, yellow otherwise
+                                iconColor: battery.pluggedIn ? Theme.green : battery.present && battery.percent <= 15 ? Theme.red : Theme.yellow
+                                text: battery.present ? battery.percent + "%" : "--"
+                            }
+
+                            Column {
+                                spacing: 4
+
+                                // percentage
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: battery.present ? battery.percent + "%" : "No battery"
+                                    color: Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 2.4
+                                    font.weight: 700
+                                    font.letterSpacing: Theme.letterSpacing
+                                }
+                                // plugged in / on battery
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: battery.pluggedIn ? "Plugged in" : "Running off battery"
+                                    color: battery.pluggedIn ? Theme.green : Theme.yellow
+                                    opacity: 0.8
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize
+                                    font.weight: 600
+                                    font.letterSpacing: Theme.letterSpacing
+                                }
+                                // the battery ligature, big
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    topPadding: 6
+                                    text: battery.glyph
+                                    color: battery.pluggedIn ? Theme.green : battery.present && battery.percent <= 15 ? Theme.red : Theme.text
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize * 3
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                            }
                         }
+                        Widget {
+                            anchors.verticalCenter: parent.verticalCenter
+                            // What the pill shows, straight from NetworkManager (it changes the moment
+                            // you connect or disconnect, no polling): the Wi-Fi network when Wi-Fi is
+                            // connected, else wired, else offline. Wi-Fi wins when both are up (it
+                            // used to show whichever device nmcli listed first, which was always
+                            // the wired one).
+                            button: Pill {
+                                readonly property var wifi: {
+                                    for (const d of Networking.devices.values)
+                                        if (d.type === DeviceType.Wifi)
+                                            for (const n of d.networks.values)
+                                                if (n.connected)
+                                                    return n;
+                                    return null;
+                                }
+                                readonly property bool wired: Networking.devices.values.some(d => d.type === DeviceType.Wired && d.connected)
 
-                        Column {
-                            id: cal
-                            spacing: 6
-
-                            // the date being shown; updates by itself because clock.date does
-                            readonly property date now: clock.date
-
-                            // ── Time ──
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: Qt.formatDateTime(cal.now, "hh:mm AP")
-                                color: Theme.text
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize * 2.4
-                                font.weight: 700
-                                font.letterSpacing: Theme.letterSpacing
-                            }
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                bottomPadding: 6
-                                text: Qt.formatDateTime(cal.now, "dddd, MMMM d")
-                                color: Theme.text
-                                opacity: 0.6
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize
-                                font.weight: 600
+                                icon: wifi ? "wifi" : wired ? "lan" : "wifi_off"
+                                iconColor: Theme.green
+                                text: wifi ? wifi.name : wired ? "Wired" : "offline"
                             }
 
-                            // ── Month label ──
-                            Text {
-                                text: Qt.formatDateTime(cal.now, "MMMM yyyy")
-                                color: Theme.accent
-                                font.family: Theme.font
-                                font.pixelSize: Theme.textSize * 1.1
-                                font.weight: 700
-                                font.letterSpacing: Theme.letterSpacing
-                            }
+                            Column {
+                                id: netList
+                                spacing: 4
 
-                            // ── Weekday names: Sun Mon Tue ... ──
-                            DayOfWeekRow {
-                                width: grid.width
-                                delegate: Text {
-                                    required property string shortName
-                                    text: shortName
-                                    horizontalAlignment: Text.AlignHCenter
+                                // Every network from every device (Wi-Fi and wired): connected first,
+                                // then strongest signal, then A to Z. Signal is counted in steps of 25%,
+                                // not to the exact percent: it wobbles all the time, and sorting on the
+                                // exact number kept reshuffling the rows. Wired networks have no
+                                // signalStrength, hence ?? 0.
+                                function bars(n) {
+                                    return Math.round((n.signalStrength ?? 0) * 4);
+                                }
+                                readonly property var networks: [].concat(...Networking.devices.values.map(d => d.networks.values)).sort((a, b) => (b.connected - a.connected) || (bars(b) - bars(a)) || a.name.localeCompare(b.name))
+
+                                // ── The connect flow, for one network at a time ──
+                                // It lives here and not in the rows: the list re-sorts whenever a network
+                                // connects or its signal changes, and rows can be rebuilt when that happens.
+                                property var active: null          // the network whose drop-down is open
+                                property string phase: "idle"      // prompt, connecting, success, failed, connected
+                                property bool usedPassword: false
+                                property string password: ""
+
+                                function isWifi(network) {
+                                    return !!network.device && network.device.type === DeviceType.Wifi;
+                                }
+                                // a saved Wi-Fi network already has its password; an open one needs none
+                                function needsPassword(network) {
+                                    return isWifi(network) && !network.known && network.security !== WifiSecurityType.Open;
+                                }
+                                function toggle(network) {
+                                    if (active === network) {
+                                        close();
+                                        return;
+                                    }
+                                    active = network;
+                                    if (network.connected) {
+                                        phase = "connected";
+                                    } else if (needsPassword(network)) {
+                                        askPassword();
+                                    } else {
+                                        // wired, open, or saved: try without a password first
+                                        usedPassword = false;
+                                        phase = "connecting";
+                                        network.connect();
+                                    }
+                                }
+                                function askPassword() {
+                                    password = "";
+                                    phase = "prompt";
+                                }
+                                function submit() {
+                                    if (password === "")
+                                        return;
+                                    usedPassword = true;
+                                    phase = "connecting";
+                                    active.connectWithPsk(password);
+                                }
+                                function disconnectActive() {
+                                    active.disconnect();
+                                    close();
+                                }
+                                function close() {
+                                    retryTimer.stop();
+                                    active = null;
+                                    phase = "idle";
+                                    password = "";
+                                }
+
+                                Connections {
+                                    target: netList.active
+                                    function onConnectedChanged() {
+                                        if (netList.phase === "connecting" && netList.active.connected)
+                                            netList.phase = "success";
+                                    }
+                                    function onConnectionFailed(reason) {
+                                        if (netList.phase !== "connecting")
+                                            return;
+                                        // a saved network whose password no longer works: ask for it
+                                        if (!netList.usedPassword && netList.isWifi(netList.active) && reason === ConnectionFailReason.NoSecrets) {
+                                            netList.askPassword();
+                                            return;
+                                        }
+                                        netList.phase = "failed";
+                                        retryTimer.restart();
+                                    }
+                                }
+
+                                // "Incorrect Password." stays up alone for 2 s, then the prompt comes back.
+                                Timer {
+                                    id: retryTimer
+                                    interval: 2000
+                                    onTriggered: netList.usedPassword ? netList.askPassword() : netList.close()
+                                }
+
+                                // Wi-Fi devices only list nearby networks while scanning,
+                                // so scan while this popup is open and stop when it closes.
+                                Repeater {
+                                    model: Networking.devices.values.filter(d => d.type === DeviceType.Wifi)
+                                    Item {
+                                        required property var modelData
+                                        Binding {
+                                            target: modelData
+                                            property: "scannerEnabled"
+                                            value: !!QsWindow.window && QsWindow.window.visible
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    text: "Networks"
                                     color: Theme.text
                                     opacity: 0.6
                                     font.family: Theme.font
                                     font.pixelSize: Theme.textSize * 0.85
                                     font.weight: 600
                                 }
-                            }
-
-                            // ── The month ──
-                            MonthGrid {
-                                id: grid
-                                width: 260
-                                height: 200
-                                month: cal.now.getMonth()        // 0 = January, same as MonthGrid
-                                year: cal.now.getFullYear()
-
-                                delegate: Item {
-                                    required property var model
-                                    // compared against the clock, so it moves to the new day at midnight
-                                    readonly property bool isToday: model.day === cal.now.getDate() && model.month === cal.now.getMonth() && model.year === cal.now.getFullYear()
-
-                                    implicitWidth: 30
-                                    implicitHeight: 26
-
-                                    // highlight behind today
-                                    Rectangle {
-                                        anchors.centerIn: parent
-                                        width: 26
-                                        height: 26
-                                        radius: 13
-                                        color: Theme.accent
-                                        visible: parent.isToday
-                                    }
+                                // A wired port only has a network to connect to while a cable is
+                                // plugged in (NetworkManager sees a link); this says so instead of
+                                // the port just not being there.
+                                Repeater {
+                                    model: Networking.devices.values.filter(d => d.type === DeviceType.Wired && !d.hasLink)
                                     Text {
-                                        anchors.centerIn: parent
-                                        text: parent.model.day
-                                        color: parent.isToday ? Theme.bg : Theme.text
-                                        // days from the previous / next month are dimmed
-                                        opacity: parent.model.month === grid.month ? 1 : 0.3
+                                        required property var modelData
+                                        leftPadding: 10
+                                        text: "Wired  (" + modelData.name + "): no cable"
+                                        color: Theme.text
+                                        opacity: 0.5
                                         font.family: Theme.font
-                                        font.pixelSize: Theme.textSize
-                                        font.weight: parent.isToday ? 700 : 500
+                                        font.pixelSize: Theme.textSize * 0.9
+                                    }
+                                }
+
+                                // Scrolls once the list is taller than 360 px (lots of devices or networks around).
+                                Flickable {
+                                    id: netScroll
+                                    width: 280
+                                    height: Math.min(contentHeight, 360)
+                                    contentHeight: netRows.implicitHeight
+                                    visible: netRows.implicitHeight > 0
+                                    clip: true
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    ScrollBar.vertical: ThinScrollBar {}
+
+                                    // Scrolls just enough to show all of `row` (used while a row's drop-down opens).
+                                    function show(row) {
+                                        if (row.y + row.height > contentY + height)
+                                            contentY = Math.min(row.y + row.height, contentHeight) - height;
+                                        if (row.y < contentY)
+                                            contentY = row.y;
+                                    }
+
+                                    Column {
+                                        id: netRows
+                                        width: netScroll.width
+                                        spacing: 4
+
+                                        Repeater {
+                                            // ScriptModel only creates rows for networks that are new, instead of
+                                            // rebuilding every row each time the list changes.
+                                            model: ScriptModel {
+                                                values: netList.networks
+                                            }
+
+                                            Rectangle {
+                                                id: netRow
+                                                required property var modelData
+                                                readonly property var network: modelData
+                                                readonly property bool isWifi: netList.isWifi(network)
+                                                readonly property string phase: netList.active === network ? netList.phase : "idle"
+                                                readonly property bool expanded: phase !== "idle"
+                                                // keep it in view while its drop-down glides open
+                                                onHeightChanged: if (expanded)
+                                                    netScroll.show(netRow)
+
+                                                width: 280
+                                                height: header.height + drop.height
+                                                radius: Theme.radius
+                                                // a network that shows up fades in instead of popping in
+                                                NumberAnimation on opacity {
+                                                    from: 0
+                                                    to: 1
+                                                    duration: 200
+                                                }
+                                                color: headerMouse.containsMouse || expanded ? Theme.pill : "transparent"
+                                                clip: true
+
+                                                Behavior on color {
+                                                    ColorAnimation {
+                                                        duration: 120
+                                                    }
+                                                }
+
+                                                // ── the row itself ──
+                                                Item {
+                                                    id: header
+                                                    width: parent.width
+                                                    height: 28
+                                                    scale: headerMouse.pressed ? 0.85 : 1
+
+                                                    Behavior on scale {
+                                                        NumberAnimation {
+                                                            duration: 120
+                                                            easing.type: Easing.OutCubic
+                                                        }
+                                                    }
+
+                                                    Text {
+                                                        anchors {
+                                                            left: parent.left
+                                                            right: strength.left
+                                                            leftMargin: 10
+                                                            rightMargin: 8
+                                                            verticalCenter: parent.verticalCenter
+                                                        }
+                                                        // wired: its network is named after the port (enp5s0...)
+                                                        text: netRow.isWifi ? netRow.network.name : "Wired  (" + netRow.network.name + ")"
+                                                        elide: Text.ElideRight
+                                                        color: netRow.network.connected ? Theme.accent : Theme.text
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize
+                                                        font.weight: netRow.network.connected ? 700 : 500
+                                                        font.letterSpacing: Theme.letterSpacing
+                                                    }
+                                                    Text {
+                                                        id: strength
+                                                        anchors {
+                                                            right: parent.right
+                                                            rightMargin: 10
+                                                            verticalCenter: parent.verticalCenter
+                                                        }
+                                                        text: netRow.isWifi ? Math.round(netRow.network.signalStrength * 100) + "%" : "wired"
+                                                        color: Theme.text
+                                                        opacity: 0.6
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.85
+                                                    }
+                                                    MouseArea {
+                                                        id: headerMouse
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: netList.toggle(netRow.network)
+                                                    }
+                                                }
+
+                                                // ── the drop-down: glides open over 500 ms ──
+                                                Item {
+                                                    id: drop
+                                                    y: header.height
+                                                    width: parent.width
+                                                    height: netRow.expanded ? dropContent.implicitHeight + 10 : 0
+                                                    clip: true
+
+                                                    Behavior on height {
+                                                        NumberAnimation {
+                                                            duration: 500
+                                                            easing.type: Easing.OutCubic
+                                                        }
+                                                    }
+
+                                                    Column {
+                                                        id: dropContent
+                                                        x: 10
+                                                        width: parent.width - 20
+                                                        spacing: 6
+
+                                                        Text {
+                                                            visible: netRow.phase === "prompt"
+                                                            text: "Enter password:"
+                                                            color: Theme.text
+                                                            font.family: Theme.font
+                                                            font.pixelSize: Theme.textSize * 0.9
+                                                        }
+                                                        TextField {
+                                                            id: passwordField
+                                                            visible: netRow.phase === "prompt"
+                                                            width: parent.width
+                                                            text: netList.password
+                                                            onTextEdited: netList.password = text
+                                                            onAccepted: netList.submit()       // Enter
+                                                            onVisibleChanged: if (visible)
+                                                                forceActiveFocus()
+                                                            echoMode: TextInput.Password      // letters show as dots
+                                                            color: Theme.text
+                                                            font.family: Theme.font
+                                                            font.pixelSize: Theme.textSize
+                                                            leftPadding: 12
+                                                            rightPadding: 12
+                                                            background: Rectangle {
+                                                                radius: height / 2                // fully rounded ends
+                                                                color: Theme.bg
+                                                                border.width: 1
+                                                                border.color: passwordField.activeFocus ? Theme.accent : Theme.pillIcon
+                                                            }
+                                                        }
+                                                        Text {
+                                                            visible: netRow.phase === "connecting"
+                                                            text: "Attempting to connect..."
+                                                            color: Theme.text
+                                                            font.family: Theme.font
+                                                            font.pixelSize: Theme.textSize * 0.9
+                                                        }
+                                                        Text {
+                                                            visible: netRow.phase === "success"
+                                                            text: "Connected Successfully."
+                                                            color: Theme.green
+                                                            font.family: Theme.font
+                                                            font.pixelSize: Theme.textSize * 0.9
+                                                        }
+                                                        Text {
+                                                            visible: netRow.phase === "failed"
+                                                            text: netList.usedPassword ? "Incorrect Password." : "Could not connect."
+                                                            color: Theme.red
+                                                            font.family: Theme.font
+                                                            font.pixelSize: Theme.textSize * 0.9
+                                                        }
+
+                                                        // Disconnect, shown once connected
+                                                        Rectangle {
+                                                            visible: netRow.phase === "success" || netRow.phase === "connected"
+                                                            width: parent.width
+                                                            height: 26
+                                                            radius: height / 2
+                                                            color: disconnectMouse.containsMouse ? Theme.red : Theme.bg
+                                                            scale: disconnectMouse.pressed ? 0.85 : 1
+
+                                                            Behavior on color {
+                                                                ColorAnimation {
+                                                                    duration: 120
+                                                                }
+                                                            }
+                                                            Behavior on scale {
+                                                                NumberAnimation {
+                                                                    duration: 120
+                                                                    easing.type: Easing.OutCubic
+                                                                }
+                                                            }
+
+                                                            Text {
+                                                                anchors.centerIn: parent
+                                                                text: "Disconnect"
+                                                                color: disconnectMouse.containsMouse ? Theme.bg : Theme.red
+                                                                font.family: Theme.font
+                                                                font.pixelSize: Theme.textSize
+                                                                font.weight: 600
+                                                            }
+                                                            MouseArea {
+                                                                id: disconnectMouse
+                                                                anchors.fill: parent
+                                                                hoverEnabled: true
+                                                                cursorShape: Qt.PointingHandCursor
+                                                                onClicked: netList.disconnectActive()
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                    // ── System monitor ──
-                    // Bar: the CPU package temperature. Popup: a graph of the last minute, every
-                    // component's usage in text, and a list: click a component to graph just that
-                    // one, click it again (or "All") to go back. Numbers come from SysMon.qml.
-                    Widget {
-                        id: sysmon
-                        anchors.verticalCenter: parent.verticalCenter
+                        Widget {
+                            anchors.verticalCenter: parent.verticalCenter
 
-                        // what the graph shows: "all", or one component's key
-                        property string selected: "all"
-                        readonly property var selectedPart: parts.find(p => p.key === selected) ?? null
-
-                        // The components, in list order. Only looks; the numbers are looked up from SysMon by key.
-                        readonly property var parts: [
-                            {
-                                key: "cpu",
-                                name: "CPU",
-                                icon: "memory",
-                                color: Theme.green
-                            },
-                            {
-                                key: "gpu",
-                                name: "GPU",
-                                icon: "developer_board",
-                                color: Theme.blue
-                            },
-                            {
-                                key: "mem",
-                                name: "Memory",
-                                icon: "memory_alt",
-                                color: Theme.yellow
-                            },
-                            {
-                                key: "vram",
-                                name: "VRAM",
-                                icon: "view_in_ar_new",
-                                color: Theme.magenta
-                            },
-                            {
-                                key: "swap",
-                                name: "Swap",
-                                icon: "swap_horiz",
-                                color: Theme.orange
-                            },
-                            {
-                                key: "disk",
-                                name: "Disk",
-                                icon: "hard_drive",
-                                color: Theme.cyan
+                            button: Pill {
+                                icon: "schedule"
+                                iconColor: Theme.red
+                                text: Qt.formatDateTime(clock.date, "hh:mm AP")
                             }
-                        ]
 
-                        button: Pill {
-                            icon: "device_thermostat"
-                            iconColor: SysMon.cpuTemp >= 85 ? Theme.red : Theme.orange
-                            text: SysMon.cpuTemp < 0 ? "--°C" : Math.round(SysMon.cpuTemp) + "°C"
-                        }
+                            Column {
+                                id: cal
+                                spacing: 6
 
-                        Column {
-                            width: 360
-                            spacing: 10
+                                // the date being shown; updates by itself because clock.date does
+                                readonly property date now: clock.date
 
-                            // ── header: title on the left, "All" on the right while one component is picked ──
-                            Item {
-                                width: parent.width
-                                height: 26
-
+                                // ── Time ──
                                 Text {
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "System"
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: Qt.formatDateTime(cal.now, "hh:mm AP")
                                     color: Theme.text
                                     font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 1.2
+                                    font.pixelSize: Theme.textSize * 2.4
                                     font.weight: 700
                                     font.letterSpacing: Theme.letterSpacing
                                 }
-                                Rectangle {
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: allLabel.implicitWidth + 20
-                                    height: 24
-                                    radius: height / 2
-                                    color: allMouse.containsMouse ? Theme.pill : "transparent"
-                                    border.width: 1
-                                    border.color: Theme.pill
-                                    opacity: sysmon.selected === "all" ? 0 : 1
-                                    visible: opacity > 0
-                                    scale: allMouse.pressed ? 0.85 : 1
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    bottomPadding: 6
+                                    text: Qt.formatDateTime(cal.now, "dddd, MMMM d")
+                                    color: Theme.text
+                                    opacity: 0.6
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize
+                                    font.weight: 600
+                                }
 
-                                    Behavior on opacity {
-                                        NumberAnimation {
-                                            duration: 150
-                                        }
-                                    }
-                                    Behavior on scale {
-                                        NumberAnimation {
-                                            duration: 120
-                                            easing.type: Easing.OutCubic
-                                        }
-                                    }
-                                    Text {
-                                        id: allLabel
-                                        anchors.centerIn: parent
-                                        text: "All"
+                                // ── Month label ──
+                                Text {
+                                    text: Qt.formatDateTime(cal.now, "MMMM yyyy")
+                                    color: Theme.accent
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 1.1
+                                    font.weight: 700
+                                    font.letterSpacing: Theme.letterSpacing
+                                }
+
+                                // ── Weekday names: Sun Mon Tue ... ──
+                                DayOfWeekRow {
+                                    width: grid.width
+                                    delegate: Text {
+                                        required property string shortName
+                                        text: shortName
+                                        horizontalAlignment: Text.AlignHCenter
                                         color: Theme.text
+                                        opacity: 0.6
                                         font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 0.9
+                                        font.pixelSize: Theme.textSize * 0.85
                                         font.weight: 600
                                     }
-                                    MouseArea {
-                                        id: allMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: sysmon.selected = "all"
+                                }
+
+                                // ── The month ──
+                                MonthGrid {
+                                    id: grid
+                                    width: 260
+                                    height: 200
+                                    month: cal.now.getMonth()        // 0 = January, same as MonthGrid
+                                    year: cal.now.getFullYear()
+
+                                    delegate: Item {
+                                        required property var model
+                                        // compared against the clock, so it moves to the new day at midnight
+                                        readonly property bool isToday: model.day === cal.now.getDate() && model.month === cal.now.getMonth() && model.year === cal.now.getFullYear()
+
+                                        implicitWidth: 30
+                                        implicitHeight: 26
+
+                                        // highlight behind today
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: 26
+                                            height: 26
+                                            radius: 13
+                                            color: Theme.accent
+                                            visible: parent.isToday
+                                        }
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: parent.model.day
+                                            color: parent.isToday ? Theme.bg : Theme.text
+                                            // days from the previous / next month are dimmed
+                                            opacity: parent.model.month === grid.month ? 1 : 0.3
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize
+                                            font.weight: parent.isToday ? 700 : 500
+                                        }
                                     }
                                 }
                             }
+                        }
+                        // ── System monitor ──
+                        // Bar: the CPU package temperature. Popup: a graph of the last minute, every
+                        // component's usage in text, and a list: click a component to graph just that
+                        // one, click it again (or "All") to go back. Numbers come from SysMon.qml.
+                        Widget {
+                            id: sysmon
+                            anchors.verticalCenter: parent.verticalCenter
 
-                            // ── the graph ──
-                            Rectangle {
-                                width: parent.width
-                                height: 170
-                                radius: Theme.radius
-                                color: Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, 0.45)
+                            // what the graph shows: "all", or one component's key
+                            property string selected: "all"
+                            readonly property var selectedPart: parts.find(p => p.key === selected) ?? null
 
-                                // what's being graphed, and (for one component) its numbers right now
-                                Item {
-                                    id: graphHeader
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.top: parent.top
-                                    anchors.margins: 10
-                                    height: 22
-
-                                    Row {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 6
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: sysmon.selectedPart ? sysmon.selectedPart.icon : "monitoring"
-                                            color: sysmon.selectedPart ? sysmon.selectedPart.color : Theme.text
-                                            font.family: Theme.iconFont
-                                            font.pixelSize: Theme.iconSize
-                                            font.variableAxes: Theme.iconAxes
-                                        }
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: sysmon.selectedPart ? sysmon.selectedPart.name : "All components"
-                                            color: Theme.text
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize
-                                            font.weight: 700
-                                            font.letterSpacing: Theme.letterSpacing
-                                        }
-                                    }
-                                    Row {
-                                        anchors.right: parent.right
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 8
-                                        visible: !!sysmon.selectedPart
-
-                                        // the temperature (the dashed red line in the graph), for CPU and GPU
-                                        Row {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            visible: !!sysmon.selectedPart && SysMon.temp(sysmon.selected) >= 0
-                                            spacing: 2
-                                            Text {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                text: "device_thermostat"
-                                                color: Theme.red
-                                                font.family: Theme.iconFont
-                                                font.pixelSize: Theme.iconSize * 0.9
-                                                font.variableAxes: Theme.iconAxes
-                                            }
-                                            Text {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                text: Math.round(SysMon.temp(sysmon.selected)) + "°C"
-                                                color: Theme.red
-                                                font.family: Theme.font
-                                                font.pixelSize: Theme.textSize * 0.9
-                                                font.weight: 600
-                                            }
-                                        }
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: Math.round(SysMon.percent(sysmon.selected)) + "%"
-                                            color: sysmon.selectedPart ? sysmon.selectedPart.color : Theme.text
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize * 1.4
-                                            font.weight: 700
-                                            font.letterSpacing: Theme.letterSpacing
-                                        }
-                                    }
+                            // The components, in list order. Only looks; the numbers are looked up from SysMon by key.
+                            readonly property var parts: [
+                                {
+                                    key: "cpu",
+                                    name: "CPU",
+                                    icon: "memory",
+                                    color: Theme.green
+                                },
+                                {
+                                    key: "gpu",
+                                    name: "GPU",
+                                    icon: "developer_board",
+                                    color: Theme.blue
+                                },
+                                {
+                                    key: "mem",
+                                    name: "Memory",
+                                    icon: "memory_alt",
+                                    color: Theme.yellow
+                                },
+                                {
+                                    key: "vram",
+                                    name: "VRAM",
+                                    icon: "view_in_ar_new",
+                                    color: Theme.magenta
+                                },
+                                {
+                                    key: "swap",
+                                    name: "Swap",
+                                    icon: "swap_horiz",
+                                    color: Theme.orange
+                                },
+                                {
+                                    key: "disk",
+                                    name: "Disk",
+                                    icon: "hard_drive",
+                                    color: Theme.cyan
                                 }
+                            ]
 
-                                Canvas {
-                                    id: graph
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.top: graphHeader.bottom
-                                    anchors.bottom: timeLabels.top
-                                    anchors.leftMargin: 10
-                                    anchors.rightMargin: 10
-                                    anchors.topMargin: 8
-                                    anchors.bottomMargin: 4
+                            button: Pill {
+                                icon: "device_thermostat"
+                                iconColor: SysMon.cpuTemp >= 85 ? Theme.red : Theme.orange
+                                text: SysMon.cpuTemp < 0 ? "--°C" : Math.round(SysMon.cpuTemp) + "°C"
+                            }
 
-                                    // Repaint on every new sample (only while the popup is open: nobody
-                                    // sees it otherwise), when it opens, and when the selection changes.
-                                    Connections {
-                                        target: SysMon
-                                        function onSampled() {
-                                            if (sysmon.open)
-                                                graph.requestPaint();
-                                        }
-                                    }
-                                    Connections {
-                                        target: sysmon
-                                        function onOpenChanged() {
-                                            graph.requestPaint();
-                                        }
-                                        function onSelectedChanged() {
-                                            graph.requestPaint();
-                                        }
-                                    }
+                            Column {
+                                width: 360
+                                spacing: 10
 
-                                    // "rgba(r, g, b, a)": the canvas wants CSS-style color strings
-                                    function rgba(c, a) {
-                                        return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + "," + Math.round(c.b * 255) + "," + a + ")";
-                                    }
-                                    // x of the i-th sample: the newest sits on the right edge, so the
-                                    // line scrolls in from the right while history is still filling up
-                                    function xAt(i, count) {
-                                        return width - (count - 1 - i) * width / (SysMon.historyLength - 1);
-                                    }
-                                    // y of a value: 0 at the bottom, 100 (% or °C) at the top
-                                    function yAt(v) {
-                                        return height - Math.max(0, Math.min(100, v)) / 100 * height;
-                                    }
-                                    // Draws the path of one list of values; nulls leave a gap.
-                                    function trace(ctx, values) {
-                                        ctx.beginPath();
-                                        let drawing = false;
-                                        for (let i = 0; i < values.length; i++) {
-                                            if (values[i] === null) {
-                                                drawing = false;
-                                                continue;
-                                            }
-                                            const x = xAt(i, values.length), y = yAt(values[i]);
-                                            if (drawing)
-                                                ctx.lineTo(x, y);
-                                            else
-                                                ctx.moveTo(x, y);
-                                            drawing = true;
-                                        }
-                                    }
-
-                                    onPaint: {
-                                        const ctx = getContext("2d");
-                                        ctx.reset();
-                                        ctx.lineJoin = "round";
-                                        ctx.lineCap = "round";
-
-                                        // grid lines at 25 / 50 / 75 %
-                                        ctx.strokeStyle = rgba(Theme.text, 0.08);
-                                        ctx.lineWidth = 1;
-                                        for (const v of [25, 50, 75]) {
-                                            ctx.beginPath();
-                                            ctx.moveTo(0, Math.round(yAt(v)) + 0.5);
-                                            ctx.lineTo(width, Math.round(yAt(v)) + 0.5);
-                                            ctx.stroke();
-                                        }
-
-                                        if (!sysmon.selectedPart) {
-                                            // everything at once: one thin line per component
-                                            ctx.lineWidth = 1.5;
-                                            for (const part of sysmon.parts) {
-                                                if (!SysMon.has(part.key))
-                                                    continue;
-                                                ctx.strokeStyle = rgba(part.color, 1);
-                                                trace(ctx, SysMon.history[part.key]);
-                                                ctx.stroke();
-                                            }
-                                            return;
-                                        }
-
-                                        // one component: its line with a fade underneath...
-                                        const part = sysmon.selectedPart;
-                                        const values = SysMon.history[part.key];
-                                        const first = values.findIndex(v => v !== null);
-                                        if (first >= 0) {
-                                            const fade = ctx.createLinearGradient(0, 0, 0, height);
-                                            fade.addColorStop(0, rgba(part.color, 0.35));
-                                            fade.addColorStop(1, rgba(part.color, 0));
-                                            trace(ctx, values);
-                                            ctx.lineTo(xAt(values.length - 1, values.length), height);
-                                            ctx.lineTo(xAt(first, values.length), height);
-                                            ctx.closePath();
-                                            ctx.fillStyle = fade;
-                                            ctx.fill();
-
-                                            ctx.strokeStyle = rgba(part.color, 1);
-                                            ctx.lineWidth = 2;
-                                            trace(ctx, values);
-                                            ctx.stroke();
-                                        }
-
-                                        // ...plus its temperature as a dashed line, if it has one
-                                        const temps = SysMon.history[part.key + "Temp"];
-                                        if (temps) {
-                                            ctx.strokeStyle = rgba(Theme.red, 0.9);
-                                            ctx.lineWidth = 1.5;
-                                            ctx.setLineDash([3, 3]);
-                                            trace(ctx, temps);
-                                            ctx.stroke();
-                                        }
-                                    }
-                                }
-
-                                // time axis: the left edge is a minute ago, the right edge is now
+                                // ── header: title on the left, "All" on the right while one component is picked ──
                                 Item {
-                                    id: timeLabels
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.bottom: parent.bottom
-                                    anchors.margins: 10
-                                    anchors.bottomMargin: 6
-                                    height: 14
+                                    width: parent.width
+                                    height: 26
 
                                     Text {
                                         anchors.left: parent.left
-                                        text: SysMon.historyLength + "s ago"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "System"
                                         color: Theme.text
-                                        opacity: 0.4
                                         font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 0.8
+                                        font.pixelSize: Theme.textSize * 1.2
+                                        font.weight: 700
+                                        font.letterSpacing: Theme.letterSpacing
                                     }
-                                    Text {
-                                        anchors.right: parent.right
-                                        text: "now"
-                                        color: Theme.text
-                                        opacity: 0.4
-                                        font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 0.8
-                                    }
-                                }
-                            }
-
-                            // ── every component, in text; click one to graph it alone ──
-                            Column {
-                                width: parent.width
-                                spacing: 2
-
-                                Repeater {
-                                    model: sysmon.parts
-
                                     Rectangle {
-                                        id: partRow
-                                        required property var modelData     // { key, name, icon, color }
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: allLabel.implicitWidth + 20
+                                        height: 24
+                                        radius: height / 2
+                                        color: allMouse.containsMouse ? Theme.pill : "transparent"
+                                        border.width: 1
+                                        border.color: Theme.pill
+                                        opacity: sysmon.selected === "all" ? 0 : 1
+                                        visible: opacity > 0
+                                        scale: allMouse.pressed ? 0.85 : 1
 
-                                        readonly property bool picked: sysmon.selected === modelData.key
-                                        readonly property real percent: SysMon.percent(modelData.key)
-
-                                        visible: SysMon.has(modelData.key)
-                                        width: parent.width
-                                        height: 32
-                                        radius: Theme.radius
-                                        color: picked ? Theme.pill : partMouse.containsMouse ? Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, 0.5) : "transparent"
-                                        scale: partMouse.pressed ? 0.97 : 1
-
-                                        Behavior on color {
-                                            ColorAnimation {
-                                                duration: 120
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: 150
                                             }
                                         }
                                         Behavior on scale {
@@ -5952,74 +5703,55 @@ in
                                                 easing.type: Easing.OutCubic
                                             }
                                         }
+                                        Text {
+                                            id: allLabel
+                                            anchors.centerIn: parent
+                                            text: "All"
+                                            color: Theme.text
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.9
+                                            font.weight: 600
+                                        }
+                                        MouseArea {
+                                            id: allMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: sysmon.selected = "all"
+                                        }
+                                    }
+                                }
 
-                                        // icon + name on the left
+                                // ── the graph ──
+                                Rectangle {
+                                    width: parent.width
+                                    height: 170
+                                    radius: Theme.radius
+                                    color: Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, 0.45)
+
+                                    // what's being graphed, and (for one component) its numbers right now
+                                    Item {
+                                        id: graphHeader
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.top: parent.top
+                                        anchors.margins: 10
+                                        height: 22
+
                                         Row {
-                                            anchors.left: parent.left
-                                            anchors.leftMargin: 10
                                             anchors.verticalCenter: parent.verticalCenter
-                                            spacing: 10
+                                            spacing: 6
                                             Text {
                                                 anchors.verticalCenter: parent.verticalCenter
-                                                text: partRow.modelData.icon
-                                                color: partRow.modelData.color
+                                                text: sysmon.selectedPart ? sysmon.selectedPart.icon : "monitoring"
+                                                color: sysmon.selectedPart ? sysmon.selectedPart.color : Theme.text
                                                 font.family: Theme.iconFont
                                                 font.pixelSize: Theme.iconSize
                                                 font.variableAxes: Theme.iconAxes
                                             }
                                             Text {
                                                 anchors.verticalCenter: parent.verticalCenter
-                                                text: partRow.modelData.name
-                                                color: Theme.text
-                                                font.family: Theme.font
-                                                font.pixelSize: Theme.textSize
-                                                font.weight: partRow.picked ? 700 : 500
-                                                font.letterSpacing: Theme.letterSpacing
-                                            }
-                                        }
-
-                                        // detail, a little meter, and the percentage on the right
-                                        Row {
-                                            anchors.right: parent.right
-                                            anchors.rightMargin: 10
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            spacing: 10
-
-                                            Text {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                text: SysMon.detail(partRow.modelData.key)
-                                                color: Theme.text
-                                                opacity: 0.55
-                                                font.family: Theme.font
-                                                font.pixelSize: Theme.textSize * 0.9
-                                                font.weight: 500
-                                                font.letterSpacing: Theme.letterSpacing
-                                            }
-                                            Rectangle {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: 56
-                                                height: 5
-                                                radius: height / 2
-                                                // the empty part of the meter: whichever of the two colors the row isn't
-                                                color: partRow.picked ? Theme.bg : Theme.pill
-                                                Rectangle {
-                                                    width: Math.max(parent.height, parent.width * partRow.percent / 100)
-                                                    height: parent.height
-                                                    radius: height / 2
-                                                    color: partRow.modelData.color
-                                                    Behavior on width {
-                                                        NumberAnimation {
-                                                            duration: 400
-                                                            easing.type: Easing.OutCubic
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            Text {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: 38
-                                                horizontalAlignment: Text.AlignRight
-                                                text: Math.round(partRow.percent) + "%"
+                                                text: sysmon.selectedPart ? sysmon.selectedPart.name : "All components"
                                                 color: Theme.text
                                                 font.family: Theme.font
                                                 font.pixelSize: Theme.textSize
@@ -6027,127 +5759,428 @@ in
                                                 font.letterSpacing: Theme.letterSpacing
                                             }
                                         }
+                                        Row {
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 8
+                                            visible: !!sysmon.selectedPart
+
+                                            // the temperature (the dashed red line in the graph), for CPU and GPU
+                                            Row {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                visible: !!sysmon.selectedPart && SysMon.temp(sysmon.selected) >= 0
+                                                spacing: 2
+                                                Text {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: "device_thermostat"
+                                                    color: Theme.red
+                                                    font.family: Theme.iconFont
+                                                    font.pixelSize: Theme.iconSize * 0.9
+                                                    font.variableAxes: Theme.iconAxes
+                                                }
+                                                Text {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: Math.round(SysMon.temp(sysmon.selected)) + "°C"
+                                                    color: Theme.red
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize * 0.9
+                                                    font.weight: 600
+                                                }
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: Math.round(SysMon.percent(sysmon.selected)) + "%"
+                                                color: sysmon.selectedPart ? sysmon.selectedPart.color : Theme.text
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize * 1.4
+                                                font.weight: 700
+                                                font.letterSpacing: Theme.letterSpacing
+                                            }
+                                        }
+                                    }
+
+                                    Canvas {
+                                        id: graph
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.top: graphHeader.bottom
+                                        anchors.bottom: timeLabels.top
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 10
+                                        anchors.topMargin: 8
+                                        anchors.bottomMargin: 4
+
+                                        // Repaint on every new sample (only while the popup is open: nobody
+                                        // sees it otherwise), when it opens, and when the selection changes.
+                                        Connections {
+                                            target: SysMon
+                                            function onSampled() {
+                                                if (sysmon.open)
+                                                    graph.requestPaint();
+                                            }
+                                        }
+                                        Connections {
+                                            target: sysmon
+                                            function onOpenChanged() {
+                                                graph.requestPaint();
+                                            }
+                                            function onSelectedChanged() {
+                                                graph.requestPaint();
+                                            }
+                                        }
+
+                                        // "rgba(r, g, b, a)": the canvas wants CSS-style color strings
+                                        function rgba(c, a) {
+                                            return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + "," + Math.round(c.b * 255) + "," + a + ")";
+                                        }
+                                        // x of the i-th sample: the newest sits on the right edge, so the
+                                        // line scrolls in from the right while history is still filling up
+                                        function xAt(i, count) {
+                                            return width - (count - 1 - i) * width / (SysMon.historyLength - 1);
+                                        }
+                                        // y of a value: 0 at the bottom, 100 (% or °C) at the top
+                                        function yAt(v) {
+                                            return height - Math.max(0, Math.min(100, v)) / 100 * height;
+                                        }
+                                        // Draws the path of one list of values; nulls leave a gap.
+                                        function trace(ctx, values) {
+                                            ctx.beginPath();
+                                            let drawing = false;
+                                            for (let i = 0; i < values.length; i++) {
+                                                if (values[i] === null) {
+                                                    drawing = false;
+                                                    continue;
+                                                }
+                                                const x = xAt(i, values.length), y = yAt(values[i]);
+                                                if (drawing)
+                                                    ctx.lineTo(x, y);
+                                                else
+                                                    ctx.moveTo(x, y);
+                                                drawing = true;
+                                            }
+                                        }
+
+                                        onPaint: {
+                                            const ctx = getContext("2d");
+                                            ctx.reset();
+                                            ctx.lineJoin = "round";
+                                            ctx.lineCap = "round";
+
+                                            // grid lines at 25 / 50 / 75 %
+                                            ctx.strokeStyle = rgba(Theme.text, 0.08);
+                                            ctx.lineWidth = 1;
+                                            for (const v of [25, 50, 75]) {
+                                                ctx.beginPath();
+                                                ctx.moveTo(0, Math.round(yAt(v)) + 0.5);
+                                                ctx.lineTo(width, Math.round(yAt(v)) + 0.5);
+                                                ctx.stroke();
+                                            }
+
+                                            if (!sysmon.selectedPart) {
+                                                // everything at once: one thin line per component
+                                                ctx.lineWidth = 1.5;
+                                                for (const part of sysmon.parts) {
+                                                    if (!SysMon.has(part.key))
+                                                        continue;
+                                                    ctx.strokeStyle = rgba(part.color, 1);
+                                                    trace(ctx, SysMon.history[part.key]);
+                                                    ctx.stroke();
+                                                }
+                                                return;
+                                            }
+
+                                            // one component: its line with a fade underneath...
+                                            const part = sysmon.selectedPart;
+                                            const values = SysMon.history[part.key];
+                                            const first = values.findIndex(v => v !== null);
+                                            if (first >= 0) {
+                                                const fade = ctx.createLinearGradient(0, 0, 0, height);
+                                                fade.addColorStop(0, rgba(part.color, 0.35));
+                                                fade.addColorStop(1, rgba(part.color, 0));
+                                                trace(ctx, values);
+                                                ctx.lineTo(xAt(values.length - 1, values.length), height);
+                                                ctx.lineTo(xAt(first, values.length), height);
+                                                ctx.closePath();
+                                                ctx.fillStyle = fade;
+                                                ctx.fill();
+
+                                                ctx.strokeStyle = rgba(part.color, 1);
+                                                ctx.lineWidth = 2;
+                                                trace(ctx, values);
+                                                ctx.stroke();
+                                            }
+
+                                            // ...plus its temperature as a dashed line, if it has one
+                                            const temps = SysMon.history[part.key + "Temp"];
+                                            if (temps) {
+                                                ctx.strokeStyle = rgba(Theme.red, 0.9);
+                                                ctx.lineWidth = 1.5;
+                                                ctx.setLineDash([3, 3]);
+                                                trace(ctx, temps);
+                                                ctx.stroke();
+                                            }
+                                        }
+                                    }
+
+                                    // time axis: the left edge is a minute ago, the right edge is now
+                                    Item {
+                                        id: timeLabels
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.bottom: parent.bottom
+                                        anchors.margins: 10
+                                        anchors.bottomMargin: 6
+                                        height: 14
+
+                                        Text {
+                                            anchors.left: parent.left
+                                            text: SysMon.historyLength + "s ago"
+                                            color: Theme.text
+                                            opacity: 0.4
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.8
+                                        }
+                                        Text {
+                                            anchors.right: parent.right
+                                            text: "now"
+                                            color: Theme.text
+                                            opacity: 0.4
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.8
+                                        }
+                                    }
+                                }
+
+                                // ── every component, in text; click one to graph it alone ──
+                                Column {
+                                    width: parent.width
+                                    spacing: 2
+
+                                    Repeater {
+                                        model: sysmon.parts
+
+                                        Rectangle {
+                                            id: partRow
+                                            required property var modelData     // { key, name, icon, color }
+
+                                            readonly property bool picked: sysmon.selected === modelData.key
+                                            readonly property real percent: SysMon.percent(modelData.key)
+
+                                            visible: SysMon.has(modelData.key)
+                                            width: parent.width
+                                            height: 32
+                                            radius: Theme.radius
+                                            color: picked ? Theme.pill : partMouse.containsMouse ? Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, 0.5) : "transparent"
+                                            scale: partMouse.pressed ? 0.97 : 1
+
+                                            Behavior on color {
+                                                ColorAnimation {
+                                                    duration: 120
+                                                }
+                                            }
+                                            Behavior on scale {
+                                                NumberAnimation {
+                                                    duration: 120
+                                                    easing.type: Easing.OutCubic
+                                                }
+                                            }
+
+                                            // icon + name on the left
+                                            Row {
+                                                anchors.left: parent.left
+                                                anchors.leftMargin: 10
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                spacing: 10
+                                                Text {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: partRow.modelData.icon
+                                                    color: partRow.modelData.color
+                                                    font.family: Theme.iconFont
+                                                    font.pixelSize: Theme.iconSize
+                                                    font.variableAxes: Theme.iconAxes
+                                                }
+                                                Text {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: partRow.modelData.name
+                                                    color: Theme.text
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize
+                                                    font.weight: partRow.picked ? 700 : 500
+                                                    font.letterSpacing: Theme.letterSpacing
+                                                }
+                                            }
+
+                                            // detail, a little meter, and the percentage on the right
+                                            Row {
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: 10
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                spacing: 10
+
+                                                Text {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: SysMon.detail(partRow.modelData.key)
+                                                    color: Theme.text
+                                                    opacity: 0.55
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize * 0.9
+                                                    font.weight: 500
+                                                    font.letterSpacing: Theme.letterSpacing
+                                                }
+                                                Rectangle {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 56
+                                                    height: 5
+                                                    radius: height / 2
+                                                    // the empty part of the meter: whichever of the two colors the row isn't
+                                                    color: partRow.picked ? Theme.bg : Theme.pill
+                                                    Rectangle {
+                                                        width: Math.max(parent.height, parent.width * partRow.percent / 100)
+                                                        height: parent.height
+                                                        radius: height / 2
+                                                        color: partRow.modelData.color
+                                                        Behavior on width {
+                                                            NumberAnimation {
+                                                                duration: 400
+                                                                easing.type: Easing.OutCubic
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                Text {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 38
+                                                    horizontalAlignment: Text.AlignRight
+                                                    text: Math.round(partRow.percent) + "%"
+                                                    color: Theme.text
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize
+                                                    font.weight: 700
+                                                    font.letterSpacing: Theme.letterSpacing
+                                                }
+                                            }
+
+                                            MouseArea {
+                                                id: partMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                // click the picked one again to go back to all
+                                                onClicked: sysmon.selected = partRow.picked ? "all" : partRow.modelData.key
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // ── Power menu ──
+                        Widget {
+                            icon: "power_settings_new"
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            Column {
+                                spacing: 2
+
+                                Repeater {
+                                    model: [
+                                        {
+                                            icon: "bedtime",
+                                            name: "Suspend",
+                                            cmd: ["systemctl", "suspend"]
+                                        },
+                                        {
+                                            icon: "restart_alt",
+                                            name: "Restart",
+                                            cmd: ["systemctl", "reboot"],
+                                            fade: true
+                                        },
+                                        {
+                                            icon: "power_settings_new",
+                                            name: "Power off",
+                                            cmd: ["systemctl", "poweroff"],
+                                            fade: true
+                                        },
+                                        {
+                                            icon: "lock",
+                                            name: "Lock",
+                                            cmd: ["${lockCmd}/bin/lock"]
+                                        },
+                                        {
+                                            icon: "logout",
+                                            name: "Log out",
+                                            cmd: ["uwsm", "stop"],
+                                            fade: true
+                                        }
+                                    ]
+
+                                    Rectangle {
+                                        id: powerRow
+                                        required property var modelData        // { icon, name, cmd, fade }
+
+                                        width: 170
+                                        height: 30
+                                        radius: Theme.radius
+                                        color: powerMouse.containsMouse ? Theme.pill : "transparent"   // highlight on hover
+                                        scale: powerMouse.pressed ? 0.85 : 1                           // shrink while clicked
+
+                                        Behavior on color {
+                                            ColorAnimation {
+                                                duration: 120
+                                            }
+                                        }
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 120
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        // icon + label side by side: two Texts, because each uses a different font
+                                        Row {
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: 10
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 10
+
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: powerRow.modelData.icon           // ligature name
+                                                color: powerMouse.containsMouse ? Theme.accent : Theme.text
+                                                font.family: Theme.iconFont             // turns the name into the glyph
+                                                font.pixelSize: Theme.iconSize
+                                                font.variableAxes: Theme.iconAxes
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: powerRow.modelData.name
+                                                color: Theme.text
+                                                font.family: Theme.font
+                                                font.pixelSize: Theme.textSize
+                                                font.weight: 500
+                                                font.letterSpacing: Theme.letterSpacing
+                                            }
+                                        }
 
                                         MouseArea {
-                                            id: partMouse
+                                            id: powerMouse
                                             anchors.fill: parent
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
-                                            // click the picked one again to go back to all
-                                            onClicked: sysmon.selected = partRow.picked ? "all" : partRow.modelData.key
+                                            // fade: true = fade the screen to black first (see `session` at the top)
+                                            onClicked: powerRow.modelData.fade ? session.leave(powerRow.modelData.cmd) : Quickshell.execDetached(powerRow.modelData.cmd)
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                    // ── Power menu ──
-                    Widget {
-                        icon: "power_settings_new"
-                        anchors.verticalCenter: parent.verticalCenter
-
-                        Column {
-                            spacing: 2
-
-                            Repeater {
-                                model: [
-                                    {
-                                        icon: "bedtime",
-                                        name: "Suspend",
-                                        cmd: ["systemctl", "suspend"]
-                                    },
-                                    {
-                                        icon: "restart_alt",
-                                        name: "Restart",
-                                        cmd: ["systemctl", "reboot"],
-                                        fade: true
-                                    },
-                                    {
-                                        icon: "power_settings_new",
-                                        name: "Power off",
-                                        cmd: ["systemctl", "poweroff"],
-                                        fade: true
-                                    },
-                                    {
-                                        icon: "lock",
-                                        name: "Lock",
-                                        cmd: ["${lockCmd}/bin/lock"]
-                                    },
-                                    {
-                                        icon: "logout",
-                                        name: "Log out",
-                                        cmd: ["uwsm", "stop"],
-                                        fade: true
-                                    }
-                                ]
-
-                                Rectangle {
-                                    id: powerRow
-                                    required property var modelData        // { icon, name, cmd, fade }
-
-                                    width: 170
-                                    height: 30
-                                    radius: Theme.radius
-                                    color: powerMouse.containsMouse ? Theme.pill : "transparent"   // highlight on hover
-                                    scale: powerMouse.pressed ? 0.85 : 1                           // shrink while clicked
-
-                                    Behavior on color {
-                                        ColorAnimation {
-                                            duration: 120
-                                        }
-                                    }
-                                    Behavior on scale {
-                                        NumberAnimation {
-                                            duration: 120
-                                            easing.type: Easing.OutCubic
-                                        }
-                                    }
-
-                                    // icon + label side by side: two Texts, because each uses a different font
-                                    Row {
-                                        anchors.left: parent.left
-                                        anchors.leftMargin: 10
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 10
-
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: powerRow.modelData.icon           // ligature name
-                                            color: powerMouse.containsMouse ? Theme.accent : Theme.text
-                                            font.family: Theme.iconFont             // turns the name into the glyph
-                                            font.pixelSize: Theme.iconSize
-                                            font.variableAxes: Theme.iconAxes
-                                        }
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: powerRow.modelData.name
-                                            color: Theme.text
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize
-                                            font.weight: 500
-                                            font.letterSpacing: Theme.letterSpacing
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        id: powerMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        // fade: true = fade the screen to black first (see `session` at the top)
-                                        onClicked: powerRow.modelData.fade ? session.leave(powerRow.modelData.cmd) : Quickshell.execDetached(powerRow.modelData.cmd)
-                                    }
-                                }
-                            }
-                        }
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        height: 3
+                        color: Theme.bg
                     }
-                }
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    height: 3
-                    color: Theme.bg
                 }
             }
         }
@@ -6402,6 +6435,9 @@ in
         Behavior on accent { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
 
         property int barHeight: 38
+        // the bar curves inward under both ends (Theme.radius big), like it wraps
+        // around the top corners of the screen; false = a plain straight bar
+        property bool barCurve: true
         property int moduleHeight: 26
         property int spacing: 8
         property int radius: 8
@@ -6465,7 +6501,7 @@ in
         function fitWindow() {
             const bar = root.QsWindow.window;
             // never taller than the screen below the bar, or Hyprland would move it
-            const room = bar && bar.screen ? bar.screen.height - bar.height : 100000;
+            const room = bar && bar.screen ? bar.screen.height - Theme.barHeight : 100000;
             windowHeight = Math.max(popup.bodyHeight, Math.min(popup.bodyHeight + headroom, room));
         }
 
@@ -6602,7 +6638,7 @@ in
                     // Centered under the button...
                     popup.anchor.rect.x = pos.x + root.width / 2 - popup.implicitWidth / 2
                     // ...with its top exactly on the bar's bottom edge.
-                    popup.anchor.rect.y = root.QsWindow.window.height
+                    popup.anchor.rect.y = Theme.barHeight   // the bar's edge (the window can be taller: Theme.barCurve)
                 }
             }
 
@@ -7704,6 +7740,46 @@ in
 
   # A small rounded toggle/button with a label, used by the Display widget.
   #   Chip { label: "On"; selected: true; tint: Theme.orange; onClicked: ... }
+  # One inward curve under an end of the bar (see Theme.barCurve): a square of the bar's
+  # color with a quarter circle cut out of it. mirrored: true mirrors it for the right end.
+  xdg.configFile."quickshell/BarCorner.qml".text = ''
+    import QtQuick
+    import QtQuick.Shapes
+
+    Shape {
+        id: corner
+
+        property bool mirrored: false
+        property real size: Theme.radius
+        property color color: Theme.bg
+
+        width: size
+        height: size
+        preferredRendererType: Shape.CurveRenderer
+        transform: Scale {
+            xScale: corner.mirrored ? -1 : 1
+            origin.x: corner.size / 2
+        }
+
+        ShapePath {
+            fillColor: corner.color
+            strokeColor: "transparent"
+            startX: 0
+            startY: 0
+            PathLine { x: corner.size; y: 0 }
+            // the curve, from the bar's edge down to the side of the screen
+            PathArc {
+                x: 0
+                y: corner.size
+                radiusX: corner.size
+                radiusY: corner.size
+                direction: PathArc.Counterclockwise
+            }
+            PathLine { x: 0; y: 0 }
+        }
+    }
+  '';
+
   xdg.configFile."quickshell/Chip.qml".text = ''
     import QtQuick
 
