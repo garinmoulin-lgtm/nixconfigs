@@ -135,6 +135,37 @@ in
   # Set your time zone.
   time.timeZone = "America/Chicago";
 
+  # ── Keeping the clock right ──
+  # chrony instead of the default (systemd-timesyncd, which it turns off): at boot it
+  # asks the time servers several times in a row ("iburst", the NixOS default here)
+  # instead of easing in, and it can jump the clock straight to the right time.
+  services.chrony = {
+    enable = true;
+    # Jump (step) whenever the clock is more than 1 s off, any time, not just right
+    # after boot; slewing a big error away would take a long time. (The option here
+    # can't say "any time", so it's written out below.)
+    makestep.enable = false;
+    extraConfig = "makestep 1 -1";
+  };
+  # Ask again right away after waking up...
+  powerManagement.resumeCommands = "${pkgs.chrony}/bin/chronyc burst 4/4 >/dev/null 2>&1 || true";
+  # ...and whenever a network connection comes up (boot, wake, switching Wi-Fi), in
+  # case it wasn't up yet when the line above ran.
+  networking.networkmanager.dispatcherScripts = [
+    {
+      type = "basic";
+      source = pkgs.writeShellScript "chrony-resync" ''
+        case "$2" in
+          up | connectivity-change)
+            ${pkgs.chrony}/bin/chronyc online >/dev/null 2>&1
+            ${pkgs.chrony}/bin/chronyc burst 4/4 >/dev/null 2>&1
+            ;;
+        esac
+        exit 0
+      '';
+    }
+  ];
+
   # Select internationalisation properties.
   i18n.defaultLocale = "en_US.UTF-8";
   # Bash line editor
@@ -242,6 +273,7 @@ in
     if cursorFile then cursorFile:close() end
     if cursor == "" then cursor = "${defaultCursor}" end
     hl.env("XCURSOR_THEME", cursor)
+    hl.env("HYPRCURSOR_THEME", cursor) -- else Hyprland grabs the first hyprcursor-format theme it finds
     hl.env("XCURSOR_SIZE", "24")
     hl.env("XCURSOR_PATH", "${greeterCursors}/share/icons")
     hl.monitor({ output = "", mode = "highrr", position = "auto", scale = "auto" })
@@ -821,6 +853,11 @@ in
           function focusField() {
               field.forceActiveFocus();
           }
+          // ...and does it again whenever this screen gets the keyboard back (after
+          // waking from suspend, or when a monitor comes back), so you can just type
+          readonly property bool windowActive: Window.active
+          onWindowActiveChanged: if (windowActive && main)
+              focusField()
 
           // One entry per typed character; the dots in the box are drawn from this,
           // so each one can fade in and out on its own.
@@ -838,6 +875,20 @@ in
           SystemClock {
               id: clock
               precision: SystemClock.Minutes
+          }
+          // after waking from suspend the clock's timer is behind (it doesn't count
+          // the sleep), so check every 2 s that it shows the right minute
+          Timer {
+              interval: 2000
+              running: true
+              repeat: true
+              onTriggered: {
+                  const now = new Date();
+                  if (now.getMinutes() !== clock.date.getMinutes() || now.getHours() !== clock.date.getHours()) {
+                      clock.enabled = false;
+                      clock.enabled = true;
+                  }
+              }
           }
           Text {
               id: clockText
@@ -1742,14 +1793,17 @@ in
               onFinished: Qt.quit()
           }
 
-          // ── the lock itself: one surface per screen, the password box on the first ──
+          // ── the lock itself: one surface per screen, each with the password box ──
           WlSessionLock {
               id: lock
               locked: true
 
               WlSessionLockSurface {
                   id: surface
-                  readonly property bool main: !!screen && screen.name === Quickshell.screens[0].name
+                  // Every screen gets the password box: Hyprland gives the keyboard to
+                  // the screen your mouse is on, so whichever one that is takes your
+                  // typing (it's the same password on all of them).
+                  readonly property bool main: true
                   color: "black"
 
                   Item {

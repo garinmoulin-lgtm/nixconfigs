@@ -631,9 +631,16 @@ let
         Name=Default
         Inherits=${t.cursor.name}
       '';
-      # read by uwsm at login (see uwsm/env below), so the session starts with it
+      # read by uwsm at login (see uwsm/env below), so the session starts with it.
+      # HYPRCURSOR_THEME too: without it Hyprland doesn't wait for XCURSOR_THEME, it
+      # takes the first hyprcursor-format theme it finds, and Catppuccin's cursors are
+      # the only ones here that come in that format. So every login came up with the
+      # Catppuccin cursor. Named here, Hyprland uses it (Catppuccin) or, if the theme
+      # has no hyprcursor version, falls back to the XCursor one of the same name.
       "session.env" = pkgs.writeText "session.env" ''
         export XCURSOR_THEME=${lib.escapeShellArg t.cursor.name}
+        export HYPRCURSOR_THEME=${lib.escapeShellArg t.cursor.name}
+        export HYPRCURSOR_SIZE=24
       '';
       # for the theme command
       "env" = pkgs.writeText "theme.env" ''
@@ -755,8 +762,9 @@ let
           hyprctl setcursor "$CURSOR_THEME" 24 >/dev/null || true
           # and for apps Hyprland starts from now on
           hyprctl eval "hl.env(\"XCURSOR_THEME\", \"$CURSOR_THEME\")" >/dev/null || true
+          hyprctl eval "hl.env(\"HYPRCURSOR_THEME\", \"$CURSOR_THEME\")" >/dev/null || true
         fi
-        systemctl --user set-environment XCURSOR_THEME="$CURSOR_THEME" || true
+        systemctl --user set-environment XCURSOR_THEME="$CURSOR_THEME" HYPRCURSOR_THEME="$CURSOR_THEME" || true
         # kitty rereads its config (and so the colors) on SIGUSR1. On NixOS the
         # process is called .kitty-wrapped.
         pkill -USR1 -x kitty || true
@@ -940,6 +948,8 @@ in
     import Quickshell.Widgets
     import Quickshell.Bluetooth
     import Quickshell.Wayland
+    import Quickshell.Services.SystemTray
+    import Quickshell.Hyprland
 
     ShellRoot {
         // ── Fading out of the session ──
@@ -1329,10 +1339,241 @@ in
                 arrived = Object.assign({}, arrived, {
                     [n.id]: new Date()
                 });
+                toasts.add(n);                 // the popup at the top right (below)
             }
 
             function markAllRead() {
                 unread = [];
+            }
+        }
+
+        // ── Notification popups ──
+        // Every new notification also slides in at the top right of the screen you're
+        // on, stays 10 s, then slides back out. It's still in the notification center
+        // afterwards (and still unread there). Point at a popup to keep it up while you
+        // read; click it (or its x) to send it away now. At most 4 at once, newest on top.
+        Scope {
+            id: toasts
+
+            readonly property int duration: 10000   // ms on screen
+            readonly property int maxShown: 4
+            property var objs: ({})                   // notification id -> notification
+
+            ListModel {
+                id: toastModel                          // { nid }, newest first
+            }
+            function add(n) {
+                remove(n.id);                           // an app replacing its own notification
+                objs[n.id] = n;
+                toastModel.insert(0, { "nid": n.id });
+                while (toastModel.count > maxShown)
+                    toastModel.remove(toastModel.count - 1);
+                n.closed.connect(() => toasts.remove(n.id));   // dismissed or closed by the app
+            }
+            function remove(id) {
+                for (let i = 0; i < toastModel.count; i++) {
+                    if (toastModel.get(i).nid === id) {
+                        toastModel.remove(i);
+                        return;
+                    }
+                }
+            }
+
+            // keeps the window up a moment after the last one leaves, for its slide-out
+            Timer {
+                id: toastLinger
+                interval: 400
+            }
+            Connections {
+                target: toastModel
+                function onCountChanged() {
+                    if (toastModel.count === 0)
+                        toastLinger.restart();
+                }
+            }
+
+            PanelWindow {
+                // the monitor you're on (the first one if Hyprland hasn't said yet)
+                screen: Quickshell.screens.find(s => Hyprland.focusedMonitor && s.name === Hyprland.focusedMonitor.name) ?? Quickshell.screens[0]
+                visible: toastModel.count > 0 || toastLinger.running
+                anchors {
+                    top: true
+                    right: true
+                }
+                margins {
+                    top: 8          // under the bar (it reserves its own space)
+                    right: 8
+                }
+                exclusionMode: ExclusionMode.Ignore
+                WlrLayershell.layer: WlrLayer.Overlay
+                WlrLayershell.namespace: "notification-popups"
+                color: "transparent"
+                implicitWidth: 344
+                implicitHeight: 560
+                // only the cards take clicks; the empty part below lets them through
+                mask: Region {
+                    width: toastList.width
+                    height: toastList.contentHeight
+                }
+
+                ListView {
+                    id: toastList
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    width: 344
+                    height: parent.height
+                    interactive: false
+                    spacing: 8
+                    model: toastModel
+
+                    // slide in from the right, slide back out, the others move up/down
+                    add: Transition {
+                        NumberAnimation {
+                            property: "x"
+                            from: 360
+                            to: 0
+                            duration: 320
+                            easing.type: Easing.OutCubic
+                        }
+                        NumberAnimation {
+                            property: "opacity"
+                            from: 0
+                            to: 1
+                            duration: 200
+                        }
+                    }
+                    remove: Transition {
+                        NumberAnimation {
+                            property: "x"
+                            to: 360
+                            duration: 260
+                            easing.type: Easing.InCubic
+                        }
+                        NumberAnimation {
+                            property: "opacity"
+                            to: 0
+                            duration: 260
+                        }
+                    }
+                    displaced: Transition {
+                        NumberAnimation {
+                            property: "y"
+                            duration: 260
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+
+                    delegate: Rectangle {
+                        id: toast
+                        required property int nid
+                        readonly property var n: toasts.objs[nid] ?? null
+                        readonly property bool critical: !!n && n.urgency === NotificationUrgency.Critical
+
+                        width: ListView.view.width
+                        height: toastContent.implicitHeight + 24
+                        radius: 12
+                        color: Theme.bg
+                        border.width: 1
+                        border.color: critical ? Theme.red : Theme.pill
+
+                        // how long it has left; pauses while you point at it
+                        property real remaining: 1
+                        NumberAnimation on remaining {
+                            id: countdown
+                            from: 1
+                            to: 0
+                            duration: toasts.duration
+                            paused: toastHover.hovered
+                            onFinished: toasts.remove(toast.nid)
+                        }
+
+                        HoverHandler {
+                            id: toastHover
+                        }
+                        // click anywhere: send it away now (it stays in the notification center)
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: toasts.remove(toast.nid)
+                        }
+
+                        Column {
+                            id: toastContent
+                            x: 14
+                            y: 12
+                            width: parent.width - 28
+                            spacing: 3
+
+                            // app name · time, and the x
+                            Item {
+                                width: parent.width
+                                height: toastApp.implicitHeight
+
+                                Text {
+                                    id: toastApp
+                                    anchors.left: parent.left
+                                    anchors.right: toastClose.left
+                                    anchors.rightMargin: 8
+                                    text: (toast.n && toast.n.appName ? toast.n.appName : "Notification") + "  ·  " + Qt.formatDateTime(new Date(), "h:mm AP")
+                                    elide: Text.ElideRight
+                                    color: toast.critical ? Theme.red : Theme.accent
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.8
+                                    font.weight: 600
+                                }
+                                Text {
+                                    id: toastClose
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "close"
+                                    color: Theme.text
+                                    opacity: toastHover.hovered ? 0.8 : 0.4
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize * 0.9
+                                }
+                            }
+                            Text {
+                                width: parent.width
+                                text: toast.n ? toast.n.summary : ""
+                                textFormat: Text.PlainText
+                                wrapMode: Text.Wrap
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
+                                color: Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize
+                                font.weight: 700
+                                font.letterSpacing: Theme.letterSpacing
+                            }
+                            Text {
+                                width: parent.width
+                                visible: text !== ""
+                                text: toast.n ? toast.n.body : ""
+                                textFormat: Text.PlainText   // apps may send markup; show it as plain text
+                                wrapMode: Text.Wrap
+                                maximumLineCount: 3
+                                elide: Text.ElideRight
+                                color: Theme.text
+                                opacity: 0.8
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.9
+                            }
+                        }
+
+                        // time left, as a thin line along the bottom
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.bottom: parent.bottom
+                            anchors.leftMargin: 12
+                            anchors.bottomMargin: 6
+                            width: (parent.width - 24) * toast.remaining
+                            height: 2
+                            radius: 1
+                            color: toast.critical ? Theme.red : Theme.accent
+                            opacity: 0.6
+                        }
+                    }
+                }
             }
         }
 
@@ -1357,17 +1598,30 @@ in
                     id: clock
                     precision: SystemClock.Minutes
                 }
+                // SystemClock moves on with a timer, and that timer doesn't count the
+                // time the computer spends asleep, so after waking the clock could be
+                // up to a minute behind (same when the time gets corrected over the
+                // network). Every 2 s this checks that it shows the right minute, and
+                // makes it read the time again if not.
+                Timer {
+                    interval: 2000
+                    running: true
+                    repeat: true
+                    onTriggered: {
+                        const now = new Date();
+                        const shown = clock.date;
+                        if (now.getMinutes() !== shown.getMinutes() || now.getHours() !== shown.getHours() || now.getDate() !== shown.getDate()) {
+                            clock.enabled = false;
+                            clock.enabled = true;
+                        }
+                    }
+                }
                 /*
                 Poll {
                     id: bluetooth
                     cmd: "bluetoothctl show | grep -q 'Powered: yes' && echo on || echo off"
                 }
                 */
-                Poll {
-                    id: net
-                    cmd: "nmcli -t -f TYPE,STATE,CONNECTION device | grep -E '^(ethernet|wifi):connected:' | head -n1"
-                    every: 1000
-                }
                 Row {
                     anchors.left: parent.left
                     anchors.leftMargin: Theme.spacing
@@ -1376,6 +1630,453 @@ in
 
                     Workspaces {
                         screen: bar.screen
+                    }
+
+                    // ── Open apps + system tray ──
+                    // In the bar: one icon per app that has a window open (the one you're
+                    // in is brighter). Click for the list: every window (click one to go to
+                    // it, x to close it), and under it the tray icons apps put up. In the
+                    // tray: left click = the app's action, middle click = its second
+                    // action, right click = its menu, shown right here in the popup.
+                    Widget {
+                        id: appsWidget
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        // one entry per app, in the order they were opened
+                        readonly property var apps: {
+                            const byId = {};
+                            const out = [];
+                            for (const t of ToplevelManager.toplevels.values) {
+                                const id = t.appId || t.title;
+                                if (!byId[id]) {
+                                    byId[id] = {
+                                        "id": id,
+                                        "active": false
+                                    };
+                                    out.push(byId[id]);
+                                }
+                                if (t.activated)
+                                    byId[id].active = true;
+                            }
+                            return out;
+                        }
+                        readonly property int maxIcons: 6
+                        // the app's icon from its .desktop file, else a generic one
+                        function iconFor(appId) {
+                            const e = DesktopEntries.heuristicLookup(appId);
+                            return Quickshell.iconPath(e && e.icon !== "" ? e.icon : appId, "application-x-executable");
+                        }
+                        function nameFor(appId) {
+                            const e = DesktopEntries.heuristicLookup(appId);
+                            return e && e.name !== "" ? e.name : appId;
+                        }
+
+                        button: Row {
+                            spacing: 6
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: appsWidget.apps.length === 0
+                                text: "apps"
+                                color: Theme.text
+                                font.family: Theme.iconFont
+                                font.pixelSize: Theme.iconSize
+                                font.variableAxes: Theme.iconAxes
+                            }
+                            Repeater {
+                                model: appsWidget.apps.slice(0, appsWidget.maxIcons)
+                                Image {
+                                    required property var modelData
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 16
+                                    height: 16
+                                    sourceSize.width: 32
+                                    sourceSize.height: 32
+                                    source: appsWidget.iconFor(modelData.id)
+                                    opacity: modelData.active ? 1 : 0.55
+                                    Behavior on opacity {
+                                        NumberAnimation {
+                                            duration: 150
+                                        }
+                                    }
+                                }
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: appsWidget.apps.length > appsWidget.maxIcons
+                                text: "+" + (appsWidget.apps.length - appsWidget.maxIcons)
+                                color: Theme.text
+                                opacity: 0.7
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.85
+                                font.weight: 700
+                            }
+                        }
+
+                        Column {
+                            id: appsList
+                            spacing: 4
+                            width: 300
+
+                            // the tray menu being shown: the tray item, and the menu (or
+                            // submenu) path into it; empty = none
+                            property var menuItem: null
+                            property var menuStack: []
+                            function openMenu(item) {
+                                if (menuItem === item) {
+                                    closeMenu();
+                                    return;
+                                }
+                                menuItem = item;
+                                menuStack = [item.menu];
+                            }
+                            function closeMenu() {
+                                menuItem = null;
+                                menuStack = [];
+                            }
+
+                            // header
+                            Item {
+                                width: parent.width
+                                height: 26
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Open apps"
+                                    color: Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 1.2
+                                    font.weight: 700
+                                    font.letterSpacing: Theme.letterSpacing
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: ToplevelManager.toplevels.values.length + (ToplevelManager.toplevels.values.length === 1 ? " window" : " windows")
+                                    color: Theme.text
+                                    opacity: 0.6
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.85
+                                }
+                            }
+
+                            Text {
+                                visible: ToplevelManager.toplevels.values.length === 0
+                                text: "Nothing open."
+                                color: Theme.text
+                                opacity: 0.6
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize
+                            }
+
+                            // every window; scrolls past 320 px
+                            Flickable {
+                                id: winScroll
+                                width: parent.width
+                                height: Math.min(contentHeight, 320)
+                                contentHeight: winRows.implicitHeight
+                                visible: winRows.implicitHeight > 0
+                                clip: true
+                                boundsBehavior: Flickable.StopAtBounds
+                                ScrollBar.vertical: ThinScrollBar {}
+
+                                Column {
+                                    id: winRows
+                                    width: winScroll.width
+                                    spacing: 2
+
+                                    Repeater {
+                                        model: ScriptModel {
+                                            values: [...ToplevelManager.toplevels.values]
+                                        }
+
+                                        Rectangle {
+                                            id: winRow
+                                            required property var modelData
+                                            width: winRows.width
+                                            height: 36
+                                            radius: Theme.radius
+                                            color: winHover.hovered || modelData.activated ? Theme.pill : "transparent"
+                                            NumberAnimation on opacity {
+                                                from: 0
+                                                to: 1
+                                                duration: 200
+                                            }
+                                            Behavior on color {
+                                                ColorAnimation {
+                                                    duration: 120
+                                                }
+                                            }
+
+                                            HoverHandler {
+                                                id: winHover
+                                            }
+                                            // click: go to that window
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    winRow.modelData.activate();
+                                                    appsWidget.closePopup();
+                                                }
+                                            }
+                                            Image {
+                                                id: winIcon
+                                                anchors.left: parent.left
+                                                anchors.leftMargin: 8
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: 20
+                                                height: 20
+                                                sourceSize.width: 40
+                                                sourceSize.height: 40
+                                                source: appsWidget.iconFor(winRow.modelData.appId)
+                                            }
+                                            Column {
+                                                anchors {
+                                                    left: winIcon.right
+                                                    right: winClose.left
+                                                    leftMargin: 10
+                                                    rightMargin: 6
+                                                    verticalCenter: parent.verticalCenter
+                                                }
+                                                Text {
+                                                    width: parent.width
+                                                    text: winRow.modelData.title || appsWidget.nameFor(winRow.modelData.appId)
+                                                    elide: Text.ElideRight
+                                                    color: winRow.modelData.activated ? Theme.accent : Theme.text
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize * 0.95
+                                                    font.weight: winRow.modelData.activated ? 700 : 500
+                                                    font.letterSpacing: Theme.letterSpacing
+                                                }
+                                                Text {
+                                                    width: parent.width
+                                                    text: appsWidget.nameFor(winRow.modelData.appId)
+                                                    elide: Text.ElideRight
+                                                    color: Theme.text
+                                                    opacity: 0.6
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize * 0.8
+                                                }
+                                            }
+                                            // x: close the window (shows on hover)
+                                            IconButton {
+                                                id: winClose
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: 4
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                icon: "close"
+                                                iconColor: Theme.red
+                                                opacity: winHover.hovered ? 1 : 0
+                                                enabled: winHover.hovered
+                                                Behavior on opacity {
+                                                    NumberAnimation {
+                                                        duration: 120
+                                                    }
+                                                }
+                                                onClicked: winRow.modelData.close()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ── the tray ──
+                            Text {
+                                visible: SystemTray.items.values.length > 0
+                                topPadding: 6
+                                text: "Tray"
+                                color: Theme.text
+                                opacity: 0.6
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.85
+                                font.weight: 600
+                            }
+                            Flow {
+                                visible: SystemTray.items.values.length > 0
+                                width: parent.width
+                                spacing: 4
+
+                                Repeater {
+                                    model: SystemTray.items
+
+                                    Rectangle {
+                                        id: trayBtn
+                                        required property var modelData
+                                        readonly property bool menuOpen: appsList.menuItem === modelData
+                                        width: 34
+                                        height: 34
+                                        radius: Theme.radius
+                                        color: menuOpen ? Theme.pill : trayMouse.containsMouse ? Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, 0.6) : "transparent"
+                                        border.width: menuOpen ? 1 : 0
+                                        border.color: Theme.accent
+                                        scale: trayMouse.pressed ? 0.85 : 1
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 120
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Image {
+                                            anchors.centerIn: parent
+                                            width: 18
+                                            height: 18
+                                            sourceSize.width: 36
+                                            sourceSize.height: 36
+                                            source: trayBtn.modelData.icon
+                                        }
+                                        MouseArea {
+                                            id: trayMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                                            onClicked: mouse => {
+                                                const item = trayBtn.modelData;
+                                                if (mouse.button === Qt.MiddleButton)
+                                                    item.secondaryActivate();
+                                                else if (item.hasMenu && (mouse.button === Qt.RightButton || item.onlyMenu))
+                                                    appsList.openMenu(item);
+                                                else
+                                                    item.activate();
+                                            }
+                                            onWheel: wheel => trayBtn.modelData.scroll(wheel.angleDelta.y, false)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ── the open tray menu ──
+                            QsMenuOpener {
+                                id: trayMenu
+                                menu: appsList.menuStack.length > 0 ? appsList.menuStack[appsList.menuStack.length - 1] : null
+                            }
+                            Rectangle {
+                                visible: appsList.menuItem !== null
+                                width: parent.width
+                                height: menuCol.implicitHeight + 8
+                                radius: Theme.radius
+                                color: Theme.pill
+
+                                Column {
+                                    id: menuCol
+                                    x: 4
+                                    y: 4
+                                    width: parent.width - 8
+
+                                    // title, with a back arrow inside a submenu
+                                    Item {
+                                        width: parent.width
+                                        height: 28
+                                        IconButton {
+                                            id: menuBack
+                                            anchors.left: parent.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            visible: appsList.menuStack.length > 1
+                                            width: visible ? implicitWidth : 0
+                                            icon: "arrow_back"
+                                            onClicked: appsList.menuStack = appsList.menuStack.slice(0, -1)
+                                        }
+                                        Text {
+                                            anchors.left: menuBack.right
+                                            anchors.leftMargin: 6
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: appsList.menuItem ? (appsList.menuItem.tooltipTitle || appsList.menuItem.title || appsList.menuItem.id) : ""
+                                            elide: Text.ElideRight
+                                            color: Theme.text
+                                            opacity: 0.7
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.85
+                                            font.weight: 600
+                                        }
+                                    }
+
+                                    Repeater {
+                                        model: trayMenu.children
+
+                                        Item {
+                                            id: entry
+                                            required property var modelData
+                                            width: menuCol.width
+                                            height: modelData.isSeparator ? 9 : 28
+
+                                            Rectangle {
+                                                visible: entry.modelData.isSeparator
+                                                anchors.centerIn: parent
+                                                width: parent.width - 16
+                                                height: 1
+                                                color: Theme.pillIcon
+                                            }
+                                            Rectangle {
+                                                visible: !entry.modelData.isSeparator
+                                                anchors.fill: parent
+                                                radius: Theme.radius
+                                                color: entryMouse.containsMouse && entry.modelData.enabled ? Theme.bg : "transparent"
+                                                opacity: entry.modelData.enabled ? 1 : 0.4
+
+                                                // check box / radio button entries
+                                                Text {
+                                                    id: entryCheck
+                                                    anchors.left: parent.left
+                                                    anchors.leftMargin: 8
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    visible: entry.modelData.buttonType !== QsMenuButtonType.None
+                                                    width: visible ? implicitWidth : 0
+                                                    text: entry.modelData.checkState === Qt.Checked ? (entry.modelData.buttonType === QsMenuButtonType.RadioButton ? "radio_button_checked" : "check_box") : (entry.modelData.buttonType === QsMenuButtonType.RadioButton ? "radio_button_unchecked" : "check_box_outline_blank")
+                                                    color: Theme.accent
+                                                    font.family: Theme.iconFont
+                                                    font.pixelSize: Theme.iconSize
+                                                    font.variableAxes: Theme.iconAxes
+                                                }
+                                                Text {
+                                                    anchors.left: entryCheck.right
+                                                    anchors.leftMargin: 8
+                                                    anchors.right: entryMore.left
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: entry.modelData.text.replace(/_(?!_)/g, "")   // drop the underline-the-next-letter marks
+                                                    elide: Text.ElideRight
+                                                    color: Theme.text
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize * 0.95
+                                                }
+                                                Text {
+                                                    id: entryMore
+                                                    anchors.right: parent.right
+                                                    anchors.rightMargin: 6
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    visible: entry.modelData.hasChildren
+                                                    text: "chevron_right"
+                                                    color: Theme.text
+                                                    font.family: Theme.iconFont
+                                                    font.pixelSize: Theme.iconSize
+                                                    font.variableAxes: Theme.iconAxes
+                                                }
+                                                MouseArea {
+                                                    id: entryMouse
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: entry.modelData.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                                    onClicked: {
+                                                        const m = entry.modelData;
+                                                        if (!m.enabled)
+                                                            return;
+                                                        if (m.hasChildren) {
+                                                            appsList.menuStack = appsList.menuStack.concat([m]);
+                                                        } else {
+                                                            m.triggered();
+                                                            appsList.closeMenu();
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // ── Display: brightness, night light, color filters ──
@@ -4385,12 +5086,25 @@ in
                     }
                     Widget {
                         anchors.verticalCenter: parent.verticalCenter
+                        // What the pill shows, straight from NetworkManager (it changes the moment
+                        // you connect or disconnect, no polling): the Wi-Fi network when Wi-Fi is
+                        // connected, else wired, else offline. Wi-Fi wins when both are up (it
+                        // used to show whichever device nmcli listed first, which was always
+                        // the wired one).
                         button: Pill {
-                            readonly property string kind: net.text.split(":")[0]
+                            readonly property var wifi: {
+                                for (const d of Networking.devices.values)
+                                    if (d.type === DeviceType.Wifi)
+                                        for (const n of d.networks.values)
+                                            if (n.connected)
+                                                return n;
+                                return null;
+                            }
+                            readonly property bool wired: Networking.devices.values.some(d => d.type === DeviceType.Wired && d.connected)
 
-                            icon: kind === "ethernet" ? "lan" : kind === "wifi" ? "wifi" : "wifi_off"
+                            icon: wifi ? "wifi" : wired ? "lan" : "wifi_off"
                             iconColor: Theme.green
-                            text: net.text.split(":").slice(2).join(":") || "offline"
+                            text: wifi ? wifi.name : wired ? "Wired" : "offline"
                         }
 
                         Column {
@@ -4509,6 +5223,21 @@ in
                                 font.pixelSize: Theme.textSize * 0.85
                                 font.weight: 600
                             }
+                            // A wired port only has a network to connect to while a cable is
+                            // plugged in (NetworkManager sees a link); this says so instead of
+                            // the port just not being there.
+                            Repeater {
+                                model: Networking.devices.values.filter(d => d.type === DeviceType.Wired && !d.hasLink)
+                                Text {
+                                    required property var modelData
+                                    leftPadding: 10
+                                    text: "Wired  (" + modelData.name + "): no cable"
+                                    color: Theme.text
+                                    opacity: 0.5
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.9
+                                }
+                            }
 
                             // Scrolls once the list is taller than 360 px (lots of devices or networks around).
                             Flickable {
@@ -4592,7 +5321,8 @@ in
                                                         rightMargin: 8
                                                         verticalCenter: parent.verticalCenter
                                                     }
-                                                    text: netRow.network.name
+                                                    // wired: its network is named after the port (enp5s0...)
+                                                    text: netRow.isWifi ? netRow.network.name : "Wired  (" + netRow.network.name + ")"
                                                     elide: Text.ElideRight
                                                     color: netRow.network.connected ? Theme.accent : Theme.text
                                                     font.family: Theme.font
@@ -7787,6 +8517,10 @@ in
               -- you start it again: on a text console (Ctrl+Alt+F3) log in and run
               -- WAYLAND_DISPLAY=wayland-1 lock   (ls /run/user/$UID shows the wayland-N name)
               allow_session_lock_restore = true,
+              -- a key or the mouse turns the screens back on if they're off (after waking
+              -- from suspend, say), so the first thing you type isn't lost to that
+              key_press_enables_dpms = true,
+              mouse_move_enables_dpms = true,
               disable_hyprland_logo = true,
               disable_splash_rendering = true,
               force_default_wallpaper = 0,
@@ -8307,6 +9041,24 @@ in
       t.cursor.package
     ]) (lib.attrValues themes.themes)
   );
+  # ── Locking when the computer sleeps ──
+  # hypridle watches for suspend (and `loginctl lock-session`) and starts the lock
+  # screen. inhibit_sleep = 3 holds the suspend back until Hyprland reports the screen
+  # is actually locked, so waking up never shows your desktop for a moment first.
+  # After waking it turns the screens back on, and the lock screen is already there,
+  # taking keys (see LoginCard.qml in configuration.nix).
+  # No idle timeouts (lock / screen off after N minutes); add `listener` entries
+  # here if you want them (man: github.com/hyprwm/hypridle).
+  services.hypridle = {
+    enable = true;
+    settings.general = {
+      lock_cmd = "${lockCmd}/bin/lock"; # what `loginctl lock-session` runs
+      before_sleep_cmd = "${lockCmd}/bin/lock"; # lock before suspending
+      after_sleep_cmd = "hyprctl dispatch 'hl.dsp.dpms({ action = \"on\" })'";
+      inhibit_sleep = 3; # wait until it's locked
+    };
+  };
+
   # Each rebuild makes new copies of the theme folders, so point the link at this
   # build's copy of the theme you're using (and make it the first time).
   home.activation.theme = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
