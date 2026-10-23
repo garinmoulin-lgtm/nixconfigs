@@ -1457,11 +1457,17 @@ in
                     top: true
                     right: true
                 }
+                // Placed in the space the bar leaves free, so it always starts below the
+                // bar (and below the bar's curved corners, Theme.barCurve). Normal + zone 0:
+                // keeps out of the bar's reserved space without reserving any itself.
+                // (Ignore, which this used before, measured from the very top of the
+                // screen, so the margin alone wasn't enough and it sat over the bar.)
+                exclusionMode: ExclusionMode.Normal
+                exclusiveZone: 0
                 margins {
-                    top: 8          // under the bar (it reserves its own space)
+                    top: (Theme.barCurve ? Theme.radius : 0) + 8
                     right: 8
                 }
-                exclusionMode: ExclusionMode.Ignore
                 WlrLayershell.layer: WlrLayer.Overlay
                 WlrLayershell.namespace: "notification-popups"
                 color: "transparent"
