@@ -524,7 +524,7 @@ let
       ln -s "$f" "$out/$(basename "$f")"
     done
     for s in message-new-instant software-update-urgent device-added device-removed \
-             system-ready system-shutdown alarm-clock-elapsed; do
+             system-ready system-shutdown alarm-clock-elapsed bell; do
       test -e "$out/$s.oga" || { echo "ui-sounds: $s is missing from the COSMIC sound theme" >&2; exit 1; }
     done
   '';
@@ -6543,8 +6543,24 @@ in
 
         readonly property string stateDir: Quickshell.env("HOME") + "/.local/state/quickshell"
 
-        // [{ id, date: "2026-10-23", time: "14:30" ("" = all day), title, notified }]
+        // [{ id, date, time, title, repeat, days, mdays, dates, until, skip, last }]
+        //   date    the first day, "2026-10-23"
+        //   time    "14:30" (24-hour), or "" for all day (no reminder)
+        //   repeat  "" (just that day), "daily", "weekly", "monthly", "dates" or "yearly"
+        //   days    weekly: which weekdays, 0 = Sunday ... 6 = Saturday
+        //   mdays   monthly: which days of the month (1-31)
+        //   dates   "dates": the exact days it happens on, picked one by one
+        //   until   the last day it can happen ("" = no end); daily, weekly and monthly
+        //           ones run for as long as you pick (a year to start with), yearly ones
+        //           for good
+        //   skip    days taken out of a repeating one ("skip this day")
+        //   last    the day of the last reminder sent, so each day reminds once
         property var events: []
+        // Reminders: things to do that aren't part of the schedule (take the bins out,
+        // water the plants). Same fields and repeat rules as events, plus `done`: the
+        // day you last ticked it off. They aren't on the calendar or in the bar; they
+        // just remind you at their time. A time is required.
+        property var reminders: []
         // [{ id, label, total, end, left, done }], all in ms. While running, `end` is when
         // it runs out (Date.now() time); while paused, end is 0 and `left` is what's left.
         property var timers: []
@@ -6568,12 +6584,21 @@ in
         }
         readonly property bool timersRunning: nextTimer !== null
 
-        // how many events each day has: { "2026-10-23": 2, ... } (the calendar's dots)
-        readonly property var eventDays: {
-            const m = {};
-            for (const e of events)
-                m[e.date] = (m[e.date] || 0) + 1;
-            return m;
+        // today's events, and the one the bar shows: the next one today with a time (still
+        // shown for 30 minutes after it starts), else today's all-day one; null if none
+        readonly property string todayKey: key(new Date(now))
+        readonly property var today: eventsOn(todayKey)
+        readonly property var nextEvent: {
+            const d = new Date(now);
+            const mins = d.getHours() * 60 + d.getMinutes();
+            for (const e of today) {
+                if (e.time === "")
+                    continue;
+                const t = e.time.split(":").map(Number);
+                if (t[0] * 60 + t[1] + 30 >= mins)
+                    return e;
+            }
+            return today.find(e => e.time === "") ?? null;
         }
 
         // ── the ticker: runs out timers and sends event reminders ──
@@ -6596,27 +6621,42 @@ in
                 ring("Timer done", t.label !== "" ? t.label : fmtLength(t.total) + " timer");
                 return Object.assign({}, t, { "done": true });
             });
+            // each event's reminder for today, once
+            const k = key(new Date(now));
             const es = events.map(e => {
-                if (e.notified || e.time === "")
+                if (e.time === "" || e.last === k || !occursOn(e, k))
                     return e;
-                const due = dueOf(e);
+                const due = dueAt(k, e.time);
                 if (now < due)
                     return e;
                 changed = true;
                 // missed by more than 15 minutes (Quickshell or the computer was off): skip it
                 if (now - due < 15 * 60000)
-                    ring(e.title, fmtTime(e.time));
-                return Object.assign({}, e, { "notified": true });
+                    ring(e.title, fmtTime(e.time) + (e.repeat ? "  ·  " + repeatText(e) : ""));
+                return Object.assign({}, e, { "last": k });
+            });
+            // and each reminder's, for today (not if it's ticked off already)
+            const rs = reminders.map(e => {
+                if (e.last === k || e.done === k || !occursOn(e, k))
+                    return e;
+                const due = dueAt(k, e.time);
+                if (now < due)
+                    return e;
+                changed = true;
+                if (now - due < 15 * 60000)
+                    ring("Reminder", e.title, "bell");
+                return Object.assign({}, e, { "last": k });
             });
             if (changed) {
                 timers = ts;
                 events = es;
+                reminders = rs;
                 save();
             }
         }
-        function ring(title, body) {
+        function ring(title, body, sound) {
             Quickshell.execDetached(["${pkgs.libnotify}/bin/notify-send", "-a", "Clock", "-i", "alarm", "-h", "boolean:suppress-sound:true", title, body]);
-            Sounds.play("alarm-clock-elapsed");
+            Sounds.play(sound || "alarm-clock-elapsed");
         }
 
         // ── saving and loading ──
@@ -6629,7 +6669,17 @@ in
         Component.onCompleted: {
             try {
                 const s = JSON.parse(file.text() || "{}");
-                events = s.events || [];
+                // events saved before repeating ones existed: same thing, new fields
+                events = (s.events || []).map(e => Object.assign({
+                        "repeat": "",
+                        "days": [],
+                        "mdays": [],
+                        "dates": [],
+                        "until": "",
+                        "skip": [],
+                        "last": e.notified ? e.date : ""
+                    }, e));
+                reminders = s.reminders || [];
                 timers = s.timers || [];
                 swStart = s.swStart || 0;
                 swBase = s.swBase || 0;
@@ -6640,6 +6690,7 @@ in
         function save() {
             Quickshell.execDetached(["sh", "-c", "mkdir -p \"$1\" && printf '%s' \"$2\" > \"$1/planner.json.$$\" && mv -f \"$1/planner.json.$$\" \"$1/planner.json\"", "sh", stateDir, JSON.stringify({
                     "events": events,
+                    "reminders": reminders,
                     "timers": timers,
                     "swStart": swStart,
                     "swBase": swBase,
@@ -6659,9 +6710,10 @@ in
             const a = k.split("-").map(Number);
             return new Date(a[0], a[1] - 1, a[2]);
         }
-        function dueOf(e) {
-            const d = dateOf(e.date);
-            const t = e.time.split(":").map(Number);
+        // when "HH:MM" on day k is, in Date.now() time
+        function dueAt(k, hm) {
+            const d = dateOf(k);
+            const t = hm.split(":").map(Number);
             d.setHours(t[0], t[1], 0, 0);
             return d.getTime();
         }
@@ -6745,25 +6797,173 @@ in
         }
 
         // ── events ──
-        function eventsOn(k) {
-            return events.filter(e => e.date === k).sort((a, b) => a.time === b.time ? 0 : a.time === "" ? -1 : b.time === "" ? 1 : a.time < b.time ? -1 : 1);
+        // does event e happen on day k ("2026-10-23")?
+        function occursOn(e, k) {
+            if (k < e.date || (e.until && k > e.until) || (e.skip || []).indexOf(k) >= 0)
+                return false;
+            const r = e.repeat || "";
+            if (r === "")
+                return k === e.date;
+            if (r === "daily")
+                return true;
+            if (r === "dates")
+                return (e.dates || []).indexOf(k) >= 0;
+            const d = dateOf(k), s = dateOf(e.date);
+            if (r === "weekly")
+                return (e.days && e.days.length > 0 ? e.days : [s.getDay()]).indexOf(d.getDay()) >= 0;
+            if (r === "monthly")         // a month without that day (the 31st) is skipped
+                return (e.mdays && e.mdays.length > 0 ? e.mdays : [s.getDate()]).indexOf(d.getDate()) >= 0;
+            if (r === "yearly")
+                return d.getDate() === s.getDate() && d.getMonth() === s.getMonth();
+            return false;
         }
-        function addEvent(k, time, title) {
-            const e = {
+        function eventsOn(k) {
+            return events.filter(e => occursOn(e, k)).sort((a, b) => a.time === b.time ? 0 : a.time === "" ? -1 : b.time === "" ? 1 : a.time < b.time ? -1 : 1);
+        }
+        readonly property var dayNames: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        // 1 -> "1st", 22 -> "22nd"
+        function ordinal(n) {
+            const s = n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th";
+            return n + s;
+        }
+        // in words: "Every day", "Every Mon, Wed", "Every month on the 1st, 15th",
+        // "Every year on Oct 23", "On 4 dates: Oct 26, Oct 30, Nov 2 +1" (+ "until ...")
+        function repeatText(e) {
+            const r = e.repeat || "";
+            const start = dateOf(e.date);
+            let t = "";
+            if (r === "daily")
+                t = "Every day";
+            else if (r === "weekly")
+                t = "Every " + [1, 2, 3, 4, 5, 6, 0].filter(d => (e.days || []).indexOf(d) >= 0).map(d => dayNames[d]).join(", ");
+            else if (r === "monthly")
+                t = "Every month on the " + (e.mdays && e.mdays.length > 0 ? e.mdays : [start.getDate()]).slice().sort((a, b) => a - b).map(ordinal).join(", ");
+            else if (r === "yearly")
+                t = "Every year on " + Qt.formatDate(start, "MMM d");
+            else if (r === "dates") {
+                const ds = (e.dates || []).slice().sort();
+                t = (ds.length === 1 ? "On 1 date: " : "On " + ds.length + " dates: ") + ds.slice(0, 3).map(k => Qt.formatDate(dateOf(k), "MMM d")).join(", ") + (ds.length > 3 ? " +" + (ds.length - 3) : "");
+                return t;
+            }
+            if (t !== "" && e.until)
+                t += " until " + Qt.formatDate(dateOf(e.until), "MMM d, yyyy");
+            return t;
+        }
+        // How an event added on day k with this repeat rule would look (the summary line
+        // in the Repeat page, and what addEvent saves). rule: { repeat, days, mdays, dates,
+        // span }:
+        //   repeat  "", "daily", "weekly", "monthly", "dates" or "yearly"
+        //   days    weekly: weekdays (0 = Sunday)   mdays  monthly: days of the month
+        //   dates   "dates": the exact days ("2026-10-26", ...)
+        //   span    daily / weekly / monthly: how many months it runs; 0 = no end
+        function previewRepeat(k, rule) {
+            const r = rule.repeat || "";
+            let date = k, until = "";
+            if (r === "dates" && rule.dates.length > 0)
+                date = rule.dates.slice().sort()[0];       // starts on the first one
+            if ((r === "daily" || r === "weekly" || r === "monthly") && rule.span > 0) {
+                const end = dateOf(k);
+                end.setMonth(end.getMonth() + rule.span);
+                end.setDate(end.getDate() - 1);            // up to the day before
+                until = key(end);
+            }
+            return {
+                "date": date,
+                "repeat": r,
+                "days": r === "weekly" ? rule.days : [],
+                "mdays": r === "monthly" ? rule.mdays : [],
+                "dates": r === "dates" ? rule.dates.slice().sort() : [],
+                "until": until
+            };
+        }
+        // a new event on day k ("2026-10-23"), with a repeat rule (previewRepeat above)
+        function addEvent(k, time, title, rule) {
+            const e = Object.assign(previewRepeat(k, rule || { "repeat": "" }), {
                 "id": newId(),
-                "date": k,
                 "time": time,
                 "title": title,
-                "notified": false
-            };
-            // already past: no reminder for it
-            if (time !== "" && dueOf(e) <= Date.now())
-                e.notified = true;
+                "skip": [],
+                "last": ""
+            });
+            // already past today: no reminder for today
+            const today = key(new Date());
+            if (time !== "" && occursOn(e, today) && dueAt(today, time) <= Date.now())
+                e.last = today;
             events = events.concat([e]);
             save();
         }
+        // ── reminders ──
+        // a new reminder at time ("14:30"), starting today, with a repeat rule
+        function addReminder(time, title, rule) {
+            const today = key(new Date());
+            const e = Object.assign(previewRepeat(today, rule || { "repeat": "" }), {
+                "id": newId(),
+                "time": time,
+                "title": title,
+                "skip": [],
+                "last": "",
+                "done": ""
+            });
+            if (occursOn(e, today) && dueAt(today, time) <= Date.now())
+                e.last = today;          // its time today has passed: from the next one on
+            reminders = reminders.concat([e]);
+            save();
+        }
+        function removeReminder(id) {
+            reminders = reminders.filter(e => e.id !== id);
+            save();
+        }
+        // tick today's off (or untick it); a ticked one doesn't remind you today
+        function toggleDone(id) {
+            const k = key(new Date());
+            reminders = reminders.map(e => e.id === id ? Object.assign({}, e, {
+                        "done": e.done === k ? "" : k
+                    }) : e);
+            save();
+        }
+        // the next day it's due, from today on ("" = never again); a ticked-off or
+        // already-reminded today counts as done
+        function nextDay(e) {
+            const d = new Date(now);
+            for (let i = 0; i < 400; i++) {
+                const k = key(d);
+                if (e.until && k > e.until)
+                    return "";
+                if (occursOn(e, k) && !(i === 0 && e.done === k))
+                    return k;
+                d.setDate(d.getDate() + 1);
+            }
+            return "";
+        }
+        // "Today", "Tomorrow", "Mon, Oct 26"
+        function dayText(k) {
+            if (k === "")
+                return "No more";
+            const t = new Date(now);
+            if (k === key(t))
+                return "Today";
+            t.setDate(t.getDate() + 1);
+            if (k === key(t))
+                return "Tomorrow";
+            return Qt.formatDate(dateOf(k), "ddd, MMM d");
+        }
+        // reminders, soonest first, for the list
+        readonly property var reminderList: reminders.map(e => ({
+                    "e": e,
+                    "next": nextDay(e)
+                })).sort((a, b) => (a.next || "9999") === (b.next || "9999") ? (a.e.time < b.e.time ? -1 : 1) : (a.next || "9999") < (b.next || "9999") ? -1 : 1)
+        readonly property int remindersToday: reminderList.filter(x => x.next === key(new Date(now))).length
+
+        // the whole event (every day it repeats on)
         function removeEvent(id) {
             events = events.filter(e => e.id !== id);
+            save();
+        }
+        // just one day of a repeating event
+        function skipDay(id, k) {
+            events = events.map(e => e.id === id ? Object.assign({}, e, {
+                        "skip": (e.skip || []).concat([k])
+                    }) : e);
             save();
         }
 
@@ -6845,6 +7045,420 @@ in
     }
   '';
 
+  # What a Repeat page has picked (RepeatPicker.qml edits it; Planner.qml reads its rule).
+  xdg.configFile."quickshell/RepeatState.qml".text = ''
+    import QtQuick
+
+    // How often something happens, as picked on a Repeat page (RepeatPicker.qml):
+    // the kind, its days, and for how long. `rule` is what Planner.addEvent /
+    // addReminder take. The clock widget has one for events and one for reminders.
+    QtObject {
+        id: pick
+
+        // the day it all starts from (its weekday, its date...)
+        property string startKey: ""
+        // a different start day: the picks start over from it, same kind
+        onStartKeyChanged: {
+            const r = repeat;
+            reset();
+            if (r !== "")
+                setRepeat(r);
+        }
+        property string repeat: ""     // "", "daily", "weekly", "monthly", "dates", "yearly"
+        property var days: []          // weekly: weekdays, 0 = Sunday
+        property var mdays: []         // monthly: days of the month
+        property var dates: []         // dates: the exact days
+        property int span: 12          // daily / weekly / monthly: months it runs, 0 = no end
+        readonly property var rule: ({
+                "repeat": repeat,
+                "days": days,
+                "mdays": mdays,
+                "dates": dates,
+                "span": span
+            })
+        // a sensible start for each kind, from the start day
+        function setRepeat(r) {
+            const d = Planner.dateOf(startKey);
+            if (r === "weekly" && days.length === 0)
+                days = [d.getDay()];
+            if (r === "monthly" && mdays.length === 0)
+                mdays = [d.getDate()];
+            if (r === "dates" && dates.length === 0)
+                dates = [startKey];
+            repeat = r;
+        }
+        // flip one in or out of a list (keeping at least one)
+        function toggled(list, x) {
+            const i = list.indexOf(x);
+            if (i < 0)
+                return list.concat([x]);
+            return list.length > 1 ? list.filter(y => y !== x) : list;
+        }
+        function reset() {
+            repeat = "";
+            days = [];
+            mdays = [];
+            dates = [];
+            span = 12;
+        }
+    }
+  '';
+
+  # A Repeat page: pick how often something happens (the clock's events and reminders).
+  xdg.configFile."quickshell/RepeatPicker.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+
+    // How often something happens (an event, a reminder). Pick a kind, then the days:
+    //   Weekly   any weekdays (swim lessons: Mon and Wed)
+    //   Monthly  any days of the month (the 1st and the 15th)
+    //   Dates    any days at all, picked one by one on a calendar
+    //   Daily / Yearly  every day, or every year on the start day
+    // Daily, weekly and monthly ones run for as long as you pick (a year to start
+    // with). What's picked lives in `pick` (a RepeatState), so it's kept when this
+    // page slides away; Back and Done just say so (done).
+    Column {
+        id: picker
+
+        property string startKey: ""     // the day it starts from
+        property QtObject pick: null     // a RepeatState: what's picked
+        property string heading: "Repeat"
+        signal done                      // back, or Done
+        spacing: 10
+
+        // ‹  Repeat                Done
+        Item {
+            width: parent.width
+            height: 26
+            IconButton {
+                id: repeatBack
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                icon: "arrow_back"
+                onClicked: picker.done()
+            }
+            Text {
+                anchors.left: repeatBack.right
+                anchors.leftMargin: 4
+                anchors.verticalCenter: parent.verticalCenter
+                text: picker.heading
+                color: Theme.text
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize * 1.1
+                font.weight: 700
+                font.letterSpacing: Theme.letterSpacing
+            }
+            Chip {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                label: "Done"
+                selected: true
+                onClicked: picker.done()
+            }
+        }
+
+        // the kind
+        Flow {
+            width: parent.width
+            spacing: 4
+            Repeater {
+                model: [
+                    {
+                        id: "",
+                        name: "Never"
+                    },
+                    {
+                        id: "daily",
+                        name: "Daily"
+                    },
+                    {
+                        id: "weekly",
+                        name: "Weekly"
+                    },
+                    {
+                        id: "monthly",
+                        name: "Monthly"
+                    },
+                    {
+                        id: "dates",
+                        name: "Dates"
+                    },
+                    {
+                        id: "yearly",
+                        name: "Yearly"
+                    }
+                ]
+                Chip {
+                    required property var modelData
+                    label: modelData.name
+                    selected: picker.pick.repeat === modelData.id
+                    onClicked: picker.pick.setRepeat(modelData.id)
+                }
+            }
+        }
+
+        // ── Weekly: a week, Monday first like the calendar ──
+        Row {
+            visible: picker.pick.repeat === "weekly"
+            spacing: 4
+            Repeater {
+                model: [1, 2, 3, 4, 5, 6, 0]
+                Rectangle {
+                    id: wd
+                    required property int modelData
+                    readonly property bool on: picker.pick.days.indexOf(modelData) >= 0
+                    width: (picker.width - 6 * 4) / 7
+                    height: 44
+                    radius: Theme.radius
+                    color: on ? Theme.accent : wdMouse.containsMouse ? Theme.pill : "transparent"
+                    border.width: 1
+                    border.color: on ? Theme.accent : Theme.pill
+                    scale: wdMouse.pressed ? 0.9 : 1
+                    Behavior on color {
+                        ColorAnimation {
+                            duration: 120
+                        }
+                    }
+                    Behavior on scale {
+                        NumberAnimation {
+                            duration: 120
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        text: Planner.dayNames[wd.modelData]
+                        color: wd.on ? Theme.bg : Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.9
+                        font.weight: 700
+                    }
+                    MouseArea {
+                        id: wdMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: picker.pick.days = picker.pick.toggled(picker.pick.days, wd.modelData)
+                    }
+                }
+            }
+        }
+
+        // ── Monthly: the days of a month, 1 to 31 ──
+        Grid {
+            visible: picker.pick.repeat === "monthly"
+            columns: 7
+            spacing: 4
+            Repeater {
+                model: 31
+                Rectangle {
+                    id: md
+                    required property int index
+                    readonly property int day: index + 1
+                    readonly property bool on: picker.pick.mdays.indexOf(day) >= 0
+                    width: (picker.width - 6 * 4) / 7
+                    height: 30
+                    radius: height / 2
+                    color: on ? Theme.accent : mdMouse.containsMouse ? Theme.pill : "transparent"
+                    Behavior on color {
+                        ColorAnimation {
+                            duration: 120
+                        }
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        text: md.day
+                        color: md.on ? Theme.bg : Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize
+                        font.weight: md.on ? 700 : 500
+                    }
+                    MouseArea {
+                        id: mdMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: picker.pick.mdays = picker.pick.toggled(picker.pick.mdays, md.day)
+                    }
+                }
+            }
+        }
+
+        // ── Dates: any days, on a calendar of their own ──
+        Column {
+            id: datePick
+            visible: picker.pick.repeat === "dates"
+            width: parent.width
+            spacing: 6
+
+            // the month on show (starts on the day picked in the calendar)
+            property int viewYear: Planner.dateOf(picker.startKey).getFullYear()
+            property int viewMonth: Planner.dateOf(picker.startKey).getMonth()
+            function step(by) {
+                const d = new Date(viewYear, viewMonth + by, 1);
+                viewYear = d.getFullYear();
+                viewMonth = d.getMonth();
+            }
+
+            Item {
+                width: parent.width
+                height: 26
+                IconButton {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    icon: "chevron_left"
+                    onClicked: datePick.step(-1)
+                }
+                Text {
+                    anchors.centerIn: parent
+                    text: Qt.formatDate(new Date(datePick.viewYear, datePick.viewMonth, 1), "MMMM yyyy")
+                    color: Theme.accent
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize
+                    font.weight: 700
+                }
+                IconButton {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    icon: "chevron_right"
+                    onClicked: datePick.step(1)
+                }
+            }
+            DayOfWeekRow {
+                width: dateGrid.width
+                delegate: Text {
+                    required property string shortName
+                    text: shortName
+                    horizontalAlignment: Text.AlignHCenter
+                    color: Theme.text
+                    opacity: 0.6
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize * 0.85
+                    font.weight: 600
+                }
+            }
+            MonthGrid {
+                id: dateGrid
+                width: parent.width
+                height: 186
+                month: datePick.viewMonth
+                year: datePick.viewYear
+
+                delegate: Item {
+                    id: dd
+                    required property var model
+                    readonly property string dayKey: Planner.key(model.date)
+                    readonly property bool on: picker.pick.dates.indexOf(dayKey) >= 0
+                    readonly property bool inMonth: model.month === dateGrid.month
+                    implicitWidth: 34
+                    implicitHeight: 28
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 28
+                        height: 28
+                        radius: 14
+                        color: dd.on ? Theme.accent : ddMouse.containsMouse ? Theme.pill : "transparent"
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: 120
+                            }
+                        }
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        text: dd.model.day
+                        color: dd.on ? Theme.bg : Theme.text
+                        opacity: dd.inMonth ? 1 : 0.3
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize
+                        font.weight: dd.on ? 700 : 500
+                    }
+                    MouseArea {
+                        id: ddMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: picker.pick.dates = picker.pick.toggled(picker.pick.dates, dd.dayKey)
+                    }
+                }
+            }
+        }
+
+        // ── Daily / Yearly: nothing to pick ──
+        Text {
+            visible: picker.pick.repeat === "daily" || picker.pick.repeat === "yearly" || picker.pick.repeat === ""
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: picker.pick.repeat === "" ? "Just once, on " + Qt.formatDate(Planner.dateOf(picker.startKey), "dddd, MMMM d") + "." : picker.pick.repeat === "daily" ? "Every day, starting " + Qt.formatDate(Planner.dateOf(picker.startKey), "MMMM d") + "." : "Every year on " + Qt.formatDate(Planner.dateOf(picker.startKey), "MMMM d") + ", for good (birthdays, anniversaries)."
+            color: Theme.text
+            opacity: 0.7
+            font.family: Theme.font
+            font.pixelSize: Theme.textSize * 0.9
+        }
+
+        // ── for how long (daily, weekly, monthly) ──
+        Column {
+            visible: picker.pick.repeat === "daily" || picker.pick.repeat === "weekly" || picker.pick.repeat === "monthly"
+            width: parent.width
+            spacing: 4
+            Text {
+                text: "For"
+                color: Theme.text
+                opacity: 0.6
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize * 0.85
+                font.weight: 600
+            }
+            Flow {
+                width: parent.width
+                spacing: 4
+                Repeater {
+                    model: [
+                        {
+                            months: 1,
+                            name: "1 month"
+                        },
+                        {
+                            months: 3,
+                            name: "3 months"
+                        },
+                        {
+                            months: 6,
+                            name: "6 months"
+                        },
+                        {
+                            months: 12,
+                            name: "1 year"
+                        },
+                        {
+                            months: 0,
+                            name: "No end"
+                        }
+                    ]
+                    Chip {
+                        required property var modelData
+                        label: modelData.name
+                        selected: picker.pick.span === modelData.months
+                        onClicked: picker.pick.span = modelData.months
+                    }
+                }
+            }
+        }
+
+        // what it'll do, in words
+        Text {
+            visible: picker.pick.repeat !== ""
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: Planner.repeatText(Planner.previewRepeat(picker.startKey, picker.pick.rule))
+            color: Theme.accent
+            font.family: Theme.font
+            font.pixelSize: Theme.textSize * 0.85
+            font.weight: 600
+        }
+    }
+  '';
+
   # The clock in the bar, with the calendar, timers and stopwatch (data: Planner.qml).
   xdg.configFile."quickshell/Clock.qml".text = ''
     import QtQuick
@@ -6869,18 +7483,26 @@ in
 
         property date now: new Date()      // the bar's clock: shell.qml passes clock.date
 
+        // the time; then a running timer's time left, or else today's next event
+        // (its name and time; an all-day one just by name)
         button: Pill {
-            icon: Planner.timersRunning ? "timer" : "schedule"
-            iconColor: Planner.timersRunning ? Theme.accent : Theme.red
-            text: Qt.formatDateTime(root.now, "hh:mm AP") + (Planner.timersRunning ? "  ·  " + Planner.fmtLeft(Planner.left(Planner.nextTimer)) : "")
+            readonly property var ev: Planner.nextEvent
+            function short(t) {
+                return t.length > 18 ? t.slice(0, 17).trim() + "…" : t;
+            }
+            icon: Planner.timersRunning ? "timer" : ev ? "event" : "schedule"
+            iconColor: Planner.timersRunning || ev ? Theme.accent : Theme.red
+            text: Qt.formatDateTime(root.now, "hh:mm AP") + (Planner.timersRunning ? "  ·  " + Planner.fmtLeft(Planner.left(Planner.nextTimer)) : ev ? "  ·  " + short(ev.title) + (ev.time !== "" ? " " + Planner.fmtTime(ev.time) : "") : "")
         }
 
         Column {
             id: card
-            width: 280
+            width: 330
             spacing: 8
 
-            property string tab: "calendar"     // "calendar", "timers" or "stopwatch"
+            property string tab: "calendar"     // "calendar", "reminders", "timers" or "stopwatch"
+            property string page: "main"        // the calendar tab's page: "main" or "repeat"
+            onTabChanged: page = "main"
             // the month on show, and the day picked (its events are listed)
             property int viewYear: root.now.getFullYear()
             property int viewMonth: root.now.getMonth()
@@ -6892,6 +7514,7 @@ in
                 viewYear = root.now.getFullYear();
                 viewMonth = root.now.getMonth();
                 selected = Planner.key(root.now);
+                page = "main";
             }
             function stepMonth(by) {
                 const d = new Date(viewYear, viewMonth + by, 1);
@@ -6932,6 +7555,10 @@ in
                             name: "Calendar"
                         },
                         {
+                            id: "reminders",
+                            name: "Reminders"
+                        },
+                        {
                             id: "timers",
                             name: "Timers"
                         },
@@ -6942,7 +7569,8 @@ in
                     ]
                     Chip {
                         required property var modelData
-                        label: modelData.name
+                        // reminders: how many are due today
+                        label: modelData.name + (modelData.id === "reminders" && Planner.remindersToday > 0 ? " " + Planner.remindersToday : "")
                         selected: card.tab === modelData.id
                         onClicked: card.tab = modelData.id
                     }
@@ -6950,353 +7578,850 @@ in
             }
 
             // ════ Calendar ════
-            Column {
+            // Two pages side by side, and the card swipes between them: the calendar, and
+            // "Repeat" (how often a new event happens; the Repeat button under the form).
+            Item {
+                id: calPages
                 visible: card.tab === "calendar"
                 width: parent.width
-                spacing: 6
+                // the page on show's height; while swiping, the taller of the two, so neither
+                // gets cut off on the way
+                height: mainSlide.running || repeatSlide.running ? Math.max(repeatPage.height, calMain.height) : card.page === "repeat" ? repeatPage.height : calMain.height
+                clip: true
 
-                // ‹  October 2026  ›
-                Item {
-                    width: parent.width
-                    height: 26
-                    IconButton {
-                        anchors.left: parent.left
-                        anchors.verticalCenter: parent.verticalCenter
-                        icon: "chevron_left"
-                        onClicked: card.stepMonth(-1)
+                // the slide: the same soft curve the popups open on
+                readonly property var curve: [0.3, 0.6, 0.35, 1, 1, 1]
+
+                // ── what the Repeat page has picked (used by the + button) ──
+                RepeatState {
+                    id: repeatPick
+                    startKey: card.selected
+                }
+
+                // ════ page 1: the calendar ════
+                Column {
+                    id: calMain
+                    x: card.page === "repeat" ? -calPages.width - 24 : 0
+                    Behavior on x {
+                        NumberAnimation {
+                            id: mainSlide
+                            duration: 320
+                            easing.type: Easing.BezierSpline
+                            easing.bezierCurve: calPages.curve
+                        }
                     }
-                    Text {
-                        anchors.centerIn: parent
-                        text: Qt.formatDate(new Date(card.viewYear, card.viewMonth, 1), "MMMM yyyy")
-                        color: monthMouse.containsMouse ? Theme.text : Theme.accent
-                        font.family: Theme.font
-                        font.pixelSize: Theme.textSize * 1.1
-                        font.weight: 700
-                        font.letterSpacing: Theme.letterSpacing
-                        MouseArea {
-                            id: monthMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {         // back to today
-                                card.viewYear = root.now.getFullYear();
-                                card.viewMonth = root.now.getMonth();
-                                card.selected = Planner.key(root.now);
+                    width: parent.width
+                    spacing: 6
+
+                    // ‹  October 2026  ›
+                    Item {
+                        width: parent.width
+                        height: 26
+                        IconButton {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            icon: "chevron_left"
+                            onClicked: card.stepMonth(-1)
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            text: Qt.formatDate(new Date(card.viewYear, card.viewMonth, 1), "MMMM yyyy")
+                            color: monthMouse.containsMouse ? Theme.text : Theme.accent
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 1.1
+                            font.weight: 700
+                            font.letterSpacing: Theme.letterSpacing
+                            MouseArea {
+                                id: monthMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {         // back to today
+                                    card.viewYear = root.now.getFullYear();
+                                    card.viewMonth = root.now.getMonth();
+                                    card.selected = Planner.key(root.now);
+                                }
+                            }
+                        }
+                        IconButton {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            icon: "chevron_right"
+                            onClicked: card.stepMonth(1)
+                        }
+                    }
+
+                    // Sun Mon Tue ...
+                    DayOfWeekRow {
+                        width: grid.width
+                        delegate: Text {
+                            required property string shortName
+                            text: shortName
+                            horizontalAlignment: Text.AlignHCenter
+                            color: Theme.text
+                            opacity: 0.6
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.85
+                            font.weight: 600
+                        }
+                    }
+
+                    MonthGrid {
+                        id: grid
+                        width: parent.width
+                        height: 186
+                        month: card.viewMonth          // 0 = January
+                        year: card.viewYear
+
+                        delegate: Item {
+                            id: day
+                            required property var model
+                            readonly property string dayKey: Planner.key(model.date)
+                            // compared against the clock, so it moves to the new day at midnight
+                            readonly property bool isToday: dayKey === Planner.key(root.now)
+                            readonly property bool isPicked: dayKey === card.selected
+                            readonly property bool inMonth: model.month === grid.month
+
+                            implicitWidth: 34
+                            implicitHeight: 28
+
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 28
+                                height: 28
+                                radius: 14
+                                color: day.isToday ? Theme.accent : dayMouse.containsMouse ? Theme.pill : "transparent"
+                                border.width: day.isPicked && !day.isToday ? 1.5 : 0
+                                border.color: Theme.accent
+                                Behavior on color {
+                                    ColorAnimation {
+                                        duration: 120
+                                    }
+                                }
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                anchors.verticalCenterOffset: -1
+                                text: day.model.day
+                                color: day.isToday ? Theme.bg : Theme.text
+                                opacity: day.inMonth ? 1 : 0.3      // days of the months either side
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize
+                                font.weight: day.isToday || day.isPicked ? 700 : 500
+                            }
+                            // has events
+                            Rectangle {
+                                visible: Planner.eventsOn(day.dayKey).length > 0
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.bottom: parent.bottom
+                                anchors.bottomMargin: 3
+                                width: 4
+                                height: 4
+                                radius: 2
+                                color: day.isToday ? Theme.bg : Theme.accent
+                                opacity: day.inMonth ? 1 : 0.4
+                            }
+                            MouseArea {
+                                id: dayMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    card.selected = day.dayKey;
+                                    if (!day.inMonth)
+                                        card.stepMonth(day.model.date < new Date(card.viewYear, card.viewMonth, 1) ? -1 : 1);
+                                }
                             }
                         }
                     }
-                    IconButton {
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        icon: "chevron_right"
-                        onClicked: card.stepMonth(1)
-                    }
-                }
 
-                // Sun Mon Tue ...
-                DayOfWeekRow {
-                    width: grid.width
-                    delegate: Text {
-                        required property string shortName
-                        text: shortName
-                        horizontalAlignment: Text.AlignHCenter
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        color: Theme.pill
+                    }
+
+                    // the picked day's events
+                    Text {
+                        text: card.selected === Planner.key(root.now) ? "Today" : Qt.formatDate(Planner.dateOf(card.selected), "dddd, MMMM d")
                         color: Theme.text
-                        opacity: 0.6
                         font.family: Theme.font
-                        font.pixelSize: Theme.textSize * 0.85
-                        font.weight: 600
+                        font.pixelSize: Theme.textSize
+                        font.weight: 700
+                        font.letterSpacing: Theme.letterSpacing
                     }
-                }
+                    ListView {
+                        id: eventList
+                        width: parent.width
+                        height: Math.min(contentHeight, 150)
+                        visible: count > 0
+                        clip: true
+                        spacing: 2
+                        boundsBehavior: Flickable.StopAtBounds
+                        model: Planner.eventsOn(card.selected)
+                        ScrollBar.vertical: ThinScrollBar {}
 
-                MonthGrid {
-                    id: grid
-                    width: parent.width
-                    height: 186
-                    month: card.viewMonth          // 0 = January
-                    year: card.viewYear
-
-                    delegate: Item {
-                        id: day
-                        required property var model
-                        readonly property string dayKey: Planner.key(model.date)
-                        // compared against the clock, so it moves to the new day at midnight
-                        readonly property bool isToday: dayKey === Planner.key(root.now)
-                        readonly property bool isPicked: dayKey === card.selected
-                        readonly property bool inMonth: model.month === grid.month
-
-                        implicitWidth: 34
-                        implicitHeight: 28
-
-                        Rectangle {
-                            anchors.centerIn: parent
-                            width: 28
-                            height: 28
-                            radius: 14
-                            color: day.isToday ? Theme.accent : dayMouse.containsMouse ? Theme.pill : "transparent"
-                            border.width: day.isPicked && !day.isToday ? 1.5 : 0
-                            border.color: Theme.accent
+                        delegate: Rectangle {
+                            id: ev
+                            required property var modelData
+                            readonly property bool hoveredRow: evMouse.containsMouse
+                            width: ListView.view.width
+                            height: 30
+                            radius: Theme.radius
+                            color: evMouse.containsMouse ? Theme.pill : "transparent"
                             Behavior on color {
                                 ColorAnimation {
                                     duration: 120
                                 }
                             }
-                        }
-                        Text {
-                            anchors.centerIn: parent
-                            anchors.verticalCenterOffset: -1
-                            text: day.model.day
-                            color: day.isToday ? Theme.bg : Theme.text
-                            opacity: day.inMonth ? 1 : 0.3      // days of the months either side
-                            font.family: Theme.font
-                            font.pixelSize: Theme.textSize
-                            font.weight: day.isToday || day.isPicked ? 700 : 500
-                        }
-                        // has events
-                        Rectangle {
-                            visible: (Planner.eventDays[day.dayKey] || 0) > 0
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 3
-                            width: 4
-                            height: 4
-                            radius: 2
-                            color: day.isToday ? Theme.bg : Theme.accent
-                            opacity: day.inMonth ? 1 : 0.4
-                        }
-                        MouseArea {
-                            id: dayMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                card.selected = day.dayKey;
-                                if (!day.inMonth)
-                                    card.stepMonth(day.model.date < new Date(card.viewYear, card.viewMonth, 1) ? -1 : 1);
+                            // hover the row for its remove button (the button is inside, so
+                            // pointing at it keeps the row hovered)
+                            MouseArea {
+                                id: evMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+
+                            Text {
+                                id: evTime
+                                anchors.left: parent.left
+                                anchors.leftMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 72
+                                text: Planner.fmtTime(ev.modelData.time)
+                                color: ev.modelData.time === "" ? Theme.text : Theme.accent
+                                opacity: ev.modelData.time === "" ? 0.6 : 1
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.9
+                                font.weight: 700
+                            }
+                            Row {
+                                anchors.left: evTime.right
+                                anchors.right: evButtons.left
+                                anchors.rightMargin: 4
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 4
+                                Text {
+                                    width: Math.min(implicitWidth, parent.width - (evRepeat.visible ? evRepeat.width + 4 : 0))
+                                    text: ev.modelData.title
+                                    elide: Text.ElideRight
+                                    color: Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize
+                                    font.weight: 600
+                                }
+                                // repeats: a little loop (hover the row for how)
+                                Text {
+                                    id: evRepeat
+                                    visible: !!ev.modelData.repeat
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "repeat"
+                                    color: Theme.accent
+                                    opacity: 0.8
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize * 0.85
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                            }
+                            Row {
+                                id: evButtons
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: evMouse.containsMouse
+                                width: visible ? implicitWidth : 0     // the title gets the room until then
+                                // a repeating one: take just this day out
+                                IconButton {
+                                    visible: !!ev.modelData.repeat
+                                    icon: "event_busy"
+                                    onClicked: Planner.skipDay(ev.modelData.id, card.selected)
+                                }
+                                // delete it (a repeating one: every day of it)
+                                IconButton {
+                                    icon: ev.modelData.repeat ? "delete_sweep" : "close"
+                                    iconColor: Theme.red
+                                    onClicked: Planner.removeEvent(ev.modelData.id)
+                                }
+                            }
                             }
                         }
                     }
-                }
+                    // how the event you're pointing at repeats, and what its buttons do
+                    Text {
+                        readonly property var hovered: {
+                            for (let i = 0; i < eventList.count; i++) {
+                                const it = eventList.itemAtIndex(i);
+                                if (it && it.hoveredRow)
+                                    return it.modelData;
+                            }
+                            return null;
+                        }
+                        visible: !!hovered && !!hovered.repeat
+                        width: parent.width
+                        leftPadding: 8
+                        wrapMode: Text.Wrap
+                        text: hovered && hovered.repeat ? Planner.repeatText(hovered) + ". Buttons: skip just this day, or delete every day of it." : ""
+                        textFormat: Text.PlainText
+                        color: Theme.text
+                        opacity: 0.6
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.8
+                    }
+                    Text {
+                        visible: eventList.count === 0
+                        text: "No events"
+                        color: Theme.text
+                        opacity: 0.5
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.9
+                    }
 
-                Rectangle {
-                    width: parent.width
-                    height: 1
-                    color: Theme.pill
-                }
+                    // add one: title, time (optional), AM / PM, +
+                    Row {
+                        id: addRow
+                        width: parent.width
+                        spacing: 6
 
-                // the picked day's events
-                Text {
-                    text: card.selected === Planner.key(root.now) ? "Today" : Qt.formatDate(Planner.dateOf(card.selected), "dddd, MMMM d")
-                    color: Theme.text
-                    font.family: Theme.font
-                    font.pixelSize: Theme.textSize
-                    font.weight: 700
-                    font.letterSpacing: Theme.letterSpacing
-                }
-                ListView {
-                    id: eventList
-                    width: parent.width
-                    height: Math.min(contentHeight, 150)
-                    visible: count > 0
-                    clip: true
-                    spacing: 2
-                    boundsBehavior: Flickable.StopAtBounds
-                    model: Planner.eventsOn(card.selected)
-                    ScrollBar.vertical: ThinScrollBar {}
-
-                    delegate: Rectangle {
-                        id: ev
-                        required property var modelData
-                        width: ListView.view.width
-                        height: 30
-                        radius: Theme.radius
-                        color: evMouse.containsMouse ? Theme.pill : "transparent"
-                        Behavior on color {
-                            ColorAnimation {
-                                duration: 120
+                        // The AM / PM switch next to the time. It's used when the time you type
+                        // could be either ("9:55", "9"); a time that says which itself ("9:55pm")
+                        // or a 24-hour one ("21:55", "0:30") doesn't need it, and it dims.
+                        // Starts on whichever half of the day it is now, each time the card opens.
+                        property bool pm: false
+                        Connections {
+                            target: card
+                            function onOpenChanged() {
+                                if (card.open)
+                                    addRow.pm = root.now.getHours() >= 12;
                             }
                         }
-                        // hover the row for its remove button (the button is inside, so
-                        // pointing at it keeps the row hovered)
-                        MouseArea {
-                            id: evMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-
-                        Text {
-                            id: evTime
-                            anchors.left: parent.left
-                            anchors.leftMargin: 8
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 72
-                            text: Planner.fmtTime(ev.modelData.time)
-                            color: ev.modelData.time === "" ? Theme.text : Theme.accent
-                            opacity: ev.modelData.time === "" ? 0.6 : 1
-                            font.family: Theme.font
-                            font.pixelSize: Theme.textSize * 0.9
-                            font.weight: 700
+                        readonly property string typed: evWhen.text.trim()
+                        readonly property bool saysWhich: /[ap]\.?m?\.?$/i.test(typed.replace(/\s/g, ""))
+                        readonly property bool needsHalf: {
+                            const m = typed.match(/^(\d{1,2})/);
+                            return !saysWhich && !!m && Number(m[1]) >= 1 && Number(m[1]) <= 12;
                         }
-                        Text {
-                            anchors.left: evTime.right
-                            anchors.right: evRemove.left
-                            anchors.rightMargin: 4
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: ev.modelData.title
-                            elide: Text.ElideRight
+                        // what's typed, with the switch's AM / PM added when it's needed
+                        readonly property string timeText: needsHalf ? typed + (pm ? "pm" : "am") : typed
+
+                        function submit() {
+                            const title = evTitle.text.trim();
+                            const time = Planner.parseTime(timeText);
+                            if (title === "" || time === null) {
+                                if (title === "")
+                                    evTitle.forceActiveFocus();
+                                return;
+                            }
+                            Planner.addEvent(card.selected, time, title, repeatPick.rule);
+                            evTitle.text = "";
+                            evWhen.text = "";
+                            repeatPick.reset();
+                        }
+
+                        TextField {
+                            id: evTitle
+                            width: parent.width - evWhen.width - halfSwitch.width - evAdd.width - parent.spacing * 3
+                            placeholderText: "New event"
+                            placeholderTextColor: Theme.pillIcon
                             color: Theme.text
                             font.family: Theme.font
                             font.pixelSize: Theme.textSize
-                            font.weight: 600
+                            leftPadding: 12
+                            rightPadding: 12
+                            onAccepted: parent.submit()
+                            background: Rectangle {
+                                radius: height / 2
+                                color: Theme.bg
+                                border.width: 1
+                                border.color: evTitle.activeFocus ? Theme.accent : Theme.pillIcon
+                            }
+                        }
+                        TextField {
+                            id: evWhen
+                            width: 64
+                            // red while what's typed isn't a time
+                            readonly property bool bad: Planner.parseTime(addRow.timeText) === null
+                            placeholderText: "9:30"
+                            placeholderTextColor: Theme.pillIcon
+                            color: bad ? Theme.red : Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize
+                            leftPadding: 10
+                            rightPadding: 10
+                            onAccepted: parent.submit()
+                            background: Rectangle {
+                                radius: height / 2
+                                color: Theme.bg
+                                border.width: 1
+                                border.color: evWhen.bad ? Theme.red : evWhen.activeFocus ? Theme.accent : Theme.pillIcon
+                            }
+                        }
+                        // AM / PM: click to switch
+                        Rectangle {
+                            id: halfSwitch
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 44
+                            height: evWhen.height
+                            radius: height / 2
+                            color: halfMouse.containsMouse && addRow.needsHalf ? Theme.pill : Theme.bg
+                            border.width: 1
+                            border.color: addRow.needsHalf ? Theme.accent : Theme.pillIcon
+                            opacity: addRow.needsHalf || addRow.typed === "" ? 1 : 0.4
+                            scale: halfMouse.pressed ? 0.9 : 1
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 120
+                                }
+                            }
+                            Behavior on opacity {
+                                NumberAnimation {
+                                    duration: 120
+                                }
+                            }
+                            Behavior on scale {
+                                NumberAnimation {
+                                    duration: 120
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                text: addRow.pm ? "PM" : "AM"
+                                color: addRow.needsHalf ? Theme.accent : Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.9
+                                font.weight: 700
+                            }
+                            MouseArea {
+                                id: halfMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: addRow.pm = !addRow.pm
+                            }
                         }
                         IconButton {
-                            id: evRemove
-                            anchors.right: parent.right
+                            id: evAdd
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: evMouse.containsMouse
-                            icon: "close"
-                            iconColor: Theme.red
-                            onClicked: Planner.removeEvent(ev.modelData.id)
+                            icon: "add"
+                            iconColor: evTitle.text.trim() !== "" && !evWhen.bad ? Theme.accent : Theme.text
+                            onClicked: parent.submit()
                         }
-                        }
-                    }
-                }
-                Text {
-                    visible: eventList.count === 0
-                    text: "No events"
-                    color: Theme.text
-                    opacity: 0.5
-                    font.family: Theme.font
-                    font.pixelSize: Theme.textSize * 0.9
-                }
-
-                // add one: title, time (optional), AM / PM, +
-                Row {
-                    id: addRow
-                    width: parent.width
-                    spacing: 6
-
-                    // The AM / PM switch next to the time. It's used when the time you type
-                    // could be either ("9:55", "9"); a time that says which itself ("9:55pm")
-                    // or a 24-hour one ("21:55", "0:30") doesn't need it, and it dims.
-                    // Starts on whichever half of the day it is now, each time the card opens.
-                    property bool pm: false
-                    Connections {
-                        target: card
-                        function onOpenChanged() {
-                            if (card.open)
-                                addRow.pm = root.now.getHours() >= 12;
-                        }
-                    }
-                    readonly property string typed: evWhen.text.trim()
-                    readonly property bool saysWhich: /[ap]\.?m?\.?$/i.test(typed.replace(/\s/g, ""))
-                    readonly property bool needsHalf: {
-                        const m = typed.match(/^(\d{1,2})/);
-                        return !saysWhich && !!m && Number(m[1]) >= 1 && Number(m[1]) <= 12;
-                    }
-                    // what's typed, with the switch's AM / PM added when it's needed
-                    readonly property string timeText: needsHalf ? typed + (pm ? "pm" : "am") : typed
-
-                    function submit() {
-                        const title = evTitle.text.trim();
-                        const time = Planner.parseTime(timeText);
-                        if (title === "" || time === null) {
-                            if (title === "")
-                                evTitle.forceActiveFocus();
-                            return;
-                        }
-                        Planner.addEvent(card.selected, time, title);
-                        evTitle.text = "";
-                        evWhen.text = "";
                     }
 
-                    TextField {
-                        id: evTitle
-                        width: parent.width - evWhen.width - halfSwitch.width - evAdd.width - parent.spacing * 3
-                        placeholderText: "New event"
-                        placeholderTextColor: Theme.pillIcon
-                        color: Theme.text
-                        font.family: Theme.font
-                        font.pixelSize: Theme.textSize
-                        leftPadding: 12
-                        rightPadding: 12
-                        onAccepted: parent.submit()
-                        background: Rectangle {
-                            radius: height / 2
-                            color: Theme.bg
-                            border.width: 1
-                            border.color: evTitle.activeFocus ? Theme.accent : Theme.pillIcon
-                        }
-                    }
-                    TextField {
-                        id: evWhen
-                        width: 64
-                        // red while what's typed isn't a time
-                        readonly property bool bad: Planner.parseTime(addRow.timeText) === null
-                        placeholderText: "9:30"
-                        placeholderTextColor: Theme.pillIcon
-                        color: bad ? Theme.red : Theme.text
-                        font.family: Theme.font
-                        font.pixelSize: Theme.textSize
-                        leftPadding: 10
-                        rightPadding: 10
-                        onAccepted: parent.submit()
-                        background: Rectangle {
-                            radius: height / 2
-                            color: Theme.bg
-                            border.width: 1
-                            border.color: evWhen.bad ? Theme.red : evWhen.activeFocus ? Theme.accent : Theme.pillIcon
-                        }
-                    }
-                    // AM / PM: click to switch
+
+                    // how often it happens: opens the Repeat page
                     Rectangle {
-                        id: halfSwitch
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 44
-                        height: evWhen.height
+                        width: parent.width
+                        height: 30
                         radius: height / 2
-                        color: halfMouse.containsMouse && addRow.needsHalf ? Theme.pill : Theme.bg
+                        color: repeatBtnMouse.containsMouse ? Theme.pill : "transparent"
                         border.width: 1
-                        border.color: addRow.needsHalf ? Theme.accent : Theme.pillIcon
-                        opacity: addRow.needsHalf || addRow.typed === "" ? 1 : 0.4
-                        scale: halfMouse.pressed ? 0.9 : 1
+                        border.color: repeatPick.repeat !== "" ? Theme.accent : Theme.pill
                         Behavior on color {
                             ColorAnimation {
                                 duration: 120
                             }
                         }
-                        Behavior on opacity {
-                            NumberAnimation {
-                                duration: 120
-                            }
-                        }
-                        Behavior on scale {
-                            NumberAnimation {
-                                duration: 120
-                                easing.type: Easing.OutCubic
-                            }
+                        Text {
+                            id: repeatBtnIcon
+                            anchors.left: parent.left
+                            anchors.leftMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "repeat"
+                            color: repeatPick.repeat !== "" ? Theme.accent : Theme.text
+                            font.family: Theme.iconFont
+                            font.pixelSize: Theme.iconSize
+                            font.variableAxes: Theme.iconAxes
                         }
                         Text {
-                            anchors.centerIn: parent
-                            text: addRow.pm ? "PM" : "AM"
-                            color: addRow.needsHalf ? Theme.accent : Theme.text
+                            anchors.left: repeatBtnIcon.right
+                            anchors.leftMargin: 8
+                            anchors.right: repeatBtnArrow.left
+                            anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            elide: Text.ElideRight
+                            text: repeatPick.repeat === "" ? "Repeat: never" : Planner.repeatText(Planner.previewRepeat(card.selected, repeatPick.rule))
+                            color: Theme.text
+                            opacity: repeatPick.repeat === "" ? 0.7 : 1
                             font.family: Theme.font
-                            font.pixelSize: Theme.textSize * 0.9
-                            font.weight: 700
+                            font.pixelSize: Theme.textSize * 0.85
+                            font.weight: 600
+                        }
+                        Text {
+                            id: repeatBtnArrow
+                            anchors.right: parent.right
+                            anchors.rightMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "chevron_right"
+                            color: Theme.text
+                            font.family: Theme.iconFont
+                            font.pixelSize: Theme.iconSize
+                            font.variableAxes: Theme.iconAxes
                         }
                         MouseArea {
-                            id: halfMouse
+                            id: repeatBtnMouse
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: addRow.pm = !addRow.pm
+                            onClicked: card.page = "repeat"
                         }
                     }
-                    IconButton {
-                        id: evAdd
-                        anchors.verticalCenter: parent.verticalCenter
-                        icon: "add"
-                        iconColor: evTitle.text.trim() !== "" && !evWhen.bad ? Theme.accent : Theme.text
-                        onClicked: parent.submit()
+                }
+
+                // ════ page 2: Repeat (RepeatPicker.qml) ════
+                RepeatPicker {
+                    id: repeatPage
+                    x: card.page === "repeat" ? 0 : calPages.width + 24
+                    Behavior on x {
+                        NumberAnimation {
+                            id: repeatSlide
+                            duration: 320
+                            easing.type: Easing.BezierSpline
+                            easing.bezierCurve: calPages.curve
+                        }
                     }
+                    width: parent.width
+                    startKey: card.selected
+                    pick: repeatPick
+                    onDone: card.page = "main"
+                }
+            }
+
+            // ════ Reminders ════
+            // Things to do that aren't part of your schedule (take the bins out, water the
+            // plants), each at a time, repeating however you like. They remind you with a
+            // notification and the bell; tick one off and it won't remind you again today.
+            // Not on the calendar or in the bar. Two pages, like the calendar: the list
+            // and the form, and Repeat (RepeatPicker.qml) swiping in from the right.
+            Item {
+                id: remPages
+                visible: card.tab === "reminders"
+                width: parent.width
+                height: remMainSlide.running || remRepeatSlide.running ? Math.max(remRepeat.height, remMain.height) : card.page === "repeat" ? remRepeat.height : remMain.height
+                clip: true
+
+                RepeatState {
+                    id: remPick
+                    startKey: Planner.todayKey
+                }
+
+                Column {
+                    id: remMain
+                    x: card.page === "repeat" ? -remPages.width - 24 : 0
+                    Behavior on x {
+                        NumberAnimation {
+                            id: remMainSlide
+                            duration: 320
+                            easing.type: Easing.BezierSpline
+                            easing.bezierCurve: calPages.curve
+                        }
+                    }
+                    width: parent.width
+                    spacing: 6
+
+                    ListView {
+                        id: remList
+                        width: parent.width
+                        height: Math.min(contentHeight, 240)
+                        visible: count > 0
+                        clip: true
+                        spacing: 2
+                        boundsBehavior: Flickable.StopAtBounds
+                        model: Planner.reminderList
+                        ScrollBar.vertical: ThinScrollBar {}
+
+                        delegate: Rectangle {
+                            id: rem
+                            required property var modelData
+                            readonly property var e: modelData.e
+                            readonly property bool dueToday: modelData.next === Planner.todayKey
+                            readonly property bool doneToday: e.done === Planner.todayKey
+                            width: ListView.view.width
+                            height: 42
+                            radius: Theme.radius
+                            color: remMouse.containsMouse ? Theme.pill : "transparent"
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 120
+                                }
+                            }
+                            MouseArea {
+                                id: remMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+
+                                // tick it off for today (only when it's on today)
+                                Rectangle {
+                                    id: remCheck
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 20
+                                    height: 20
+                                    radius: 10
+                                    color: rem.doneToday ? Theme.accent : "transparent"
+                                    border.width: 2
+                                    border.color: rem.doneToday || rem.dueToday ? Theme.accent : Theme.pillIcon
+                                    opacity: rem.dueToday || rem.doneToday ? 1 : 0.4
+                                    Behavior on color {
+                                        ColorAnimation {
+                                            duration: 120
+                                        }
+                                    }
+                                    Text {
+                                        anchors.centerIn: parent
+                                        visible: rem.doneToday
+                                        text: "check"
+                                        color: Theme.bg
+                                        font.family: Theme.iconFont
+                                        font.pixelSize: 14
+                                        font.variableAxes: Theme.iconAxes
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        anchors.margins: -4
+                                        enabled: rem.dueToday || rem.doneToday
+                                        cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                        onClicked: Planner.toggleDone(rem.e.id)
+                                    }
+                                }
+                                Column {
+                                    anchors.left: remCheck.right
+                                    anchors.leftMargin: 10
+                                    anchors.right: remDelete.left
+                                    anchors.rightMargin: 4
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 1
+                                    Text {
+                                        width: parent.width
+                                        text: rem.e.title
+                                        elide: Text.ElideRight
+                                        color: Theme.text
+                                        opacity: rem.doneToday ? 0.5 : 1
+                                        font.strikeout: rem.doneToday
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize
+                                        font.weight: 600
+                                    }
+                                    // when it's next, and how it repeats
+                                    Text {
+                                        width: parent.width
+                                        elide: Text.ElideRight
+                                        text: (rem.doneToday ? "Done today" : Planner.dayText(rem.modelData.next) + " " + Planner.fmtTime(rem.e.time)) + (rem.e.repeat ? "  ·  " + Planner.repeatText(rem.e) : "")
+                                        color: rem.dueToday && !rem.doneToday ? Theme.accent : Theme.text
+                                        opacity: rem.dueToday && !rem.doneToday ? 1 : 0.6
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.8
+                                    }
+                                }
+                                IconButton {
+                                    id: remDelete
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: remMouse.containsMouse
+                                    width: visible ? implicitWidth : 0
+                                    icon: "close"
+                                    iconColor: Theme.red
+                                    onClicked: Planner.removeReminder(rem.e.id)
+                                }
+                            }
+                        }
+                    }
+                    Text {
+                        visible: remList.count === 0
+                        width: parent.width
+                        wrapMode: Text.Wrap
+                        text: "No reminders. Add one below: what, when, and how often."
+                        color: Theme.text
+                        opacity: 0.5
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.9
+                    }
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        color: Theme.pill
+                    }
+
+                    // add one: what, time, AM / PM, +   (it starts today)
+                    Row {
+                        id: remRow
+                        width: parent.width
+                        spacing: 6
+
+                        // AM / PM, like the event form's
+                        property bool pm: root.now.getHours() >= 12
+                        readonly property string typed: remWhen.text.trim()
+                        readonly property bool saysWhich: /[ap]\.?m?\.?$/i.test(typed.replace(/\s/g, ""))
+                        readonly property bool needsHalf: {
+                            const m = typed.match(/^(\d{1,2})/);
+                            return !saysWhich && !!m && Number(m[1]) >= 1 && Number(m[1]) <= 12;
+                        }
+                        readonly property string timeText: needsHalf ? typed + (pm ? "pm" : "am") : typed
+                        // a reminder needs a time
+                        readonly property string time: typed === "" ? "" : (Planner.parseTime(timeText) ?? "")
+                        readonly property bool bad: typed !== "" && Planner.parseTime(timeText) === null
+
+                        function submit() {
+                            const title = remTitle.text.trim();
+                            if (title === "") {
+                                remTitle.forceActiveFocus();
+                                return;
+                            }
+                            if (time === "") {
+                                remWhen.forceActiveFocus();
+                                return;
+                            }
+                            Planner.addReminder(time, title, remPick.rule);
+                            remTitle.text = "";
+                            remWhen.text = "";
+                            remPick.reset();
+                        }
+
+                        TextField {
+                            id: remTitle
+                            width: parent.width - remWhen.width - remHalf.width - remAdd.width - parent.spacing * 3
+                            placeholderText: "New reminder"
+                            placeholderTextColor: Theme.pillIcon
+                            color: Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize
+                            leftPadding: 12
+                            rightPadding: 12
+                            onAccepted: parent.submit()
+                            background: Rectangle {
+                                radius: height / 2
+                                color: Theme.bg
+                                border.width: 1
+                                border.color: remTitle.activeFocus ? Theme.accent : Theme.pillIcon
+                            }
+                        }
+                        TextField {
+                            id: remWhen
+                            width: 64
+                            placeholderText: "9:00"
+                            placeholderTextColor: Theme.pillIcon
+                            color: remRow.bad ? Theme.red : Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize
+                            leftPadding: 10
+                            rightPadding: 10
+                            onAccepted: parent.submit()
+                            background: Rectangle {
+                                radius: height / 2
+                                color: Theme.bg
+                                border.width: 1
+                                border.color: remRow.bad ? Theme.red : remWhen.activeFocus ? Theme.accent : Theme.pillIcon
+                            }
+                        }
+                        Rectangle {
+                            id: remHalf
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 44
+                            height: remWhen.height
+                            radius: height / 2
+                            color: remHalfMouse.containsMouse && remRow.needsHalf ? Theme.pill : Theme.bg
+                            border.width: 1
+                            border.color: remRow.needsHalf ? Theme.accent : Theme.pillIcon
+                            opacity: remRow.needsHalf || remRow.typed === "" ? 1 : 0.4
+                            Text {
+                                anchors.centerIn: parent
+                                text: remRow.pm ? "PM" : "AM"
+                                color: remRow.needsHalf ? Theme.accent : Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.9
+                                font.weight: 700
+                            }
+                            MouseArea {
+                                id: remHalfMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: remRow.pm = !remRow.pm
+                            }
+                        }
+                        IconButton {
+                            id: remAdd
+                            anchors.verticalCenter: parent.verticalCenter
+                            icon: "add"
+                            iconColor: remTitle.text.trim() !== "" && remRow.time !== "" ? Theme.accent : Theme.text
+                            onClicked: parent.submit()
+                        }
+                    }
+
+                    // how often: opens the Repeat page
+                    Rectangle {
+                        width: parent.width
+                        height: 30
+                        radius: height / 2
+                        color: remRepeatMouse.containsMouse ? Theme.pill : "transparent"
+                        border.width: 1
+                        border.color: remPick.repeat !== "" ? Theme.accent : Theme.pill
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: 120
+                            }
+                        }
+                        Text {
+                            id: remRepeatIcon
+                            anchors.left: parent.left
+                            anchors.leftMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "repeat"
+                            color: remPick.repeat !== "" ? Theme.accent : Theme.text
+                            font.family: Theme.iconFont
+                            font.pixelSize: Theme.iconSize
+                            font.variableAxes: Theme.iconAxes
+                        }
+                        Text {
+                            anchors.left: remRepeatIcon.right
+                            anchors.leftMargin: 8
+                            anchors.right: remRepeatArrow.left
+                            anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            elide: Text.ElideRight
+                            text: remPick.repeat === "" ? "Repeat: just today" : Planner.repeatText(Planner.previewRepeat(Planner.todayKey, remPick.rule))
+                            color: Theme.text
+                            opacity: remPick.repeat === "" ? 0.7 : 1
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.85
+                            font.weight: 600
+                        }
+                        Text {
+                            id: remRepeatArrow
+                            anchors.right: parent.right
+                            anchors.rightMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "chevron_right"
+                            color: Theme.text
+                            font.family: Theme.iconFont
+                            font.pixelSize: Theme.iconSize
+                            font.variableAxes: Theme.iconAxes
+                        }
+                        MouseArea {
+                            id: remRepeatMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: card.page = "repeat"
+                        }
+                    }
+                }
+
+                RepeatPicker {
+                    id: remRepeat
+                    x: card.page === "repeat" ? 0 : remPages.width + 24
+                    Behavior on x {
+                        NumberAnimation {
+                            id: remRepeatSlide
+                            duration: 320
+                            easing.type: Easing.BezierSpline
+                            easing.bezierCurve: calPages.curve
+                        }
+                    }
+                    width: parent.width
+                    heading: "Repeat reminder"
+                    startKey: Planner.todayKey
+                    pick: remPick
+                    onDone: card.page = "main"
                 }
             }
 
@@ -9194,6 +10319,7 @@ in
     //   system-ready            logging in (fade.qml)
     //   system-shutdown         log out / restart / power off (shell.qml)
     //   alarm-clock-elapsed     a timer running out, an event's reminder (Planner.qml)
+    //   bell                    a reminder (Planner.qml)
     // The lock screen plays desktop-screen-lock itself (configuration.nix).
     Singleton {
         id: sounds
