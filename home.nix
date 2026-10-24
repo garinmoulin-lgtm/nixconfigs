@@ -6892,6 +6892,36 @@ in
             events = events.concat([e]);
             save();
         }
+        // ── every event, for the "All events" list ──
+        // the last day an event happened, up to today ("" if it hasn't yet)
+        function lastDay(e) {
+            const d = new Date(now);
+            const first = dateOf(e.date);
+            for (let i = 0; i < 400 && d >= first; i++) {
+                const k = key(d);
+                if (occursOn(e, k))
+                    return k;
+                d.setDate(d.getDate() - 1);
+            }
+            return e.date;
+        }
+        // [{ e, next, last, group }]: what's coming, by its next day and time, then
+        // what's over, most recent first
+        readonly property var allEvents: {
+            const rows = events.map(e => {
+                const next = nextDay(e);
+                return {
+                    "e": e,
+                    "next": next,
+                    "last": next === "" ? lastDay(e) : "",
+                    "group": next === "" ? "Over" : "Coming up"
+                };
+            });
+            const coming = rows.filter(r => r.next !== "").sort((a, b) => a.next === b.next ? (a.e.time < b.e.time ? -1 : 1) : a.next < b.next ? -1 : 1);
+            const over = rows.filter(r => r.next === "").sort((a, b) => a.last < b.last ? 1 : -1);
+            return coming.concat(over);
+        }
+
         // ── reminders ──
         // a new reminder at time ("14:30"), starting today, with a repeat rule
         function addReminder(time, title, rule) {
@@ -7501,7 +7531,7 @@ in
             spacing: 8
 
             property string tab: "calendar"     // "calendar", "reminders", "timers" or "stopwatch"
-            property string page: "main"        // the calendar tab's page: "main" or "repeat"
+            property string page: "main"        // the tab's page: "main", "repeat", or "all" (every event)
             onTabChanged: page = "main"
             // the month on show, and the day picked (its events are listed)
             property int viewYear: root.now.getFullYear()
@@ -7586,7 +7616,7 @@ in
                 width: parent.width
                 // the page on show's height; while swiping, the taller of the two, so neither
                 // gets cut off on the way
-                height: mainSlide.running || repeatSlide.running ? Math.max(repeatPage.height, calMain.height) : card.page === "repeat" ? repeatPage.height : calMain.height
+                height: mainSlide.running || repeatSlide.running || allSlide.running ? Math.max(repeatPage.height, calMain.height, allPage.height) : card.page === "repeat" ? repeatPage.height : card.page === "all" ? allPage.height : calMain.height
                 clip: true
 
                 // the slide: the same soft curve the popups open on
@@ -7601,7 +7631,7 @@ in
                 // ════ page 1: the calendar ════
                 Column {
                     id: calMain
-                    x: card.page === "repeat" ? -calPages.width - 24 : 0
+                    x: card.page === "main" ? 0 : -calPages.width - 24
                     Behavior on x {
                         NumberAnimation {
                             id: mainSlide
@@ -7741,14 +7771,26 @@ in
                         color: Theme.pill
                     }
 
-                    // the picked day's events
-                    Text {
-                        text: card.selected === Planner.key(root.now) ? "Today" : Qt.formatDate(Planner.dateOf(card.selected), "dddd, MMMM d")
-                        color: Theme.text
-                        font.family: Theme.font
-                        font.pixelSize: Theme.textSize
-                        font.weight: 700
-                        font.letterSpacing: Theme.letterSpacing
+                    // the picked day's events; "All events" swipes to the list of every one
+                    Item {
+                        width: parent.width
+                        height: 24
+                        Text {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: card.selected === Planner.key(root.now) ? "Today" : Qt.formatDate(Planner.dateOf(card.selected), "dddd, MMMM d")
+                            color: Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize
+                            font.weight: 700
+                            font.letterSpacing: Theme.letterSpacing
+                        }
+                        Chip {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            label: "All events" + (Planner.events.length > 0 ? "  " + Planner.events.length : "")
+                            onClicked: card.page = "all"
+                        }
                     }
                     ListView {
                         id: eventList
@@ -8082,6 +8124,181 @@ in
                     startKey: card.selected
                     pick: repeatPick
                     onDone: card.page = "main"
+                }
+                // ════ page 3: every event ════
+                // All of them in one scrolling list: what's coming first (by the next day
+                // each one happens), then the ones that are over (most recent first).
+                // Each says when: its next day and time, how it repeats, or when it was.
+                // Click one to go to its (next) day in the calendar; hover for its x.
+                Column {
+                    id: allPage
+                    x: card.page === "all" ? 0 : calPages.width + 24
+                    Behavior on x {
+                        NumberAnimation {
+                            id: allSlide
+                            duration: 320
+                            easing.type: Easing.BezierSpline
+                            easing.bezierCurve: calPages.curve
+                        }
+                    }
+                    width: parent.width
+                    spacing: 8
+
+                    // ‹  All events                  12
+                    Item {
+                        width: parent.width
+                        height: 26
+                        IconButton {
+                            id: allBack
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            icon: "arrow_back"
+                            onClicked: card.page = "main"
+                        }
+                        Text {
+                            anchors.left: allBack.right
+                            anchors.leftMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "All events"
+                            color: Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 1.1
+                            font.weight: 700
+                            font.letterSpacing: Theme.letterSpacing
+                        }
+                        Text {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: Planner.allEvents.filter(x => x.next !== "").length + " coming · " + Planner.allEvents.filter(x => x.next === "").length + " past"
+                            color: Theme.text
+                            opacity: 0.6
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.85
+                        }
+                    }
+
+                    Text {
+                        visible: Planner.allEvents.length === 0
+                        width: parent.width
+                        wrapMode: Text.Wrap
+                        text: "No events yet. Pick a day in the calendar and add one there."
+                        color: Theme.text
+                        opacity: 0.5
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.9
+                    }
+
+                    ListView {
+                        id: allList
+                        visible: count > 0
+                        width: parent.width
+                        height: Math.min(contentHeight, 380)
+                        clip: true
+                        spacing: 2
+                        boundsBehavior: Flickable.StopAtBounds
+                        model: Planner.allEvents
+                        ScrollBar.vertical: ThinScrollBar {}
+                        // "Coming up" and "Over" headings
+                        section.property: "group"
+                        section.delegate: Text {
+                            required property string section
+                            width: ListView.view.width
+                            topPadding: 6
+                            bottomPadding: 2
+                            leftPadding: 8
+                            text: section
+                            color: Theme.accent
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.85
+                            font.weight: 700
+                        }
+
+                        delegate: Rectangle {
+                            id: ae
+                            required property var modelData
+                            readonly property var e: modelData.e
+                            readonly property bool past: modelData.next === ""
+                            width: ListView.view.width
+                            height: 44
+                            radius: Theme.radius
+                            color: aeMouse.containsMouse ? Theme.pill : "transparent"
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 120
+                                }
+                            }
+                            MouseArea {
+                                id: aeMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                // to its next day (or the day it was) in the calendar
+                                onClicked: {
+                                    const k = ae.modelData.next || ae.modelData.last;
+                                    const d = Planner.dateOf(k);
+                                    card.viewYear = d.getFullYear();
+                                    card.viewMonth = d.getMonth();
+                                    card.selected = k;
+                                    card.page = "main";
+                                }
+
+                                Column {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 8
+                                    anchors.right: aeDelete.left
+                                    anchors.rightMargin: 4
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 1
+                                    Row {
+                                        width: parent.width
+                                        spacing: 4
+                                        Text {
+                                            width: Math.min(implicitWidth, parent.width - (aeRepeat.visible ? aeRepeat.width + 4 : 0))
+                                            text: ae.e.title
+                                            elide: Text.ElideRight
+                                            color: Theme.text
+                                            opacity: ae.past ? 0.55 : 1
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize
+                                            font.weight: 600
+                                        }
+                                        Text {
+                                            id: aeRepeat
+                                            visible: !!ae.e.repeat
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "repeat"
+                                            color: Theme.accent
+                                            opacity: 0.8
+                                            font.family: Theme.iconFont
+                                            font.pixelSize: Theme.iconSize * 0.85
+                                            font.variableAxes: Theme.iconAxes
+                                        }
+                                    }
+                                    // when: next (or last) day and time, then how it repeats
+                                    Text {
+                                        width: parent.width
+                                        elide: Text.ElideRight
+                                        text: (ae.past ? "Was " + Qt.formatDate(Planner.dateOf(ae.modelData.last), "ddd, MMM d, yyyy") : Planner.dayText(ae.modelData.next)) + (ae.e.time !== "" ? "  " + Planner.fmtTime(ae.e.time) : "  all day") + (ae.e.repeat ? "  ·  " + Planner.repeatText(ae.e) : "")
+                                        color: !ae.past && ae.modelData.next === Planner.todayKey ? Theme.accent : Theme.text
+                                        opacity: !ae.past && ae.modelData.next === Planner.todayKey ? 1 : 0.6
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.8
+                                    }
+                                }
+                                IconButton {
+                                    id: aeDelete
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: aeMouse.containsMouse
+                                    width: visible ? implicitWidth : 0
+                                    icon: ae.e.repeat ? "delete_sweep" : "close"
+                                    iconColor: Theme.red
+                                    onClicked: Planner.removeEvent(ae.e.id)
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -9137,6 +9354,13 @@ in
         function togglePin(key) {
             isPinned(key) ? unpin(key) : pin(key);
         }
+        // put an app at place `index` among the pins (pinning it if it wasn't)
+        function placePin(key, index) {
+            const p = pins.filter(k => k !== key);
+            p.splice(Math.max(0, Math.min(p.length, index)), 0, key);
+            pins = p;
+            save();
+        }
         // move a pin left (-1) or right (+1)
         function movePin(key, by) {
             const i = pins.indexOf(key), j = i + by;
@@ -9188,6 +9412,7 @@ in
     //     click         open it; if it's open, go to its window (again: the next one)
     //     middle click  a new window
     //     right click   pin / unpin, new window, close
+    //     drag it       left or right to rearrange (an unpinned one gets pinned there)
     //     point at it   with more than one window open: after a second the dock grows
     //                   a list of them above the icons (click one to go to it, x to
     //                   close it); it shrinks back when the mouse leaves
@@ -9311,6 +9536,35 @@ in
             interval: 350
             onTriggered: if (dock.extra === "list")
                 dock.closeExtras()
+        }
+
+        // ── dragging apps to rearrange them ──
+        // Drag an app left or right and drop it. Your pins take the new order; an open app
+        // that isn't pinned gets pinned where you drop it among the pins; a pin dragged
+        // past the last pin goes to the end of the pins. (The order is saved, DockData.)
+        property int dragFrom: -1        // the app being dragged (its place), -1 = none
+        property int dragTo: -1          // where it would land now
+        property real dragDx: 0          // how far the mouse has moved it
+        readonly property real slotStep: cell + 2      // an icon slot plus the gap
+        readonly property int pinCount: DockData.pins.length
+        function updateDrag(pinned) {
+            const t = Math.round(dragFrom + dragDx / slotStep);
+            // pins move among the pins; others can go in among them, or stay put
+            dragTo = Math.max(0, Math.min(pinned ? pinCount - 1 : Math.max(pinCount, dragFrom), t));
+        }
+        function dropDrag() {
+            const from = dragFrom, to = dragTo;
+            const a = from >= 0 ? DockData.apps[from] : null;
+            endDrag();
+            if (!a || from === to)
+                return;
+            if (a.pinned || to <= pinCount)
+                DockData.placePin(a.key, Math.min(to, a.pinned ? pinCount - 1 : pinCount));
+        }
+        function endDrag() {
+            dragFrom = -1;
+            dragTo = -1;
+            dragDx = 0;
         }
 
         // ── the dock ──
@@ -9664,6 +9918,31 @@ in
                             width: dock.cell + (firstUnpinned ? 11 : 0)
                             height: dock.cell
 
+                            // while one is dragged: it follows the mouse, the ones it passes
+                            // step aside by a slot to make room
+                            readonly property bool dragged: dock.dragFrom === index
+                            readonly property real shift: {
+                                const f = dock.dragFrom, t = dock.dragTo;
+                                if (f < 0 || dragged)
+                                    return 0;
+                                if (f < t && index > f && index <= t)
+                                    return -dock.slotStep;
+                                if (f > t && index >= t && index < f)
+                                    return dock.slotStep;
+                                return 0;
+                            }
+                            z: dragged ? 10 : 0
+                            transform: Translate {
+                                x: app.dragged ? dock.dragDx : app.shift
+                                Behavior on x {
+                                    enabled: !app.dragged && dock.dragFrom >= 0
+                                    NumberAnimation {
+                                        duration: 150
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+                            }
+
                             Rectangle {
                                 visible: app.firstUnpinned
                                 anchors.left: parent.left
@@ -9737,9 +10016,38 @@ in
                                     id: appMouse
                                     anchors.fill: parent
                                     hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
+                                    cursorShape: app.dragged ? Qt.ClosedHandCursor : Qt.PointingHandCursor
                                     acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+                                    preventStealing: true
+
+                                    // drag (left button) to move it along the dock
+                                    property real pressX: 0
+                                    property bool moved: false
+                                    onPressed: mouse => {
+                                        pressX = mapToItem(row, mouse.x, 0).x;
+                                        moved = false;
+                                    }
+                                    onPositionChanged: mouse => {
+                                        if (!(pressedButtons & Qt.LeftButton))
+                                            return;
+                                        const dx = mapToItem(row, mouse.x, 0).x - pressX;
+                                        if (!moved && Math.abs(dx) < 8)
+                                            return;
+                                        if (!moved) {
+                                            moved = true;
+                                            dock.closeExtras();
+                                            dock.dragFrom = app.index;
+                                            dock.dragTo = app.index;
+                                        }
+                                        dock.dragDx = dx;
+                                        dock.updateDrag(app.modelData.pinned);
+                                    }
+                                    onReleased: if (moved)
+                                        dock.dropDrag()
+                                    onCanceled: dock.endDrag()
                                     onClicked: mouse => {
+                                        if (moved)
+                                            return;      // that was a drag, not a click
                                         if (mouse.button === Qt.RightButton) {
                                             dock.openAppMenu(app.modelData);
                                             return;
@@ -9755,7 +10063,7 @@ in
                                 // (pointing at another such app while one's open switches to it)
                                 Timer {
                                     interval: 1000
-                                    running: appMouse.containsMouse && !appMouse.pressed && app.modelData.windows.length > 1 && (dock.extra === "" || (dock.extra === "list" && dock.listApp && dock.listApp.key !== app.modelData.key))
+                                    running: appMouse.containsMouse && !appMouse.pressed && dock.dragFrom < 0 && app.modelData.windows.length > 1 && (dock.extra === "" || (dock.extra === "list" && dock.listApp && dock.listApp.key !== app.modelData.key))
                                     onTriggered: dock.openList(app.modelData, appMouse)
                                 }
                             }
@@ -9764,7 +10072,7 @@ in
                             // else is showing above the icons)
                             Rectangle {
                                 parent: dock.contentItem
-                                visible: appMouse.containsMouse && dock.extra === "" && panel.openness === 1
+                                visible: appMouse.containsMouse && dock.extra === "" && dock.dragFrom < 0 && panel.openness === 1
                                 // worked out again whenever the dock moves or changes size
                                 readonly property real atX: (panel.width, appMouse.containsMouse, slot.mapToItem(dock.contentItem, slot.width / 2, 0).x)
                                 x: Math.max(4, Math.min(dock.width - width - 4, atX - width / 2))
