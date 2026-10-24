@@ -515,18 +515,32 @@ let
   '';
 
   # ── UI sounds ──
-  # System76's COSMIC sound theme, as one flat folder of .oga files (the theme keeps them
-  # in action/, alert/ and notification/ subfolders). Sounds.qml plays them. The build
-  # stops here if a sound the shell uses ever goes missing from the theme.
+  # KDE's Ocean sound theme (Plasma 6's default), as one flat folder of .oga files.
+  # Sounds.qml plays them by name. Ocean has no sounds under a few of the names the
+  # shell uses, so those play one of its others (oceanStandIns). The build stops here
+  # if a sound the shell uses ever goes missing from the theme.
+  #   the shell's name = Ocean's file it plays
+  oceanStandIns = {
+    "system-ready" = "desktop-login";              # logging in
+    "system-shutdown" = "desktop-logout";          # log out / restart / power off
+    "software-update-urgent" = "message-attention"; # a critical notification
+    "power-unplug-battery-low" = "battery-low";    # unplugged while it's low
+  };
   uiSounds = pkgs.runCommand "ui-sounds" { } ''
     mkdir -p $out
-    for f in $(find -L ${pkgs.cosmic-sound-theme}/share/sounds/COSMIC -name '*.oga'); do
+    for f in ${pkgs.kdePackages.ocean-sound-theme}/share/sounds/ocean/stereo/*.oga; do
       ln -s "$f" "$out/$(basename "$f")"
     done
+    stand_in() {
+      test -e "$out/$1.oga" && return 0    # Ocean has its own after all: keep it
+      test -e "$out/$2.oga" || { echo "ui-sounds: $2 is missing from the Ocean sound theme" >&2; exit 1; }
+      ln -s "$(readlink "$out/$2.oga")" "$out/$1.oga"
+    }
+    ${lib.concatStrings (lib.mapAttrsToList (name: file: "stand_in ${name} ${file}\n") oceanStandIns)}
     for s in message-new-instant software-update-urgent device-added device-removed \
              system-ready system-shutdown alarm-clock-elapsed bell \
              battery-low battery-caution battery-full power-plug power-unplug power-unplug-battery-low; do
-      test -e "$out/$s.oga" || { echo "ui-sounds: $s is missing from the COSMIC sound theme" >&2; exit 1; }
+      test -e "$out/$s.oga" || { echo "ui-sounds: $s is missing from the Ocean sound theme" >&2; exit 1; }
     done
   '';
 
@@ -6016,16 +6030,23 @@ in
         Timer {
             interval: 50               // first frame is up by now
             running: true
-            onTriggered: Quickshell.execDetached(["${pkgs.coreutils}/bin/touch", root.marker])
+            onTriggered: {
+                Quickshell.execDetached(["${pkgs.coreutils}/bin/touch", root.marker]);
+                // The login sound: on the black screen, so it carries on while the
+                // desktop fades in. This early, PipeWire is running (audio-at-login in
+                // home.nix) but WirePlumber may not have set up your speakers /
+                // headphones yet, and a sound with nowhere to go is lost. So it waits
+                // until there's a default output (wpctl fails until then), up to 4 s,
+                // then plays. Detached, so it isn't cut off when this quits.
+                if (Sounds.enabled)
+                    Quickshell.execDetached(["sh", "-c", "for _ in $(${pkgs.coreutils}/bin/seq 40); do ${pkgs.wireplumber}/bin/wpctl inspect @DEFAULT_AUDIO_SINK@ >/dev/null 2>&1 && break; ${pkgs.coreutils}/bin/sleep 0.1; done; exec ${pkgs.pipewire}/bin/pw-play \"$0\"", Sounds.path("system-ready")]);
+            }
         }
         // wallpaper up (awww answers with "image: ..."), then ~0.35 s for the bar to draw
         Process {
             running: true
             command: ["sh", "-c", "for _ in $(seq 30); do ${pkgs.awww}/bin/awww query 2>/dev/null | grep -q image && break; sleep 0.1; done; sleep 0.35"]
-            onExited: {
-                Sounds.play("system-ready");     // the login sound, as the desktop opens up
-                reveal.start();
-            }
+            onExited: reveal.start()
         }
         NumberAnimation {
             id: reveal
@@ -10616,25 +10637,26 @@ in
     }
   '';
 
-  # The shell's sounds (COSMIC sound theme): played by Sounds.qml.
+  # The shell's sounds (KDE's Ocean sound theme): played by Sounds.qml.
   xdg.configFile."quickshell/Sounds.qml".text = ''
     pragma Singleton
 
     import QtQuick
     import Quickshell
 
-    // The shell's sounds, from System76's COSMIC sound theme (uiSounds in home.nix):
+    // The shell's sounds, from KDE's Ocean sound theme (uiSounds in home.nix; a few
+    // names play a stand-in from Ocean, see oceanStandIns there):
     //   message-new-instant     a notification
     //   software-update-urgent  a critical notification
     //   device-added / -removed a USB device or an audio output (DeviceWatch.qml)
-    //   system-ready            logging in (fade.qml)
+    //   system-ready            logging in, on the black screen before the desktop (fade.qml)
     //   system-shutdown         log out / restart / power off (shell.qml)
     //   alarm-clock-elapsed     a timer running out, an event's reminder (Planner.qml)
     //   bell                    a reminder (Planner.qml)
     //   battery-low / -caution  a battery down to 15% / 5% (BatteryWatch.qml)
     //   battery-full            the laptop's battery charged (BatteryWatch.qml)
     //   power-plug / -unplug    the laptop's charger in / out (BatteryWatch.qml)
-    // The lock screen plays desktop-screen-lock itself (configuration.nix).
+    // The lock screen plays its own lock sound (Ocean's service-logout; configuration.nix).
     Singleton {
         id: sounds
 
@@ -12534,6 +12556,27 @@ in
     . "${config.home.sessionVariablesPackage}/etc/profile.d/hm-session-vars.sh"
     if [ -r "${themeState}/current/session.env" ]; then . "${themeState}/current/session.env"; fi
   '';
+
+  # Start PipeWire the moment you log in, instead of when the first program asks for
+  # sound. Otherwise the login sound (fade.qml) would also be what wakes PipeWire up,
+  # and it would come late while PipeWire and WirePlumber get going. Only for you: the
+  # login screen's user doesn't get this. (NixOS starts PipeWire on first use: its
+  # socket, services.pipewire.socketActivation.)
+  systemd.user.services.audio-at-login = {
+    Unit = {
+      Description = "Start PipeWire at login (for the login sound)";
+      Wants = [
+        "pipewire.service"
+        "wireplumber.service"
+      ];
+    };
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.coreutils}/bin/true";
+      RemainAfterExit = true;
+    };
+    Install.WantedBy = [ "default.target" ];
+  };
 
   # ── Autostart, as services (were hl.exec_cmd lines in the Hyprland config) ──
   # Wallpaper: home-manager's awww module runs awww-daemon with the session.

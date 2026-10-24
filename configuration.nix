@@ -1813,8 +1813,9 @@ in
           }
 
           // ── the lock itself: one surface per screen, each with the password box ──
-          // the lock sound (the COSMIC theme's, like the rest of your desktop's sounds)
-          Component.onCompleted: Quickshell.execDetached(["${pkgs.pipewire}/bin/pw-play", "${pkgs.cosmic-sound-theme}/share/sounds/COSMIC/stereo/notification/desktop-screen-lock.oga"])
+          // the lock sound: from KDE's Ocean theme, like the rest of your desktop's sounds.
+          // Ocean has no lock sound of its own, so this is its service-logout.
+          Component.onCompleted: Quickshell.execDetached(["${pkgs.pipewire}/bin/pw-play", "${pkgs.kdePackages.ocean-sound-theme}/share/sounds/ocean/stereo/service-logout.oga"])
 
           WlSessionLock {
               id: lock
