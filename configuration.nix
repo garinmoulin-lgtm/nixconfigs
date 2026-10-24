@@ -116,7 +116,7 @@ in
   boot.loader.efi.canTouchEfiVariables = true;
   # Use latest kernel. You can switch to cachy (using chaotic flake) by appending _cachyos rather than _latest.
   # If cachy doesn't work, just swap to _latest temporarily
-  boot.kernelPackages = pkgs.linuxPackages_latest;
+  boot.kernelPackages = pkgs.linuxPackages_cachyos;
 
   nix.settings.trusted-users = [
     "root"
@@ -2006,7 +2006,7 @@ in
   # ── NVIDIA (active) ─────────────────────────────────────── start of block ──
   services.xserver.videoDrivers = [ "nvidia" ];
   hardware.nvidia = {
-    package = config.boot.kernelPackages.nvidiaPackages.latest; # chaotic: prebuilt for linuxPackages_cachyos (was config.boot.kernelPackages.nvidiaPackages.latest)
+    package = pkgs.nvidia_cachyos; # chaotic: prebuilt for linuxPackages_cachyos (was config.boot.kernelPackages.nvidiaPackages.latest)
     # Nvidia-cachy pkg is pkgs.nvidia_cachyos
     open = true;
     modesetting.enable = true;

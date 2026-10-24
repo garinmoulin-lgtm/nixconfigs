@@ -7729,6 +7729,57 @@ in
     }
   '';
 
+  # An app's icon, or a letter tile when there isn't one (the dock and its bar button).
+  xdg.configFile."quickshell/AppIcon.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // An app's icon from your icon theme, or from the file its desktop entry names.
+    // When there's no icon to be found (some games, launchers and Java apps don't
+    // install one, or name one your theme doesn't have), a rounded tile with the app's
+    // first letter, instead of Qt's black-and-magenta "missing" square.
+    Item {
+        id: root
+
+        property string icon: ""    // an icon name ("firefox"), or a file path
+        property string name: ""    // the app's name, for the letter
+
+        readonly property string path: {
+            if (icon === "")
+                return "";
+            if (icon.startsWith("/"))
+                return "file://" + icon;
+            if (icon.indexOf("://") > 0)
+                return icon;
+            return Quickshell.iconPath(icon, true);    // "" when the theme hasn't got it
+        }
+
+        Image {
+            id: img
+            anchors.fill: parent
+            visible: root.path !== "" && status !== Image.Error
+            source: root.path
+            sourceSize: Qt.size(root.width * 2, root.height * 2)
+            asynchronous: true
+        }
+        Rectangle {
+            visible: !img.visible
+            anchors.fill: parent
+            anchors.margins: Math.round(parent.width * 0.06)
+            radius: width * 0.28
+            color: Theme.pill
+            Text {
+                anchors.centerIn: parent
+                text: (root.name || root.icon || "?").trim().charAt(0).toUpperCase()
+                color: Theme.accent
+                font.family: Theme.font
+                font.pixelSize: parent.height * 0.5
+                font.weight: 700
+            }
+        }
+    }
+  '';
+
   # The dock's apps and your pins (Dock.qml shows them, DockControl.qml edits the pins).
   xdg.configFile."quickshell/DockData.qml".text = ''
     pragma Singleton
@@ -7788,9 +7839,11 @@ in
         function entryFor(key) {
             return DesktopEntries.byId(key) ?? DesktopEntries.heuristicLookup(key);
         }
+        // the icon's name (or file path) from its desktop entry, else its app id;
+        // AppIcon.qml finds it, or draws a letter tile when there's no such icon
         function iconFor(key) {
             const e = entryFor(key);
-            return Quickshell.iconPath(e && e.icon !== "" ? e.icon : key, "application-x-executable");
+            return e && e.icon !== "" ? e.icon : key;
         }
         function nameFor(key) {
             const e = entryFor(key);
@@ -8392,14 +8445,13 @@ in
                                         }
                                     }
                                 }
-                                Image {
+                                AppIcon {
                                     anchors.centerIn: parent
                                     anchors.verticalCenterOffset: -2
                                     width: dock.iconSize
                                     height: dock.iconSize
-                                    sourceSize: Qt.size(dock.iconSize * 2, dock.iconSize * 2)
-                                    source: DockData.iconFor(app.modelData.key)
-                                    asynchronous: true
+                                    icon: DockData.iconFor(app.modelData.key)
+                                    name: DockData.nameFor(app.modelData.key)
                                     // pinned but closed: a little faded
                                     opacity: app.modelData.windows.length > 0 || appMouse.containsMouse ? 1 : 0.7
                                     scale: appMouse.pressed ? 0.9 : appMouse.containsMouse ? 1.12 : 1
@@ -8822,16 +8874,15 @@ in
                         anchors.fill: parent
                         hoverEnabled: true
 
-                        Image {
+                        AppIcon {
                             id: pinIcon
                             anchors.left: parent.left
                             anchors.leftMargin: 8
                             anchors.verticalCenter: parent.verticalCenter
                             width: 22
                             height: 22
-                            sourceSize: Qt.size(44, 44)
-                            source: DockData.iconFor(pinRow.modelData)
-                            asynchronous: true
+                            icon: DockData.iconFor(pinRow.modelData)
+                            name: DockData.nameFor(pinRow.modelData)
                         }
                         Text {
                             anchors.left: pinIcon.right
@@ -8937,16 +8988,15 @@ in
                         cursorShape: Qt.PointingHandCursor
                         onClicked: DockData.togglePin(appRow.modelData.id)
 
-                        Image {
+                        AppIcon {
                             id: appIcon
                             anchors.left: parent.left
                             anchors.leftMargin: 8
                             anchors.verticalCenter: parent.verticalCenter
                             width: 22
                             height: 22
-                            sourceSize: Qt.size(44, 44)
-                            source: Quickshell.iconPath(appRow.modelData.icon, "application-x-executable")
-                            asynchronous: true
+                            icon: appRow.modelData.icon
+                            name: appRow.modelData.name
                         }
                         Column {
                             anchors.left: appIcon.right
