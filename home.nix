@@ -524,7 +524,8 @@ let
       ln -s "$f" "$out/$(basename "$f")"
     done
     for s in message-new-instant software-update-urgent device-added device-removed \
-             system-ready system-shutdown alarm-clock-elapsed bell; do
+             system-ready system-shutdown alarm-clock-elapsed bell \
+             battery-low battery-caution battery-full power-plug power-unplug power-unplug-battery-low; do
       test -e "$out/$s.oga" || { echo "ui-sounds: $s is missing from the COSMIC sound theme" >&2; exit 1; }
     done
   '';
@@ -1427,6 +1428,8 @@ in
         // inside, every monitor would start its own server, and only one can run.
         // USB devices and audio outputs coming and going: a notice and a sound
         DeviceWatch {}
+        // battery warnings: a laptop's battery and Bluetooth devices'
+        BatteryWatch {}
 
         NotificationServer {
             id: notifs
@@ -10628,6 +10631,9 @@ in
     //   system-shutdown         log out / restart / power off (shell.qml)
     //   alarm-clock-elapsed     a timer running out, an event's reminder (Planner.qml)
     //   bell                    a reminder (Planner.qml)
+    //   battery-low / -caution  a battery down to 15% / 5% (BatteryWatch.qml)
+    //   battery-full            the laptop's battery charged (BatteryWatch.qml)
+    //   power-plug / -unplug    the laptop's charger in / out (BatteryWatch.qml)
     // The lock screen plays desktop-screen-lock itself (configuration.nix).
     Singleton {
         id: sounds
@@ -10776,6 +10782,149 @@ in
                         watch.tell(u.added, u.added ? "USB device connected" : "USB device disconnected", u.name, "drive-removable-media-usb");
                 watch.waiting = [];
             }
+        }
+    }
+  '';
+
+  # Battery warnings: the laptop battery (if there is one) and Bluetooth devices.
+  xdg.configFile."quickshell/BatteryWatch.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Bluetooth
+    import Quickshell.Services.UPower
+
+    // Battery notifications and sounds. shell.qml makes one of these.
+    //
+    // The laptop battery (UPower's combined battery; nothing happens on a desktop):
+    //   plugged in       "Charging"        power-plug
+    //   unplugged        "On battery"      power-unplug (power-unplug-battery-low if it's low)
+    //   down to 15%      "Battery low"     battery-low
+    //   down to 5%       critical          battery-caution
+    //   full (plugged)   "Fully charged"   battery-full
+    //
+    // Bluetooth devices that report a battery (headphones, controllers, mice...):
+    //   down to 15% / 5%, the same as the laptop's.
+    //
+    // Each warning comes once per discharge: it's armed again when the battery is
+    // charging, or has climbed a few percent back above the line.
+    // Quiet for a few seconds after Quickshell starts and after the computer wakes up.
+    Scope {
+        id: watch
+
+        readonly property int low: 15
+        readonly property int critical: 5
+
+        // ── quiet while starting and waking (same as DeviceWatch.qml) ──
+        property bool settled: false
+        Timer {
+            id: settle
+            interval: 4000
+            running: true
+            onTriggered: {
+                watch.settled = true;
+                watch.checkLevels();
+            }
+        }
+        property double lastTick: Date.now()
+        Timer {
+            interval: 2000
+            running: true
+            repeat: true
+            onTriggered: {
+                const now = Date.now();
+                if (now - watch.lastTick > 8000) {
+                    watch.settled = false;
+                    settle.restart();
+                }
+                watch.lastTick = now;
+            }
+        }
+
+        function tell(title, body, icon, sound, urgent) {
+            Quickshell.execDetached(["${pkgs.libnotify}/bin/notify-send", "-a", "Battery", "-i", icon, "-u", urgent ? "critical" : "normal", "-h", "boolean:suppress-sound:true", title, body]);
+            Sounds.play(sound);
+        }
+
+        // ── the laptop battery ──
+        readonly property var battery: UPower.displayDevice
+        readonly property bool hasBattery: !!battery && battery.ready && battery.isLaptopBattery
+        readonly property int percent: hasBattery ? Math.round(battery.percentage * 100) : 100
+        readonly property bool charging: !UPower.onBattery
+
+        Connections {
+            target: UPower
+            function onOnBatteryChanged() {
+                if (!watch.settled || !watch.hasBattery)
+                    return;
+                watch.toldFull = false;
+                const next = Object.assign({}, watch.warned);
+                if (watch.charging) {
+                    delete next.laptop;    // re-arm the laptop's warnings
+                    watch.warned = next;
+                    watch.tell("Charging", watch.percent + "%", "battery-good-charging", "power-plug", false);
+                } else if (watch.percent <= watch.low) {
+                    // unplugged while it's already low: this one notice is the warning
+                    const isCritical = watch.percent <= watch.critical;
+                    next.laptop = isCritical ? "critical" : "low";
+                    watch.warned = next;
+                    watch.tell(isCritical ? "On battery, very low" : "On battery, low", watch.percent + "%", isCritical ? "battery-caution" : "battery-low", "power-unplug-battery-low", isCritical);
+                } else
+                    watch.tell("On battery", watch.percent + "%", "battery-good", "power-unplug", false);
+            }
+        }
+        // once per plug-in: some laptops hop between "charging" and "full" near the top
+        property bool toldFull: false
+        Connections {
+            target: watch.battery
+            function onStateChanged() {
+                if (watch.toldFull || !watch.settled || !watch.hasBattery || !watch.charging || watch.battery.state !== UPowerDeviceState.FullyCharged)
+                    return;
+                watch.toldFull = true;
+                watch.tell("Fully charged", "You can unplug", "battery-full-charged", "battery-full", false);
+            }
+        }
+
+        // ── the levels ──
+        // key -> the worst warning given so far this discharge: "low" or "critical"
+        property var warned: ({})
+        function level(key, name, pct, draining, isLaptop) {
+            const was = warned[key] || "";
+            const next = Object.assign({}, warned);
+            if (!draining || pct > low + 3)
+                delete next[key];
+            else if (pct <= critical && was !== "critical") {
+                next[key] = "critical";
+                tell(isLaptop ? "Battery very low" : name + " battery very low", pct + "%" + (isLaptop ? ", plug in now" : ""), "battery-caution", "battery-caution", true);
+            } else if (pct <= low && pct > critical && was === "") {
+                next[key] = "low";
+                tell(isLaptop ? "Battery low" : name + " battery low", pct + "%", "battery-low", "battery-low", false);
+            } else if (pct > critical + 3 && was === "critical")
+                next[key] = "low";    // charged back up a bit: the critical one can come again
+            warned = next;
+        }
+        function checkLevels() {
+            if (!settled)
+                return;
+            if (hasBattery)
+                level("laptop", "", percent, !charging, true);
+            for (const d of Bluetooth.devices.values) {
+                if (d.connected && d.batteryAvailable)
+                    level(d.dbusPath, d.name || d.deviceName || "Bluetooth device", Math.round(d.battery * 100), true, false);
+                else if (d.dbusPath in warned) {
+                    const next = Object.assign({}, warned);
+                    delete next[d.dbusPath];    // disconnected: start over next time
+                    warned = next;
+                }
+            }
+        }
+        // the laptop's level as it changes; Bluetooth batteries every half minute
+        // (they only change every few minutes anyway)
+        onPercentChanged: checkLevels()
+        Timer {
+            interval: 30000
+            running: true
+            repeat: true
+            onTriggered: watch.checkLevels()
         }
     }
   '';
