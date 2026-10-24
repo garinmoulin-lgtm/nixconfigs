@@ -216,7 +216,14 @@ in
   };
   xdg.portal = {
     enable = true;
-    extraPortals = [ pkgs.xdg-desktop-portal-hyprland ];
+    extraPortals = [
+      pkgs.xdg-desktop-portal-hyprland
+      # Answers what Hyprland's portal doesn't, like "is the desktop dark?". Apps that ask
+      # (libadwaita apps, Firefox) otherwise fall back to light, and only half follow the
+      # dark theme. It reads the setting from dconf, which the `theme` command writes
+      # (home.nix). Hyprland's own portal config already sends those questions here.
+      pkgs.xdg-desktop-portal-gtk
+    ];
   };
 
   # ── Login screen: greetd + a Quickshell greeter ──
@@ -1806,6 +1813,9 @@ in
           }
 
           // ── the lock itself: one surface per screen, each with the password box ──
+          // the lock sound (the COSMIC theme's, like the rest of your desktop's sounds)
+          Component.onCompleted: Quickshell.execDetached(["${pkgs.pipewire}/bin/pw-play", "${pkgs.cosmic-sound-theme}/share/sounds/COSMIC/stereo/notification/desktop-screen-lock.oga"])
+
           WlSessionLock {
               id: lock
               locked: true

@@ -514,6 +514,21 @@ let
     exec ${config.programs.quickshell.package}/bin/quickshell -n -p /etc/greetd/greeter/lock.qml "$@"
   '';
 
+  # ── UI sounds ──
+  # System76's COSMIC sound theme, as one flat folder of .oga files (the theme keeps them
+  # in action/, alert/ and notification/ subfolders). Sounds.qml plays them. The build
+  # stops here if a sound the shell uses ever goes missing from the theme.
+  uiSounds = pkgs.runCommand "ui-sounds" { } ''
+    mkdir -p $out
+    for f in $(find -L ${pkgs.cosmic-sound-theme}/share/sounds/COSMIC -name '*.oga'); do
+      ln -s "$f" "$out/$(basename "$f")"
+    done
+    for s in message-new-instant software-update-urgent device-added device-removed \
+             system-ready system-shutdown alarm-clock-elapsed; do
+      test -e "$out/$s.oga" || { echo "ui-sounds: $s is missing from the COSMIC sound theme" >&2; exit 1; }
+    done
+  '';
+
   # After waking from suspend: screens on, then give the keyboard back to the lock
   # screen. Hyprland hands the keyboard to the lock screen when the mouse moves
   # (InputManager.cpp), so this "moves" the cursor to where it already is, which
@@ -1046,7 +1061,10 @@ in
             function pointer(visible) {
                 Quickshell.execDetached(["hyprctl", "eval", "hl.config({ cursor = { invisible = " + !visible + " } })"]);
             }
-            // fade to black, then run `cmd`
+            // fade to black with the shutdown sound, then run `cmd` once both are done
+            // (so the sound isn't cut off by the power going off)
+            property bool faded: false
+            property bool soundDone: false
             function leave(cmd) {
                 if (leaveCmd !== null)
                     return;
@@ -1055,6 +1073,32 @@ in
                 pointer(false);
                 coverAnim.start();
                 leaveTimer.start();
+                if (Sounds.enabled) {
+                    byeSound.running = true;
+                    byeSoundLimit.start();
+                } else {
+                    soundDone = true;
+                }
+            }
+            function goIfDone() {
+                if (faded && soundDone)
+                    Quickshell.execDetached(leaveCmd);
+            }
+            Process {
+                id: byeSound
+                command: ["${pkgs.pipewire}/bin/pw-play", Sounds.path("system-shutdown")]
+                onExited: {
+                    session.soundDone = true;
+                    session.goIfDone();
+                }
+            }
+            Timer {
+                id: byeSoundLimit       // never wait on the sound more than 3 s
+                interval: 3000
+                onTriggered: if (!session.soundDone) {
+                    session.soundDone = true;
+                    session.goIfDone();
+                }
             }
             function logout() {
                 leave(["uwsm", "stop"]);
@@ -1062,7 +1106,10 @@ in
             Timer {
                 id: leaveTimer
                 interval: 750      // just after the 700 ms fade
-                onTriggered: Quickshell.execDetached(session.leaveCmd)
+                onTriggered: {
+                    session.faded = true;
+                    session.goIfDone();
+                }
             }
             // so the Super+Shift+E key can use it: quickshell ipc call session logout
             IpcHandler {
@@ -1378,6 +1425,9 @@ in
         // ── Notifications ──
         // One server for the whole shell. It sits outside the Variants on purpose:
         // inside, every monitor would start its own server, and only one can run.
+        // USB devices and audio outputs coming and going: a notice and a sound
+        DeviceWatch {}
+
         NotificationServer {
             id: notifs
 
@@ -1397,6 +1447,10 @@ in
                     [n.id]: new Date()
                 });
                 toasts.add(n);                 // the popup at the top right (below)
+                // its sound (Sounds.qml), unless it asks for none (the clock and the
+                // device notices play their own)
+                if (!(n.hints && n.hints["suppress-sound"]))
+                    Sounds.play(n.urgency === NotificationUrgency.Critical ? "software-update-urgent" : "message-new-instant");
             }
 
             function markAllRead() {
@@ -5965,7 +6019,10 @@ in
         Process {
             running: true
             command: ["sh", "-c", "for _ in $(seq 30); do ${pkgs.awww}/bin/awww query 2>/dev/null | grep -q image && break; sleep 0.1; done; sleep 0.35"]
-            onExited: reveal.start()
+            onExited: {
+                Sounds.play("system-ready");     // the login sound, as the desktop opens up
+                reveal.start();
+            }
         }
         NumberAnimation {
             id: reveal
@@ -6558,8 +6615,8 @@ in
             }
         }
         function ring(title, body) {
-            Quickshell.execDetached(["${pkgs.libnotify}/bin/notify-send", "-a", "Clock", "-i", "alarm", title, body]);
-            Quickshell.execDetached(["${pkgs.pipewire}/bin/pw-play", "${pkgs.sound-theme-freedesktop}/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga"]);
+            Quickshell.execDetached(["${pkgs.libnotify}/bin/notify-send", "-a", "Clock", "-i", "alarm", "-h", "boolean:suppress-sound:true", title, body]);
+            Sounds.play("alarm-clock-elapsed");
         }
 
         // ── saving and loading ──
@@ -6799,8 +6856,8 @@ in
     // runs. Click for the card: the time and date, then three tabs:
     //   Calendar   the month (‹ › to change it, the month's name for back to today).
     //              Days with events get a dot. Click a day to see its events and to add
-    //              one: a title, and a time if you want a reminder then ("2pm", "2:30 pm",
-    //              "14:30"); no time = all day.
+    //              one: a title, and a time if you want a reminder then ("9:30" with the
+    //              AM / PM switch beside it, or "2pm", "14:30"); no time = all day.
     //   Timers     a preset, or type a length ("5" = 5 minutes, "1:30", "1h 20m") and an
     //              optional label. Pause, start again, remove. When one runs out you get a
     //              notification and a sound.
@@ -7111,14 +7168,36 @@ in
                     font.pixelSize: Theme.textSize * 0.9
                 }
 
-                // add one: title, time (optional), +
+                // add one: title, time (optional), AM / PM, +
                 Row {
+                    id: addRow
                     width: parent.width
                     spacing: 6
 
+                    // The AM / PM switch next to the time. It's used when the time you type
+                    // could be either ("9:55", "9"); a time that says which itself ("9:55pm")
+                    // or a 24-hour one ("21:55", "0:30") doesn't need it, and it dims.
+                    // Starts on whichever half of the day it is now, each time the card opens.
+                    property bool pm: false
+                    Connections {
+                        target: card
+                        function onOpenChanged() {
+                            if (card.open)
+                                addRow.pm = root.now.getHours() >= 12;
+                        }
+                    }
+                    readonly property string typed: evWhen.text.trim()
+                    readonly property bool saysWhich: /[ap]\.?m?\.?$/i.test(typed.replace(/\s/g, ""))
+                    readonly property bool needsHalf: {
+                        const m = typed.match(/^(\d{1,2})/);
+                        return !saysWhich && !!m && Number(m[1]) >= 1 && Number(m[1]) <= 12;
+                    }
+                    // what's typed, with the switch's AM / PM added when it's needed
+                    readonly property string timeText: needsHalf ? typed + (pm ? "pm" : "am") : typed
+
                     function submit() {
                         const title = evTitle.text.trim();
-                        const time = Planner.parseTime(evWhen.text);
+                        const time = Planner.parseTime(timeText);
                         if (title === "" || time === null) {
                             if (title === "")
                                 evTitle.forceActiveFocus();
@@ -7131,7 +7210,7 @@ in
 
                     TextField {
                         id: evTitle
-                        width: parent.width - evWhen.width - evAdd.width - parent.spacing * 2
+                        width: parent.width - evWhen.width - halfSwitch.width - evAdd.width - parent.spacing * 3
                         placeholderText: "New event"
                         placeholderTextColor: Theme.pillIcon
                         color: Theme.text
@@ -7149,10 +7228,10 @@ in
                     }
                     TextField {
                         id: evWhen
-                        width: 78
+                        width: 64
                         // red while what's typed isn't a time
-                        readonly property bool bad: Planner.parseTime(text) === null
-                        placeholderText: "time"
+                        readonly property bool bad: Planner.parseTime(addRow.timeText) === null
+                        placeholderText: "9:30"
                         placeholderTextColor: Theme.pillIcon
                         color: bad ? Theme.red : Theme.text
                         font.family: Theme.font
@@ -7165,6 +7244,50 @@ in
                             color: Theme.bg
                             border.width: 1
                             border.color: evWhen.bad ? Theme.red : evWhen.activeFocus ? Theme.accent : Theme.pillIcon
+                        }
+                    }
+                    // AM / PM: click to switch
+                    Rectangle {
+                        id: halfSwitch
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 44
+                        height: evWhen.height
+                        radius: height / 2
+                        color: halfMouse.containsMouse && addRow.needsHalf ? Theme.pill : Theme.bg
+                        border.width: 1
+                        border.color: addRow.needsHalf ? Theme.accent : Theme.pillIcon
+                        opacity: addRow.needsHalf || addRow.typed === "" ? 1 : 0.4
+                        scale: halfMouse.pressed ? 0.9 : 1
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: 120
+                            }
+                        }
+                        Behavior on opacity {
+                            NumberAnimation {
+                                duration: 120
+                            }
+                        }
+                        Behavior on scale {
+                            NumberAnimation {
+                                duration: 120
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            text: addRow.pm ? "PM" : "AM"
+                            color: addRow.needsHalf ? Theme.accent : Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.9
+                            font.weight: 700
+                        }
+                        MouseArea {
+                            id: halfMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: addRow.pm = !addRow.pm
                         }
                     }
                     IconButton {
@@ -9052,6 +9175,172 @@ in
                 opacity: 0.5
                 font.family: Theme.font
                 font.pixelSize: Theme.textSize * 0.9
+            }
+        }
+    }
+  '';
+
+  # The shell's sounds (COSMIC sound theme): played by Sounds.qml.
+  xdg.configFile."quickshell/Sounds.qml".text = ''
+    pragma Singleton
+
+    import QtQuick
+    import Quickshell
+
+    // The shell's sounds, from System76's COSMIC sound theme (uiSounds in home.nix):
+    //   message-new-instant     a notification
+    //   software-update-urgent  a critical notification
+    //   device-added / -removed a USB device or an audio output (DeviceWatch.qml)
+    //   system-ready            logging in (fade.qml)
+    //   system-shutdown         log out / restart / power off (shell.qml)
+    //   alarm-clock-elapsed     a timer running out, an event's reminder (Planner.qml)
+    // The lock screen plays desktop-screen-lock itself (configuration.nix).
+    Singleton {
+        id: sounds
+
+        readonly property string dir: "${uiSounds}"
+        property bool enabled: true
+
+        function path(name) {
+            return dir + "/" + name + ".oga";
+        }
+        // the same sound twice within a moment (a burst of notifications) plays once
+        property var lastPlayed: ({})
+        function play(name) {
+            if (!enabled)
+                return;
+            const now = Date.now();
+            if (now - (lastPlayed[name] || 0) < 250)
+                return;
+            lastPlayed[name] = now;
+            Quickshell.execDetached(["${pkgs.pipewire}/bin/pw-play", path(name)]);
+        }
+    }
+  '';
+
+  # USB devices and audio outputs coming and going: a notification and a sound.
+  xdg.configFile."quickshell/DeviceWatch.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+    import Quickshell.Services.Pipewire
+
+    // Plug in or pull out a USB device, or an audio output appears or goes away (USB or
+    // Bluetooth headphones, a DAC, HDMI audio...): a notification saying which, with the
+    // device-added / device-removed sound. shell.qml makes one of these.
+    //
+    // A USB audio device would count twice (it's a USB device and an audio output), so
+    // a USB event waits a moment and is dropped if an audio output changed around then:
+    // the audio one says more.
+    //
+    // Quiet for a few seconds after Quickshell starts and after the computer wakes up,
+    // while things are found (or come back) by themselves.
+    Scope {
+        id: watch
+
+        // ── quiet while starting and waking ──
+        property bool settled: false
+        Timer {
+            id: settle
+            interval: 4000
+            running: true
+            onTriggered: watch.settled = true
+        }
+        // timers don't count time asleep: a big gap between ticks means it just woke up
+        property double lastTick: Date.now()
+        Timer {
+            interval: 2000
+            running: true
+            repeat: true
+            onTriggered: {
+                const now = Date.now();
+                if (now - watch.lastTick > 8000) {
+                    watch.settled = false;
+                    settle.restart();
+                }
+                watch.lastTick = now;
+            }
+        }
+
+        function tell(added, title, name, icon) {
+            Quickshell.execDetached(["${pkgs.libnotify}/bin/notify-send", "-a", "Devices", "-i", icon, "-h", "boolean:suppress-sound:true", title, name]);
+            Sounds.play(added ? "device-added" : "device-removed");
+        }
+
+        // ── audio outputs ──
+        property var outputs: ({})       // node id -> name, of the outputs there are now
+        property double lastAudio: 0     // when one last came or went
+        function syncOutputs() {
+            const now = {};
+            for (const n of Pipewire.nodes.values)
+                if (n.isSink && !n.isStream && n.audio)
+                    now[n.id] = n.description || n.nickname || n.name;
+            if (settled) {
+                for (const id in now)
+                    if (!(id in outputs))
+                        audioChanged(true, now[id]);
+                for (const id in outputs)
+                    if (!(id in now))
+                        audioChanged(false, outputs[id]);
+            }
+            outputs = now;
+        }
+        function audioChanged(added, name) {
+            lastAudio = Date.now();
+            tell(added, added ? "Audio output connected" : "Audio output disconnected", name, added ? "audio-speakers" : "audio-volume-muted");
+        }
+        Connections {
+            target: Pipewire.nodes
+            function onValuesChanged() {
+                watch.syncOutputs();
+            }
+        }
+        Component.onCompleted: syncOutputs()
+
+        // ── USB devices ──
+        // udev reports each event as KEY=value lines ending with a blank line.
+        property var event: ({})
+        property var waiting: []         // USB events held back a moment: [{ added, name, at }]
+        Process {
+            running: true
+            command: ["udevadm", "monitor", "--udev", "--subsystem-match=usb", "--property"]
+            stdout: SplitParser {
+                onRead: line => {
+                    if (line.trim() === "") {
+                        watch.usbEvent(watch.event);
+                        watch.event = {};
+                        return;
+                    }
+                    const i = line.indexOf("=");
+                    if (i > 0)
+                        watch.event[line.slice(0, i)] = line.slice(i + 1);
+                }
+            }
+        }
+        function usbEvent(e) {
+            if (!settled || e.DEVTYPE !== "usb_device" || (e.ACTION !== "add" && e.ACTION !== "remove"))
+                return;
+            if ((e.TYPE || "").startsWith("9/"))    // a hub (USB class 9): not interesting
+                return;
+            const tidy = s => (s || "").replace(/_/g, " ").trim();
+            const vendor = tidy(e.ID_VENDOR_FROM_DATABASE || e.ID_VENDOR);
+            const model = tidy(e.ID_MODEL_FROM_DATABASE || e.ID_MODEL);
+            let name = model === "" ? vendor : model.toLowerCase().startsWith(vendor.toLowerCase()) ? model : (vendor + " " + model).trim();
+            waiting = waiting.concat([{
+                    "added": e.ACTION === "add",
+                    "name": name || "USB device",
+                    "at": Date.now()
+                }]);
+            usbDelay.restart();
+        }
+        Timer {
+            id: usbDelay
+            interval: 2500
+            onTriggered: {
+                for (const u of watch.waiting)
+                    if (Math.abs(watch.lastAudio - u.at) > 4000)
+                        watch.tell(u.added, u.added ? "USB device connected" : "USB device disconnected", u.name, "drive-removable-media-usb");
+                watch.waiting = [];
             }
         }
     }
