@@ -1640,6 +1640,16 @@ in
             }
         }
 
+        // ── The dock ── (Dock.qml): one per screen, hidden at the bottom edge
+        Variants {
+            model: Quickshell.screens
+
+            Dock {
+                required property var modelData
+                screen: modelData
+            }
+        }
+
         Variants {
             model: Quickshell.screens
 
@@ -4269,451 +4279,10 @@ in
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: Theme.spacing
 
-                        // ── Open apps + system tray ── (right side, just left of the weather)
-                        // In the bar: one icon per app that has a window open (the one you're
-                        // in is brighter). Click for the list: every window (click one to go to
-                        // it, x to close it), and under it the tray icons apps put up. In the
-                        // tray: left click = the app's action, middle click = its second
-                        // action, right click = its menu, shown right here in the popup.
-                        Widget {
-                            id: appsWidget
+                        // ── Dock: what's pinned on the dock at the bottom of the screen ──
+                        // (DockControl.qml; the open apps and the tray are on the dock now)
+                        DockControl {
                             anchors.verticalCenter: parent.verticalCenter
-
-                            // one entry per app, in the order they were opened
-                            readonly property var apps: {
-                                const byId = {};
-                                const out = [];
-                                for (const t of ToplevelManager.toplevels.values) {
-                                    const id = t.appId || t.title;
-                                    if (!byId[id]) {
-                                        byId[id] = {
-                                            "id": id,
-                                            "active": false
-                                        };
-                                        out.push(byId[id]);
-                                    }
-                                    if (t.activated)
-                                        byId[id].active = true;
-                                }
-                                return out;
-                            }
-                            readonly property int maxIcons: 5   // icons in the bar; more than this shows "…"
-                            // the app's icon from its .desktop file, else a generic one
-                            function iconFor(appId) {
-                                const e = DesktopEntries.heuristicLookup(appId);
-                                return Quickshell.iconPath(e && e.icon !== "" ? e.icon : appId, "application-x-executable");
-                            }
-                            function nameFor(appId) {
-                                const e = DesktopEntries.heuristicLookup(appId);
-                                return e && e.name !== "" ? e.name : appId;
-                            }
-
-                            button: Row {
-                                spacing: 6
-
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    visible: appsWidget.apps.length === 0
-                                    text: "apps"
-                                    color: Theme.text
-                                    font.family: Theme.iconFont
-                                    font.pixelSize: Theme.iconSize
-                                    font.variableAxes: Theme.iconAxes
-                                }
-                                Repeater {
-                                    model: appsWidget.apps.slice(0, appsWidget.maxIcons)
-                                    Image {
-                                        required property var modelData
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: 16
-                                        height: 16
-                                        sourceSize.width: 32
-                                        sourceSize.height: 32
-                                        source: appsWidget.iconFor(modelData.id)
-                                        opacity: modelData.active ? 1 : 0.55
-                                        Behavior on opacity {
-                                            NumberAnimation {
-                                                duration: 150
-                                            }
-                                        }
-                                    }
-                                }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    visible: appsWidget.apps.length > appsWidget.maxIcons
-                                    text: "…"      // more open; the popup lists them all
-                                    color: Theme.text
-                                    opacity: 0.7
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize
-                                    font.weight: 700
-                                }
-                            }
-
-                            Column {
-                                id: appsList
-                                spacing: 4
-                                width: 300
-
-                                // the tray menu being shown: the tray item, and the menu (or
-                                // submenu) path into it; empty = none
-                                property var menuItem: null
-                                property var menuStack: []
-                                function openMenu(item) {
-                                    if (menuItem === item) {
-                                        closeMenu();
-                                        return;
-                                    }
-                                    menuItem = item;
-                                    menuStack = [item.menu];
-                                }
-                                function closeMenu() {
-                                    menuItem = null;
-                                    menuStack = [];
-                                }
-
-                                // header
-                                Item {
-                                    width: parent.width
-                                    height: 26
-
-                                    Text {
-                                        anchors.left: parent.left
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: "Open apps"
-                                        color: Theme.text
-                                        font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 1.2
-                                        font.weight: 700
-                                        font.letterSpacing: Theme.letterSpacing
-                                    }
-                                    Text {
-                                        anchors.right: parent.right
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: ToplevelManager.toplevels.values.length + (ToplevelManager.toplevels.values.length === 1 ? " window" : " windows")
-                                        color: Theme.text
-                                        opacity: 0.6
-                                        font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 0.85
-                                    }
-                                }
-
-                                Text {
-                                    visible: ToplevelManager.toplevels.values.length === 0
-                                    text: "Nothing open."
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize
-                                }
-
-                                // every window; scrolls past 320 px
-                                Flickable {
-                                    id: winScroll
-                                    width: parent.width
-                                    height: Math.min(contentHeight, 320)
-                                    contentHeight: winRows.implicitHeight
-                                    visible: winRows.implicitHeight > 0
-                                    clip: true
-                                    boundsBehavior: Flickable.StopAtBounds
-                                    ScrollBar.vertical: ThinScrollBar {}
-
-                                    Column {
-                                        id: winRows
-                                        width: winScroll.width
-                                        spacing: 2
-
-                                        Repeater {
-                                            model: ScriptModel {
-                                                values: [...ToplevelManager.toplevels.values]
-                                            }
-
-                                            Rectangle {
-                                                id: winRow
-                                                required property var modelData
-                                                width: winRows.width
-                                                height: 36
-                                                radius: Theme.radius
-                                                color: winHover.hovered || modelData.activated ? Theme.pill : "transparent"
-                                                NumberAnimation on opacity {
-                                                    from: 0
-                                                    to: 1
-                                                    duration: 200
-                                                }
-                                                Behavior on color {
-                                                    ColorAnimation {
-                                                        duration: 120
-                                                    }
-                                                }
-
-                                                HoverHandler {
-                                                    id: winHover
-                                                }
-                                                // click: go to that window
-                                                MouseArea {
-                                                    anchors.fill: parent
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: {
-                                                        winRow.modelData.activate();
-                                                        appsWidget.closePopup();
-                                                    }
-                                                }
-                                                Image {
-                                                    id: winIcon
-                                                    anchors.left: parent.left
-                                                    anchors.leftMargin: 8
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    width: 20
-                                                    height: 20
-                                                    sourceSize.width: 40
-                                                    sourceSize.height: 40
-                                                    source: appsWidget.iconFor(winRow.modelData.appId)
-                                                }
-                                                Column {
-                                                    anchors {
-                                                        left: winIcon.right
-                                                        right: winClose.left
-                                                        leftMargin: 10
-                                                        rightMargin: 6
-                                                        verticalCenter: parent.verticalCenter
-                                                    }
-                                                    Text {
-                                                        width: parent.width
-                                                        text: winRow.modelData.title || appsWidget.nameFor(winRow.modelData.appId)
-                                                        elide: Text.ElideRight
-                                                        color: winRow.modelData.activated ? Theme.accent : Theme.text
-                                                        font.family: Theme.font
-                                                        font.pixelSize: Theme.textSize * 0.95
-                                                        font.weight: winRow.modelData.activated ? 700 : 500
-                                                        font.letterSpacing: Theme.letterSpacing
-                                                    }
-                                                    Text {
-                                                        width: parent.width
-                                                        text: appsWidget.nameFor(winRow.modelData.appId)
-                                                        elide: Text.ElideRight
-                                                        color: Theme.text
-                                                        opacity: 0.6
-                                                        font.family: Theme.font
-                                                        font.pixelSize: Theme.textSize * 0.8
-                                                    }
-                                                }
-                                                // x: close the window (shows on hover)
-                                                IconButton {
-                                                    id: winClose
-                                                    anchors.right: parent.right
-                                                    anchors.rightMargin: 4
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    icon: "close"
-                                                    iconColor: Theme.red
-                                                    opacity: winHover.hovered ? 1 : 0
-                                                    enabled: winHover.hovered
-                                                    Behavior on opacity {
-                                                        NumberAnimation {
-                                                            duration: 120
-                                                        }
-                                                    }
-                                                    onClicked: winRow.modelData.close()
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // ── the tray ──
-                                Text {
-                                    visible: SystemTray.items.values.length > 0
-                                    topPadding: 6
-                                    text: "Tray"
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.85
-                                    font.weight: 600
-                                }
-                                Flow {
-                                    visible: SystemTray.items.values.length > 0
-                                    width: parent.width
-                                    spacing: 4
-
-                                    Repeater {
-                                        model: SystemTray.items
-
-                                        Rectangle {
-                                            id: trayBtn
-                                            required property var modelData
-                                            readonly property bool menuOpen: appsList.menuItem === modelData
-                                            width: 34
-                                            height: 34
-                                            radius: Theme.radius
-                                            color: menuOpen ? Theme.pill : trayMouse.containsMouse ? Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, 0.6) : "transparent"
-                                            border.width: menuOpen ? 1 : 0
-                                            border.color: Theme.accent
-                                            scale: trayMouse.pressed ? 0.85 : 1
-                                            Behavior on scale {
-                                                NumberAnimation {
-                                                    duration: 120
-                                                    easing.type: Easing.OutCubic
-                                                }
-                                            }
-
-                                            Image {
-                                                anchors.centerIn: parent
-                                                width: 18
-                                                height: 18
-                                                sourceSize.width: 36
-                                                sourceSize.height: 36
-                                                source: trayBtn.modelData.icon
-                                            }
-                                            MouseArea {
-                                                id: trayMouse
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
-                                                onClicked: mouse => {
-                                                    const item = trayBtn.modelData;
-                                                    if (mouse.button === Qt.MiddleButton)
-                                                        item.secondaryActivate();
-                                                    else if (item.hasMenu && (mouse.button === Qt.RightButton || item.onlyMenu))
-                                                        appsList.openMenu(item);
-                                                    else
-                                                        item.activate();
-                                                }
-                                                onWheel: wheel => trayBtn.modelData.scroll(wheel.angleDelta.y, false)
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // ── the open tray menu ──
-                                QsMenuOpener {
-                                    id: trayMenu
-                                    menu: appsList.menuStack.length > 0 ? appsList.menuStack[appsList.menuStack.length - 1] : null
-                                }
-                                Rectangle {
-                                    visible: appsList.menuItem !== null
-                                    width: parent.width
-                                    height: menuCol.implicitHeight + 8
-                                    radius: Theme.radius
-                                    color: Theme.pill
-
-                                    Column {
-                                        id: menuCol
-                                        x: 4
-                                        y: 4
-                                        width: parent.width - 8
-
-                                        // title, with a back arrow inside a submenu
-                                        Item {
-                                            width: parent.width
-                                            height: 28
-                                            IconButton {
-                                                id: menuBack
-                                                anchors.left: parent.left
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                visible: appsList.menuStack.length > 1
-                                                width: visible ? implicitWidth : 0
-                                                icon: "arrow_back"
-                                                onClicked: appsList.menuStack = appsList.menuStack.slice(0, -1)
-                                            }
-                                            Text {
-                                                anchors.left: menuBack.right
-                                                anchors.leftMargin: 6
-                                                anchors.right: parent.right
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                text: appsList.menuItem ? (appsList.menuItem.tooltipTitle || appsList.menuItem.title || appsList.menuItem.id) : ""
-                                                elide: Text.ElideRight
-                                                color: Theme.text
-                                                opacity: 0.7
-                                                font.family: Theme.font
-                                                font.pixelSize: Theme.textSize * 0.85
-                                                font.weight: 600
-                                            }
-                                        }
-
-                                        Repeater {
-                                            model: trayMenu.children
-
-                                            Item {
-                                                id: entry
-                                                required property var modelData
-                                                width: menuCol.width
-                                                height: modelData.isSeparator ? 9 : 28
-
-                                                Rectangle {
-                                                    visible: entry.modelData.isSeparator
-                                                    anchors.centerIn: parent
-                                                    width: parent.width - 16
-                                                    height: 1
-                                                    color: Theme.pillIcon
-                                                }
-                                                Rectangle {
-                                                    visible: !entry.modelData.isSeparator
-                                                    anchors.fill: parent
-                                                    radius: Theme.radius
-                                                    color: entryMouse.containsMouse && entry.modelData.enabled ? Theme.bg : "transparent"
-                                                    opacity: entry.modelData.enabled ? 1 : 0.4
-
-                                                    // check box / radio button entries
-                                                    Text {
-                                                        id: entryCheck
-                                                        anchors.left: parent.left
-                                                        anchors.leftMargin: 8
-                                                        anchors.verticalCenter: parent.verticalCenter
-                                                        visible: entry.modelData.buttonType !== QsMenuButtonType.None
-                                                        width: visible ? implicitWidth : 0
-                                                        text: entry.modelData.checkState === Qt.Checked ? (entry.modelData.buttonType === QsMenuButtonType.RadioButton ? "radio_button_checked" : "check_box") : (entry.modelData.buttonType === QsMenuButtonType.RadioButton ? "radio_button_unchecked" : "check_box_outline_blank")
-                                                        color: Theme.accent
-                                                        font.family: Theme.iconFont
-                                                        font.pixelSize: Theme.iconSize
-                                                        font.variableAxes: Theme.iconAxes
-                                                    }
-                                                    Text {
-                                                        anchors.left: entryCheck.right
-                                                        anchors.leftMargin: 8
-                                                        anchors.right: entryMore.left
-                                                        anchors.verticalCenter: parent.verticalCenter
-                                                        text: entry.modelData.text.replace(/_(?!_)/g, "")   // drop the underline-the-next-letter marks
-                                                        elide: Text.ElideRight
-                                                        color: Theme.text
-                                                        font.family: Theme.font
-                                                        font.pixelSize: Theme.textSize * 0.95
-                                                    }
-                                                    Text {
-                                                        id: entryMore
-                                                        anchors.right: parent.right
-                                                        anchors.rightMargin: 6
-                                                        anchors.verticalCenter: parent.verticalCenter
-                                                        visible: entry.modelData.hasChildren
-                                                        text: "chevron_right"
-                                                        color: Theme.text
-                                                        font.family: Theme.iconFont
-                                                        font.pixelSize: Theme.iconSize
-                                                        font.variableAxes: Theme.iconAxes
-                                                    }
-                                                    MouseArea {
-                                                        id: entryMouse
-                                                        anchors.fill: parent
-                                                        hoverEnabled: true
-                                                        cursorShape: entry.modelData.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                                        onClicked: {
-                                                            const m = entry.modelData;
-                                                            if (!m.enabled)
-                                                                return;
-                                                            if (m.hasChildren) {
-                                                                appsList.menuStack = appsList.menuStack.concat([m]);
-                                                            } else {
-                                                                m.triggered();
-                                                                appsList.closeMenu();
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
 
                         Weather {
@@ -8160,6 +7729,1284 @@ in
     }
   '';
 
+  # The dock's apps and your pins (Dock.qml shows them, DockControl.qml edits the pins).
+  xdg.configFile."quickshell/DockData.qml".text = ''
+    pragma Singleton
+
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+    import Quickshell.Wayland
+
+    // What the dock (Dock.qml) shows: the apps you pinned, then everything else that
+    // has a window open. Apps are known by their desktop entry id ("firefox",
+    // "org.gnome.Nautilus"); a window is matched to its app the same way the old
+    // tray widget did it (DesktopEntries.heuristicLookup on its app id).
+    // Your pins, in order, are saved in ~/.local/state/quickshell/dock.json.
+    Singleton {
+        id: d
+
+        readonly property string stateDir: Quickshell.env("HOME") + "/.local/state/quickshell"
+        property var pins: []             // desktop entry ids, in dock order
+
+        // ── the apps, for the dock ──
+        // [{ key, pinned, windows: [toplevel, ...] }]: pinned first (in your order), then
+        // the other open apps in the order they were opened
+        readonly property var apps: {
+            const out = [];
+            const byKey = {};
+            for (const k of pins) {
+                const a = {
+                    "key": k,
+                    "pinned": true,
+                    "windows": []
+                };
+                byKey[k] = a;
+                out.push(a);
+            }
+            for (const t of ToplevelManager.toplevels.values) {
+                const k = keyFor(t);
+                let a = byKey[k];
+                if (!a) {
+                    a = byKey[k] = {
+                        "key": k,
+                        "pinned": false,
+                        "windows": []
+                    };
+                    out.push(a);
+                }
+                a.windows.push(t);
+            }
+            return out;
+        }
+
+        // the app a window belongs to: its desktop entry's id, else its app id
+        function keyFor(t) {
+            const e = DesktopEntries.heuristicLookup(t.appId);
+            return e ? e.id : (t.appId || t.title);
+        }
+        function entryFor(key) {
+            return DesktopEntries.byId(key) ?? DesktopEntries.heuristicLookup(key);
+        }
+        function iconFor(key) {
+            const e = entryFor(key);
+            return Quickshell.iconPath(e && e.icon !== "" ? e.icon : key, "application-x-executable");
+        }
+        function nameFor(key) {
+            const e = entryFor(key);
+            return e && e.name !== "" ? e.name : key;
+        }
+
+        // ── doing things ──
+        // Started through uwsm, so each app gets its own place in your session instead
+        // of being Quickshell's child (restarting Quickshell would close it otherwise).
+        function launch(key) {
+            if (entryFor(key))
+                Quickshell.execDetached(["uwsm", "app", "--", entryFor(key).id + ".desktop"]);
+        }
+        // Click: open it if nothing's open, go to its window if one is, and go round its
+        // windows one by one on more clicks.
+        function focus(app) {
+            if (app.windows.length === 0) {
+                launch(app.key);
+                return;
+            }
+            const i = app.windows.findIndex(w => w.activated);
+            app.windows[(i + 1) % app.windows.length].activate();
+        }
+        function closeAll(app) {
+            for (const w of app.windows)
+                w.close();
+        }
+
+        // ── pins ──
+        function isPinned(key) {
+            return pins.indexOf(key) >= 0;
+        }
+        function pin(key) {
+            if (!isPinned(key)) {
+                pins = pins.concat([key]);
+                save();
+            }
+        }
+        function unpin(key) {
+            pins = pins.filter(k => k !== key);
+            save();
+        }
+        function togglePin(key) {
+            isPinned(key) ? unpin(key) : pin(key);
+        }
+        // move a pin left (-1) or right (+1)
+        function movePin(key, by) {
+            const i = pins.indexOf(key), j = i + by;
+            if (i < 0 || j < 0 || j >= pins.length)
+                return;
+            const p = pins.slice();
+            p.splice(j, 0, p.splice(i, 1)[0]);
+            pins = p;
+            save();
+        }
+
+        // ── saving ──
+        FileView {
+            id: file
+            path: d.stateDir + "/dock.json"
+            blockLoading: true
+            printErrors: false
+        }
+        Component.onCompleted: {
+            try {
+                pins = JSON.parse(file.text() || "{}").pins || [];
+            } catch (e) {}
+        }
+        function save() {
+            Quickshell.execDetached(["sh", "-c", "mkdir -p \"$1\" && printf '%s' \"$2\" > \"$1/dock.json.$$\" && mv -f \"$1/dock.json.$$\" \"$1/dock.json\"", "sh", stateDir, JSON.stringify({
+                    "pins": pins
+                })]);
+        }
+    }
+  '';
+
+  # The dock along the bottom of the screen (shell.qml makes one per monitor).
+  xdg.configFile."quickshell/Dock.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Wayland
+    import Quickshell.Services.SystemTray
+
+    // ── The dock ──
+    // App icons on the bottom edge of the screen, hidden until you push the mouse
+    // against that edge. It grows up out of the edge the way the bar's widgets drop out
+    // of the bar (DockPanel.qml: same curves, corners and animation), and sinks back
+    // half a second after the mouse leaves it. It doesn't take any space from your
+    // windows: it sits over them while it's up. (Hidden under fullscreen windows.)
+    //
+    //   Apps (left): your pins (the dock button in the top bar), then the other open
+    //   apps. A dot under an app means it has a window open (a longer one for several);
+    //   accent colored = the one you're in.
+    //     click         open it; if it's open, go to its window (again: the next one)
+    //     middle click  a new window
+    //     right click   pin / unpin, new window, close
+    //     point at it   with more than one window open: after a second the dock grows
+    //                   a list of them above the icons (click one to go to it, x to
+    //                   close it); it shrinks back when the mouse leaves
+    //   Tray (right): the icons apps put up.
+    //     click = the app's action, middle click = its second action,
+    //     right click = its menu (the dock grows to show it, like the window list).
+    PanelWindow {
+        id: dock
+
+        anchors {
+            bottom: true
+            left: true
+            right: true
+        }
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Top
+        WlrLayershell.namespace: "dock"
+        color: "transparent"
+        // room for the dock to grow into (a window list or a menu above the icons)
+        implicitHeight: 480
+
+        readonly property int iconSize: 36
+        readonly property int cell: 48           // an icon's slot
+
+        // ── showing and hiding ──
+        property bool shown: false
+        // the mouse is on the dock or the bottom edge
+        readonly property bool held: edgeHover.hovered || panelHover.hovered
+        onHeldChanged: {
+            if (held) {
+                hideDelay.stop();
+                shown = true;
+            } else {
+                hideDelay.restart();
+            }
+        }
+        Timer {
+            id: hideDelay
+            interval: 500
+            onTriggered: {
+                dock.shown = false;
+                dock.closeExtras();
+            }
+        }
+
+        // Only these take the mouse; the rest of the window lets clicks through to what's
+        // under it. While hidden that's just the bottom 2 px of the screen. (The edge
+        // stays in while it's up, so resting the mouse there keeps it up.)
+        mask: Region {
+            item: edge
+            Region {
+                item: panel.visible ? panel : null
+            }
+        }
+
+        // the bottom edge: push the mouse here to bring the dock up
+        Item {
+            id: edge
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 2
+            HoverHandler {
+                id: edgeHover
+            }
+        }
+
+        // ── what shows above the icons: one at a time ──
+        // "list" (an app's windows), "menu" (an app's right-click menu), "tray" (a tray
+        // icon's menu), or "" for just the icons
+        property string extra: ""
+        property var listApp: null      // the app whose windows are listed
+        property var listMouse: null    // its icon's mouse area: pointing there keeps the list
+        property var menuApp: null      // the app whose menu is open
+        property var trayItem: null     // the tray icon whose menu is open
+        property var trayStack: []      // the menu, and submenus opened inside it
+        function closeExtras() {
+            extra = "";
+            listApp = null;
+            listMouse = null;
+            menuApp = null;
+            trayItem = null;
+        }
+        function openList(a, mouse) {
+            closeExtras();
+            listApp = a;
+            listMouse = mouse;
+            extra = "list";
+        }
+        function openAppMenu(a) {
+            const same = extra === "menu" && menuApp && menuApp.key === a.key;
+            closeExtras();
+            if (same)
+                return;
+            menuApp = a;
+            extra = "menu";
+        }
+        function openTrayMenu(item) {
+            const same = extra === "tray" && trayItem === item;
+            closeExtras();
+            if (same)
+                return;
+            trayItem = item;
+            trayStack = [item.menu];
+            extra = "tray";
+        }
+        // the listed app as it is now (windows come and go while the list is open)
+        readonly property var listLive: listApp ? (DockData.apps.find(a => a.key === listApp.key) ?? null) : null
+        onListLiveChanged: if (extra === "list" && (!listLive || listLive.windows.length < 2))
+            closeExtras()
+        // The window list goes a moment after the mouse leaves both the icon and the
+        // list. (Menus stay until you pick something, click their icon again, or the
+        // dock hides.)
+        readonly property bool listHeld: extra === "list" && (listHover.hovered || (listMouse !== null && listMouse.containsMouse))
+        onListHeldChanged: if (!listHeld && extra === "list")
+            listClose.restart()
+        else
+            listClose.stop()
+        Timer {
+            id: listClose
+            interval: 350
+            onTriggered: if (dock.extra === "list")
+                dock.closeExtras()
+        }
+
+        // ── the dock ──
+        DockPanel {
+            id: panel
+            open: dock.shown
+            anchorX: dock.width / 2
+            baseY: dock.height
+            HoverHandler {
+                id: panelHover
+            }
+
+            Column {
+                id: stack
+                spacing: 6
+
+                // ════ an app's windows ════
+                Column {
+                    id: listCol
+                    visible: dock.extra === "list"
+                    width: Math.max(row.width, 240)
+                    HoverHandler {
+                        id: listHover
+                    }
+
+                    Text {
+                        width: parent.width
+                        leftPadding: 8
+                        bottomPadding: 4
+                        elide: Text.ElideRight
+                        text: dock.listLive ? DockData.nameFor(dock.listLive.key) + "  ·  " + dock.listLive.windows.length + " windows" : ""
+                        color: Theme.text
+                        opacity: 0.7
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.85
+                        font.weight: 600
+                    }
+                    Repeater {
+                        model: dock.extra === "list" && dock.listLive ? dock.listLive.windows : []
+
+                        Rectangle {
+                            id: winRow
+                            required property var modelData
+                            width: listCol.width
+                            height: 32
+                            radius: Theme.radius
+                            color: winRowMouse.containsMouse ? Theme.pill : "transparent"
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 120
+                                }
+                            }
+                            // click: go to that window
+                            MouseArea {
+                                id: winRowMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    winRow.modelData.activate();
+                                    dock.closeExtras();
+                                }
+
+                                Rectangle {      // the one you're in
+                                    id: winDot
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 10
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 6
+                                    height: 6
+                                    radius: 3
+                                    color: winRow.modelData.activated ? Theme.accent : Theme.pillIcon
+                                }
+                                Text {
+                                    anchors.left: winDot.right
+                                    anchors.leftMargin: 10
+                                    anchors.right: winClose.left
+                                    anchors.rightMargin: 4
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: winRow.modelData.title || DockData.nameFor(dock.listLive ? dock.listLive.key : "")
+                                    elide: Text.ElideRight
+                                    color: winRow.modelData.activated ? Theme.accent : Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.95
+                                    font.weight: winRow.modelData.activated ? 700 : 500
+                                }
+                                // x: close that window (shows on hover)
+                                IconButton {
+                                    id: winClose
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: winRowMouse.containsMouse
+                                    icon: "close"
+                                    iconColor: Theme.red
+                                    onClicked: winRow.modelData.close()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ════ an app's menu (right click) ════
+                Column {
+                    id: appMenuCol
+                    visible: dock.extra === "menu"
+                    width: Math.max(row.width, 220)
+
+                    Text {
+                        width: parent.width
+                        leftPadding: 8
+                        bottomPadding: 4
+                        elide: Text.ElideRight
+                        text: dock.menuApp ? DockData.nameFor(dock.menuApp.key) : ""
+                        color: Theme.text
+                        opacity: 0.7
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.85
+                        font.weight: 600
+                    }
+                    Repeater {
+                        model: {
+                            const a = dock.extra === "menu" ? dock.menuApp : null;
+                            if (!a)
+                                return [];
+                            const items = [{
+                                    "id": "pin",
+                                    "icon": "push_pin",
+                                    "text": DockData.isPinned(a.key) ? "Unpin from dock" : "Pin to dock"
+                                }];
+                            if (DockData.entryFor(a.key))
+                                items.push({
+                                    "id": "new",
+                                    "icon": "add",
+                                    "text": "New window"
+                                });
+                            if (a.windows.length > 0)
+                                items.push({
+                                    "id": "close",
+                                    "icon": "close",
+                                    "text": a.windows.length > 1 ? "Close " + a.windows.length + " windows" : "Close window"
+                                });
+                            return items;
+                        }
+
+                        Rectangle {
+                            id: menuRow
+                            required property var modelData
+                            width: appMenuCol.width
+                            height: 30
+                            radius: Theme.radius
+                            color: menuRowMouse.containsMouse ? Theme.pill : "transparent"
+                            Text {
+                                id: menuRowIcon
+                                anchors.left: parent.left
+                                anchors.leftMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: menuRow.modelData.icon
+                                color: menuRow.modelData.id === "close" ? Theme.red : Theme.accent
+                                font.family: Theme.iconFont
+                                font.pixelSize: Theme.iconSize
+                                font.variableAxes: Theme.iconAxes
+                            }
+                            Text {
+                                anchors.left: menuRowIcon.right
+                                anchors.leftMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: menuRow.modelData.text
+                                color: Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.95
+                            }
+                            MouseArea {
+                                id: menuRowMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    const a = dock.menuApp;
+                                    const what = menuRow.modelData.id;
+                                    dock.closeExtras();
+                                    if (what === "pin")
+                                        DockData.togglePin(a.key);
+                                    else if (what === "new")
+                                        DockData.launch(a.key);
+                                    else
+                                        DockData.closeAll(a);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ════ a tray icon's menu ════
+                QsMenuOpener {
+                    id: trayOpener
+                    menu: dock.extra === "tray" && dock.trayStack.length > 0 ? dock.trayStack[dock.trayStack.length - 1] : null
+                }
+                Column {
+                    id: menuCol
+                    visible: dock.extra === "tray"
+                    width: Math.max(row.width, 240)
+
+                    // title, with a back arrow inside a submenu
+                    Item {
+                        width: parent.width
+                        height: 28
+                        IconButton {
+                            id: menuBack
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: dock.trayStack.length > 1
+                            width: visible ? implicitWidth : 0
+                            icon: "arrow_back"
+                            onClicked: dock.trayStack = dock.trayStack.slice(0, -1)
+                        }
+                        Text {
+                            anchors.left: menuBack.right
+                            anchors.leftMargin: 6
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: dock.trayItem ? (dock.trayItem.tooltipTitle || dock.trayItem.title || dock.trayItem.id) : ""
+                            elide: Text.ElideRight
+                            color: Theme.text
+                            opacity: 0.7
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.85
+                            font.weight: 600
+                        }
+                    }
+
+                    Repeater {
+                        model: trayOpener.children
+
+                        Item {
+                            id: entry
+                            required property var modelData
+                            width: menuCol.width
+                            height: modelData.isSeparator ? 9 : 28
+
+                            Rectangle {
+                                visible: entry.modelData.isSeparator
+                                anchors.centerIn: parent
+                                width: parent.width - 16
+                                height: 1
+                                color: Theme.pillIcon
+                            }
+                            Rectangle {
+                                visible: !entry.modelData.isSeparator
+                                anchors.fill: parent
+                                radius: Theme.radius
+                                color: entryMouse.containsMouse && entry.modelData.enabled ? Theme.pill : "transparent"
+                                opacity: entry.modelData.enabled ? 1 : 0.4
+
+                                // check box / radio button entries
+                                Text {
+                                    id: entryCheck
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: entry.modelData.buttonType !== QsMenuButtonType.None
+                                    width: visible ? implicitWidth : 0
+                                    text: entry.modelData.checkState === Qt.Checked ? (entry.modelData.buttonType === QsMenuButtonType.RadioButton ? "radio_button_checked" : "check_box") : (entry.modelData.buttonType === QsMenuButtonType.RadioButton ? "radio_button_unchecked" : "check_box_outline_blank")
+                                    color: Theme.accent
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                                Text {
+                                    anchors.left: entryCheck.right
+                                    anchors.leftMargin: 8
+                                    anchors.right: entryMore.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: entry.modelData.text.replace(/_(?!_)/g, "")   // drop the underline-the-next-letter marks
+                                    elide: Text.ElideRight
+                                    color: Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.95
+                                }
+                                Text {
+                                    id: entryMore
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 6
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: entry.modelData.hasChildren
+                                    text: "chevron_right"
+                                    color: Theme.text
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: Theme.iconSize
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                                MouseArea {
+                                    id: entryMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: entry.modelData.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    onClicked: {
+                                        const m = entry.modelData;
+                                        if (!m.enabled)
+                                            return;
+                                        if (m.hasChildren) {
+                                            dock.trayStack = dock.trayStack.concat([m]);
+                                        } else {
+                                            m.triggered();
+                                            dock.closeExtras();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // a line between whatever's above and the icons
+                Rectangle {
+                    visible: dock.extra !== ""
+                    width: Math.max(row.width, listCol.visible ? listCol.width : appMenuCol.visible ? appMenuCol.width : menuCol.width)
+                    height: 1
+                    color: Theme.pill
+                }
+
+                // ════ the icons ════
+                Row {
+                    id: row
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 2
+
+                    // nothing pinned or open
+                    Text {
+                        visible: DockData.apps.length === 0
+                        anchors.verticalCenter: parent.verticalCenter
+                        leftPadding: 8
+                        rightPadding: 8
+                        text: "Nothing open. Pin apps from the dock button in the bar."
+                        color: Theme.text
+                        opacity: 0.6
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.9
+                    }
+
+                    Repeater {
+                        model: DockData.apps
+
+                        Item {
+                            id: app
+                            required property var modelData
+                            required property int index
+                            readonly property bool active: modelData.windows.some(w => w.activated)
+                            // a line between the pins and the other open apps
+                            readonly property bool firstUnpinned: !modelData.pinned && index > 0 && DockData.apps[index - 1].pinned
+
+                            width: dock.cell + (firstUnpinned ? 11 : 0)
+                            height: dock.cell
+
+                            Rectangle {
+                                visible: app.firstUnpinned
+                                anchors.left: parent.left
+                                anchors.leftMargin: 4
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 1
+                                height: dock.cell - 16
+                                color: Theme.pill
+                            }
+
+                            Item {
+                                id: slot
+                                anchors.right: parent.right
+                                width: dock.cell
+                                height: dock.cell
+
+                                // picked out while its list or menu is open
+                                Rectangle {
+                                    anchors.fill: parent
+                                    anchors.margins: 2
+                                    radius: Theme.radius
+                                    color: Theme.pill
+                                    opacity: (dock.extra === "list" && dock.listApp && dock.listApp.key === app.modelData.key) || (dock.extra === "menu" && dock.menuApp && dock.menuApp.key === app.modelData.key) ? 1 : 0
+                                    Behavior on opacity {
+                                        NumberAnimation {
+                                            duration: 150
+                                        }
+                                    }
+                                }
+                                Image {
+                                    anchors.centerIn: parent
+                                    anchors.verticalCenterOffset: -2
+                                    width: dock.iconSize
+                                    height: dock.iconSize
+                                    sourceSize: Qt.size(dock.iconSize * 2, dock.iconSize * 2)
+                                    source: DockData.iconFor(app.modelData.key)
+                                    asynchronous: true
+                                    // pinned but closed: a little faded
+                                    opacity: app.modelData.windows.length > 0 || appMouse.containsMouse ? 1 : 0.7
+                                    scale: appMouse.pressed ? 0.9 : appMouse.containsMouse ? 1.12 : 1
+                                    Behavior on scale {
+                                        NumberAnimation {
+                                            duration: 160
+                                            easing.type: Easing.OutCubic
+                                        }
+                                    }
+                                    Behavior on opacity {
+                                        NumberAnimation {
+                                            duration: 150
+                                        }
+                                    }
+                                }
+                                // open windows: a dot, longer for more than one
+                                Rectangle {
+                                    visible: app.modelData.windows.length > 0
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: 1
+                                    width: app.modelData.windows.length > 1 ? 14 : 5
+                                    height: 3
+                                    radius: 1.5
+                                    color: app.active ? Theme.accent : Theme.text
+                                    opacity: app.active ? 1 : 0.5
+                                    Behavior on width {
+                                        NumberAnimation {
+                                            duration: 150
+                                            easing.type: Easing.OutCubic
+                                        }
+                                    }
+                                }
+                                MouseArea {
+                                    id: appMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+                                    onClicked: mouse => {
+                                        if (mouse.button === Qt.RightButton) {
+                                            dock.openAppMenu(app.modelData);
+                                            return;
+                                        }
+                                        dock.closeExtras();
+                                        if (mouse.button === Qt.MiddleButton)
+                                            DockData.launch(app.modelData.key);
+                                        else
+                                            DockData.focus(app.modelData);
+                                    }
+                                }
+                                // more than one window: point at it for a second for the list
+                                // (pointing at another such app while one's open switches to it)
+                                Timer {
+                                    interval: 1000
+                                    running: appMouse.containsMouse && !appMouse.pressed && app.modelData.windows.length > 1 && (dock.extra === "" || (dock.extra === "list" && dock.listApp && dock.listApp.key !== app.modelData.key))
+                                    onTriggered: dock.openList(app.modelData, appMouse)
+                                }
+                            }
+
+                            // its name, above the dock, while you point at it (when nothing
+                            // else is showing above the icons)
+                            Rectangle {
+                                parent: dock.contentItem
+                                visible: appMouse.containsMouse && dock.extra === "" && panel.openness === 1
+                                // worked out again whenever the dock moves or changes size
+                                readonly property real atX: (panel.width, appMouse.containsMouse, slot.mapToItem(dock.contentItem, slot.width / 2, 0).x)
+                                x: Math.max(4, Math.min(dock.width - width - 4, atX - width / 2))
+                                y: panel.y - height - 8
+                                width: nameLabel.implicitWidth + 16
+                                height: 24
+                                radius: height / 2
+                                color: Theme.bg
+                                Text {
+                                    id: nameLabel
+                                    anchors.centerIn: parent
+                                    text: DockData.nameFor(app.modelData.key) + (app.modelData.windows.length > 1 ? "  ·  " + app.modelData.windows.length : "")
+                                    color: Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 0.9
+                                    font.weight: 600
+                                }
+                            }
+                        }
+                    }
+
+                    // ── the tray ──
+                    Item {
+                        visible: SystemTray.items.values.length > 0
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 9
+                        height: dock.cell - 16
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: 1
+                            height: parent.height
+                            color: Theme.pill
+                        }
+                    }
+                    Repeater {
+                        model: SystemTray.items
+
+                        Rectangle {
+                            id: trayBtn
+                            required property var modelData
+                            readonly property bool menuOpen: dock.extra === "tray" && dock.trayItem === modelData
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 34
+                            height: 34
+                            radius: Theme.radius
+                            color: menuOpen ? Theme.pill : trayMouse.containsMouse ? Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, 0.6) : "transparent"
+                            scale: trayMouse.pressed ? 0.85 : 1
+                            Behavior on scale {
+                                NumberAnimation {
+                                    duration: 120
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                            Image {
+                                anchors.centerIn: parent
+                                width: 18
+                                height: 18
+                                sourceSize: Qt.size(36, 36)
+                                source: trayBtn.modelData.icon
+                            }
+                            MouseArea {
+                                id: trayMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                                onClicked: mouse => {
+                                    const item = trayBtn.modelData;
+                                    if (mouse.button === Qt.MiddleButton)
+                                        item.secondaryActivate();
+                                    else if (item.hasMenu && (mouse.button === Qt.RightButton || item.onlyMenu))
+                                        dock.openTrayMenu(item);
+                                    else
+                                        item.activate();
+                                }
+                                onWheel: wheel => trayBtn.modelData.scroll(wheel.angleDelta.y, false)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  # The dock's shape: grows up out of the bottom edge like the bar's widgets drop out of the bar.
+  xdg.configFile."quickshell/DockPanel.qml".text = ''
+    import QtQuick
+    import QtQuick.Shapes
+
+    // The dock's body (Dock.qml). It sits flush on the bottom edge of the screen and
+    // grows up out of it the way the bar's widgets drop out of the bar (Widget.qml),
+    // just upside down: the same flared curves where it meets the edge, the same
+    // rounded corners, color, opening and closing curves and timing.
+    //
+    //   ╭───────────────────╮
+    //   │   (the content)   │
+    //  ─╯                   ╰─   bottom edge of the screen
+    //
+    // While it's open, a change in the content's size (a window list appearing above
+    // the icons) makes it grow or shrink on the same soft curve, with the icons staying
+    // where they are; only the edges move.
+    Item {
+        id: pop
+
+        property bool open: false
+        property real anchorX: 0        // the middle (in the parent's coordinates)
+        property real baseY: 0          // the edge it grows out of
+
+        property int padding: 8
+        property int curve: 14          // the curves into the edge (Widget.qml: curve)
+        property int cornerRadius: 14   // the two top corners (Widget.qml: cornerRadius)
+        property int duration: 320
+        property int closeDuration: 260
+        property var openCurve: [0.3, 0.6, 0.35, 1]
+        property var closeCurve: [0.45, 0, 0.55, 1]
+
+        default property alias content: area.data
+
+        // 0 = closed (flat in the edge), 1 = all the way up
+        property real openness: 0
+        visible: openness > 0
+
+        readonly property real bodyWidth: Math.ceil(area.childrenRect.width + padding * 2)
+        readonly property real bodyHeight: Math.ceil(area.childrenRect.height + padding * 2)
+        // the size it's showing: glides to a new one when the content changes while open
+        property real shownWidth: bodyWidth
+        property real shownHeight: bodyHeight
+        Behavior on shownWidth {
+            enabled: pop.open && pop.openness === 1
+            NumberAnimation {
+                duration: 260
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: pop.openCurve.concat([1, 1])
+            }
+        }
+        Behavior on shownHeight {
+            enabled: pop.open && pop.openness === 1
+            NumberAnimation {
+                duration: 260
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: pop.openCurve.concat([1, 1])
+            }
+        }
+
+        x: anchorX - shownWidth / 2 - curve
+        y: baseY - height
+        width: shownWidth + curve * 2
+        height: openness * shownHeight
+
+        // a bigger one gets a little longer, like Widget.qml
+        function timeFor(base) {
+            return Math.round(base * (0.9 + 0.3 * Math.min(1, bodyHeight / 900)));
+        }
+        onOpenChanged: {
+            if (open) {
+                closeAnim.stop();
+                openAnim.duration = timeFor(duration);
+                openAnim.restart();
+            } else {
+                openAnim.stop();
+                closeAnim.duration = timeFor(closeDuration);
+                closeAnim.restart();
+            }
+        }
+        NumberAnimation {
+            id: openAnim
+            target: pop
+            property: "openness"
+            to: 1
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: pop.openCurve.concat([1, 1])
+        }
+        NumberAnimation {
+            id: closeAnim
+            target: pop
+            property: "openness"
+            to: 0
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: pop.closeCurve.concat([1, 1])
+        }
+
+        Shape {
+            id: shape
+            anchors.fill: parent
+            preferredRendererType: Shape.CurveRenderer
+
+            // the curves can't be bigger than half the height, so they grow in while opening
+            readonly property real c: Math.min(pop.curve, height / 2)
+            readonly property real r: Math.min(pop.cornerRadius, height / 2)
+            readonly property real boxLeft: pop.curve
+            readonly property real boxRight: width - pop.curve
+
+            ShapePath {
+                fillColor: Theme.bg
+                strokeColor: "transparent"
+
+                // on the edge, left of the box; around clockwise
+                startX: shape.boxLeft - shape.c
+                startY: shape.height
+                // bottom-left curve, up into the box's left side
+                PathArc {
+                    x: shape.boxLeft
+                    y: shape.height - shape.c
+                    radiusX: shape.c
+                    radiusY: shape.c
+                    direction: PathArc.Counterclockwise
+                }
+                PathLine {
+                    x: shape.boxLeft
+                    y: shape.r
+                }
+                // top-left corner
+                PathArc {
+                    x: shape.boxLeft + shape.r
+                    y: 0
+                    radiusX: shape.r
+                    radiusY: shape.r
+                }
+                PathLine {
+                    x: shape.boxRight - shape.r
+                    y: 0
+                }
+                // top-right corner
+                PathArc {
+                    x: shape.boxRight
+                    y: shape.r
+                    radiusX: shape.r
+                    radiusY: shape.r
+                }
+                PathLine {
+                    x: shape.boxRight
+                    y: shape.height - shape.c
+                }
+                // bottom-right curve, back out onto the edge
+                PathArc {
+                    x: shape.boxRight + shape.c
+                    y: shape.height
+                    radiusX: shape.c
+                    radiusY: shape.c
+                    direction: PathArc.Counterclockwise
+                }
+            }
+        }
+
+        // The content. Opening and closing, it rides the top edge, so it comes up out
+        // of the screen's edge; growing or shrinking while open, it stays put at the
+        // bottom and the top edge moves. Anything outside the shape is cut off (clip).
+        Item {
+            x: pop.curve
+            width: pop.shownWidth
+            height: parent.height
+            clip: true
+
+            Item {
+                id: area
+                x: (pop.shownWidth - pop.bodyWidth) / 2 + pop.padding
+                y: pop.openness * (pop.shownHeight - pop.bodyHeight) + pop.padding
+                width: pop.bodyWidth - pop.padding * 2
+                height: pop.bodyHeight - pop.padding * 2
+                opacity: pop.openness
+            }
+        }
+    }
+  '';
+
+  # The dock's button in the top bar: pin, unpin and order the dock's apps.
+  xdg.configFile."quickshell/DockControl.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+    import Quickshell
+
+    // ── Dock ── (in the top bar, where the open-apps/tray widget used to be)
+    // The dock itself lives at the bottom of the screen (Dock.qml): push the mouse
+    // against the bottom edge to bring it up. This is where you pick what's on it.
+    //   Pinned   your pins, in dock order: arrows move one left / right, x unpins it.
+    //   Add      search your apps (name, description, keywords) and click the pin.
+    // Right-clicking an app in the dock pins or unpins it too.
+    Widget {
+        id: root
+        icon: "dock_to_bottom"
+
+        Column {
+            id: card
+            width: 320
+            spacing: 8
+
+            // clear the search each time it opens
+            readonly property bool open: !!QsWindow.window && QsWindow.window.visible
+            onOpenChanged: if (!open)
+                search.text = ""
+
+            // ── header ──
+            Item {
+                width: parent.width
+                height: 26
+                Text {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Dock"
+                    color: Theme.text
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize * 1.2
+                    font.weight: 700
+                    font.letterSpacing: Theme.letterSpacing
+                }
+                Text {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: DockData.pins.length + " pinned"
+                    color: Theme.text
+                    opacity: 0.6
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize * 0.85
+                }
+            }
+
+            // ── pinned ──
+            Text {
+                visible: DockData.pins.length === 0
+                width: parent.width
+                wrapMode: Text.Wrap
+                text: "Nothing pinned yet. Find an app below and click its pin."
+                color: Theme.text
+                opacity: 0.6
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize * 0.9
+            }
+            ListView {
+                id: pinList
+                visible: count > 0
+                width: parent.width
+                height: Math.min(contentHeight, 200)
+                clip: true
+                spacing: 2
+                boundsBehavior: Flickable.StopAtBounds
+                model: DockData.pins
+                ScrollBar.vertical: ThinScrollBar {}
+
+                delegate: Rectangle {
+                    id: pinRow
+                    required property string modelData
+                    required property int index
+                    width: ListView.view.width
+                    height: 36
+                    radius: Theme.radius
+                    color: pinMouse.containsMouse ? Theme.pill : "transparent"
+                    Behavior on color {
+                        ColorAnimation {
+                            duration: 120
+                        }
+                    }
+                    MouseArea {
+                        id: pinMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+
+                        Image {
+                            id: pinIcon
+                            anchors.left: parent.left
+                            anchors.leftMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 22
+                            height: 22
+                            sourceSize: Qt.size(44, 44)
+                            source: DockData.iconFor(pinRow.modelData)
+                            asynchronous: true
+                        }
+                        Text {
+                            anchors.left: pinIcon.right
+                            anchors.leftMargin: 10
+                            anchors.right: pinButtons.left
+                            anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: DockData.nameFor(pinRow.modelData)
+                            elide: Text.ElideRight
+                            color: Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize
+                            font.weight: 600
+                        }
+                        Row {
+                            id: pinButtons
+                            anchors.right: parent.right
+                            anchors.rightMargin: 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            opacity: pinMouse.containsMouse ? 1 : 0
+                            Behavior on opacity {
+                                NumberAnimation {
+                                    duration: 120
+                                }
+                            }
+                            IconButton {
+                                icon: "chevron_left"
+                                opacity: pinRow.index > 0 ? 1 : 0.3
+                                onClicked: DockData.movePin(pinRow.modelData, -1)
+                            }
+                            IconButton {
+                                icon: "chevron_right"
+                                opacity: pinRow.index < DockData.pins.length - 1 ? 1 : 0.3
+                                onClicked: DockData.movePin(pinRow.modelData, 1)
+                            }
+                            IconButton {
+                                icon: "close"
+                                iconColor: Theme.red
+                                onClicked: DockData.unpin(pinRow.modelData)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                width: parent.width
+                height: 1
+                color: Theme.pill
+            }
+
+            // ── add: search your apps ──
+            TextField {
+                id: search
+                width: parent.width
+                placeholderText: "Search apps to pin"
+                placeholderTextColor: Theme.pillIcon
+                color: Theme.text
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize
+                leftPadding: 12
+                rightPadding: 12
+                Keys.onEscapePressed: text = ""
+                background: Rectangle {
+                    radius: height / 2
+                    color: Theme.bg
+                    border.width: 1
+                    border.color: search.activeFocus ? Theme.accent : Theme.pillIcon
+                }
+            }
+            ListView {
+                id: appList
+                width: parent.width
+                height: Math.min(contentHeight, 240)
+                visible: count > 0
+                clip: true
+                spacing: 2
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ThinScrollBar {}
+                // every app with a launcher entry, A to Z, narrowed down by the search
+                model: {
+                    const q = search.text.trim().toLowerCase();
+                    return [...DesktopEntries.applications.values].filter(e => !e.noDisplay && (q === "" || (e.name + " " + e.genericName + " " + e.comment + " " + [...e.keywords].join(" ")).toLowerCase().includes(q))).sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+                }
+
+                delegate: Rectangle {
+                    id: appRow
+                    required property var modelData
+                    readonly property bool pinned: DockData.pins.indexOf(modelData.id) >= 0
+                    width: ListView.view.width
+                    height: 36
+                    radius: Theme.radius
+                    color: appMouse.containsMouse ? Theme.pill : "transparent"
+                    Behavior on color {
+                        ColorAnimation {
+                            duration: 120
+                        }
+                    }
+                    MouseArea {
+                        id: appMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: DockData.togglePin(appRow.modelData.id)
+
+                        Image {
+                            id: appIcon
+                            anchors.left: parent.left
+                            anchors.leftMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 22
+                            height: 22
+                            sourceSize: Qt.size(44, 44)
+                            source: Quickshell.iconPath(appRow.modelData.icon, "application-x-executable")
+                            asynchronous: true
+                        }
+                        Column {
+                            anchors.left: appIcon.right
+                            anchors.leftMargin: 10
+                            anchors.right: pinMark.left
+                            anchors.rightMargin: 6
+                            anchors.verticalCenter: parent.verticalCenter
+                            Text {
+                                width: parent.width
+                                text: appRow.modelData.name
+                                elide: Text.ElideRight
+                                color: appRow.pinned ? Theme.accent : Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize
+                                font.weight: 600
+                            }
+                            Text {
+                                width: parent.width
+                                visible: text !== ""
+                                text: appRow.modelData.genericName || appRow.modelData.comment
+                                elide: Text.ElideRight
+                                color: Theme.text
+                                opacity: 0.55
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.8
+                            }
+                        }
+                        // the pin: filled when it's on the dock
+                        Text {
+                            id: pinMark
+                            anchors.right: parent.right
+                            anchors.rightMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "push_pin"
+                            color: appRow.pinned ? Theme.accent : Theme.text
+                            opacity: appRow.pinned || appMouse.containsMouse ? 1 : 0.3
+                            font.family: Theme.iconFont
+                            font.pixelSize: Theme.iconSize
+                            font.variableAxes: ({
+                                    "FILL": appRow.pinned ? 1 : 0,
+                                    "wght": 700,
+                                    "opsz": 20,
+                                    "GRAD": 0
+                                })
+                        }
+                    }
+                }
+            }
+            Text {
+                visible: appList.count === 0
+                text: "No apps match."
+                color: Theme.text
+                opacity: 0.5
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize * 0.9
+            }
+        }
+    }
+  '';
+
   xdg.configFile."quickshell/WeatherData.qml".text = ''
     pragma Singleton
 
@@ -10030,6 +10877,9 @@ in
       hl.config({
           cursor = {
               inactive_timeout = 0,
+              -- don't move the mouse to the middle of a window when it gets focus (from
+              -- the dock, an app asking for attention, a focus keybind...)
+              no_warps = true,
               -- [GPU] NVIDIA needs software cursors; on AMD / Intel this can be false
               no_hardware_cursors = true,
           },
