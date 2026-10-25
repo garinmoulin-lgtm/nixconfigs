@@ -50,6 +50,54 @@ let
         done
         cp ${inputs.rose-pine-gtk}/gtk4/rose-pine.css $out/share/rose-pine-gtk4/gtk.css
       '';
+      # Everblush's GTK theme isn't in nixpkgs either. It comes from the everblush-gtk
+      # flake input (Everblush/gtk on GitHub). The repo has the finished GTK 3 and
+      # GTK 2 themes in it, so they're copied in as they are, with the pictures they
+      # use (assets/, which gtk-3.0/gtk.css finds at ../assets). (Its own default.nix
+      # builds from a gtk-3.0/gtk.scss that the repo doesn't have, so it isn't used.)
+      # There's no GTK 4 version, so everblushGtk4 below gives libadwaita apps the
+      # colors.
+      everblushGtk = pkgs.runCommand "everblush-gtk-theme" { } ''
+        mkdir -p $out/share/themes/Everblush
+        cp -r ${inputs.everblush-gtk}/{gtk-2.0,gtk-3.0,assets,index.theme} $out/share/themes/Everblush/
+      '';
+      # libadwaita's named colors, in Everblush's colors (my own file, in the same
+      # shape as Rosé Pine's GTK 4 one)
+      everblushGtk4 = pkgs.writeText "everblush-gtk4.css" ''
+        @define-color accent_bg_color #67b0e8;
+        @define-color accent_fg_color #141b1e;
+        @define-color accent_color #67b0e8;
+        @define-color destructive_bg_color #e57474;
+        @define-color destructive_fg_color #141b1e;
+        @define-color destructive_color #e57474;
+        @define-color success_bg_color #8ccf7e;
+        @define-color success_fg_color #141b1e;
+        @define-color success_color #8ccf7e;
+        @define-color warning_bg_color #e5c76b;
+        @define-color warning_fg_color #141b1e;
+        @define-color warning_color #e5c76b;
+        @define-color error_bg_color #e57474;
+        @define-color error_fg_color #141b1e;
+        @define-color error_color #e57474;
+        @define-color window_bg_color #141b1e;
+        @define-color window_fg_color #dadada;
+        @define-color view_bg_color #161d1f;
+        @define-color view_fg_color #dadada;
+        @define-color headerbar_bg_color #141b1e;
+        @define-color headerbar_fg_color #dadada;
+        @define-color headerbar_backdrop_color @window_bg_color;
+        @define-color headerbar_shade_color #141b1e;
+        @define-color card_bg_color #232a2d;
+        @define-color card_fg_color #dadada;
+        @define-color card_shade_color #141b1e;
+        @define-color popover_bg_color #232a2d;
+        @define-color popover_fg_color #dadada;
+        @define-color dialog_bg_color #232a2d;
+        @define-color dialog_fg_color #dadada;
+        @define-color sidebar_bg_color #161d1f;
+        @define-color sidebar_fg_color #dadada;
+        @define-color sidebar_backdrop_color #161d1f;
+      '';
       # one build for Tokyo Night's GTK theme and its icons
       tokyonightGtk = pkgs.tokyonight-gtk-theme.override {
         colorVariants = [ "dark" ];
@@ -67,6 +115,7 @@ let
         "rose-pine"
         "gruvbox"
         "tokyo-night"
+        "everblush"
       ];
 
       # Each theme:
@@ -493,6 +542,92 @@ let
             color15 #c0caf5
             color16 #ff9e64
             color17 #db4b4b
+          '';
+        };
+
+        # Everblush/everblush (the palette), Everblush/everblush.nvim (palette.lua)
+        everblush = {
+          name = "Everblush";
+          variant = "Dark";
+          colors = {
+            bg = "141b1e"; # background
+            bgDim = "141b1e"; # (nothing darker in the palette)
+            surface = "161d1f"; # contrast
+            overlay = "232a2d"; # lighter background (color0)
+            midlight = "2d3437"; # color8
+            light = "404749"; # comment
+            dim = "404749"; # comment
+            border = "2d3437"; # color8
+            fg = "dadada"; # foreground
+            fgBright = "dadada";
+            subtle = "b3b9b8"; # light gray (color7)
+            # Everblush has no steps between light gray and comment, or an orange,
+            # so these three are blends of its colors (not from the palette):
+            placeholder = "7a8080"; # halfway from light gray to comment
+            disabled = "5d6365"; # three quarters of the way
+            orange = "e59d6f"; # halfway from red to yellow
+            red = "e57474";
+            yellow = "e5c76b";
+            green = "8ccf7e";
+            cyan = "6cbfbf";
+            blue = "67b0e8";
+            magenta = "c47fd5";
+            accent = "67b0e8"; # blue
+            link = "67b0e8";
+            linkVisited = "c47fd5";
+          };
+          gtk = {
+            name = "Everblush";
+            package = everblushGtk;
+          };
+          gtk4Css = "${everblushGtk4}";
+          icons = {
+            # No Everblush icons exist. Tela's standard dark one: blue folders (#5294e2),
+            # close to the accent. (Not Papirus: every theme's icons are installed side
+            # by side, and Catppuccin's are already a Papirus with the same folder
+            # names, so two can't both be there.)
+            name = "Tela-dark";
+            package = pkgs.tela-icon-theme;
+          };
+          cursor = {
+            # no Everblush cursor exists either; Nord's cool grey-blue is the closest
+            # of the Capitaine set
+            name = "Capitaine Cursors (Nord)";
+            package = pkgs.capitaine-cursors-themed;
+          };
+          # The 16 colors from Gogh's Everblush (by Everblush's author, Mangeshrex);
+          # the cursor, selection and tab colors are my picks from the palette.
+          kitty = ''
+            background #141b1e
+            foreground #dadada
+            cursor #dadada
+            cursor_text_color #141b1e
+            selection_foreground #dadada
+            selection_background #2d3437
+            url_color #67b0e8
+            active_border_color #67b0e8
+            inactive_border_color #232a2d
+            active_tab_foreground #141b1e
+            active_tab_background #67b0e8
+            inactive_tab_foreground #b3b9b8
+            inactive_tab_background #232a2d
+            tab_bar_background #141b1e
+            color0 #232a2d
+            color1 #e57474
+            color2 #8ccf7e
+            color3 #e5c76b
+            color4 #67b0e8
+            color5 #c47fd5
+            color6 #6cbfbf
+            color7 #b3b9b8
+            color8 #2d3437
+            color9 #ef7e7e
+            color10 #96d988
+            color11 #f4d67a
+            color12 #71baf2
+            color13 #ce89df
+            color14 #67cbe7
+            color15 #bdc3c2
           '';
         };
       };
@@ -1606,7 +1741,7 @@ in
                         width: ListView.view.width
                         height: toastContent.implicitHeight + 24
                         radius: 12
-                        color: Theme.bg
+                        color: Theme.glass     // see-through and blurred, like the bar
                         border.width: 1
                         border.color: critical ? Theme.red : Theme.pill
 
@@ -1735,15 +1870,30 @@ in
                     left: true
                     right: true
                 }
-                // The window is a little taller than the bar when it curves (Theme.barCurve):
-                // the curves hang below it. Windows still only make room for the bar itself
-                // (exclusiveZone), and the curves let clicks through (mask).
-                implicitHeight: Theme.barHeight + (Theme.barCurve ? Theme.radius : 0)
+                // The window covers the whole screen: the widgets' popups are drawn in it
+                // (Widget.qml), so the bar and an open popup are one surface, blurred
+                // together with no edge between them. Everything but the bar and an open
+                // popup is clear and lets clicks through (mask), and windows only make
+                // room for the bar itself (exclusiveZone).
+                implicitHeight: modelData.height
                 exclusiveZone: Theme.barHeight
                 color: "transparent"
+                // the name Hyprland's blur rule for the bar looks for
+                WlrLayershell.namespace: "bar"
+
+                // the widget whose popup is open on this bar, if any
+                readonly property var openWidget: Ui.openWidget && Ui.openWidget.barContent === bar.contentItem ? Ui.openWidget : null
+                // Takes clicks: the bar, and an open popup (only the part showing).
                 mask: Region {
                     item: barBody
+                    Region {
+                        item: bar.openWidget ? bar.openWidget.popupItem : null
+                    }
                 }
+                // Typing goes to an open popup (search boxes, the calendar's add row...):
+                // the bar takes the keyboard when you click in it while a popup is open.
+                // Otherwise it never does, so it can't take focus from your windows.
+                WlrLayershell.keyboardFocus: bar.openWidget ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
                 // ── the inward curves under both ends of the bar ──
                 // So the bar looks like it wraps around the top corners of the screen.
@@ -1767,7 +1917,7 @@ in
 
                     Rectangle {
                         anchors.fill: parent
-                        color: Theme.bg
+                        color: Theme.glass     // see-through, blurred (Theme.glassOpacity)
                     }
 
                     SystemClock {
@@ -1812,6 +1962,7 @@ in
                         // Icon only, like Bluetooth. The icon shows what's on: a filter, night
                         // light, or plain brightness.
                         Widget {
+                            id: dispWidget
                             anchors.verticalCenter: parent.verticalCenter
                             icon: {
                                 if (disp.filter === "invert")
@@ -1945,7 +2096,7 @@ in
 
                                 // Read the real brightness (and whether there's a backlight at all)
                                 // at start and each time the popup opens, so the keys are picked up.
-                                readonly property bool shown: !!QsWindow.window && QsWindow.window.visible
+                                readonly property bool shown: dispWidget.popupShown
                                 onShownChanged: if (shown)
                                     reader.running = true
                                 Process {
@@ -2222,6 +2373,7 @@ in
                         // ── Bluetooth ──
                         // In the bar: just the icon, no pill. Click it for the device list.
                         Widget {
+                            id: btWidget
                             anchors.verticalCenter: parent.verticalCenter
                             // bluetooth_searching (the one with waves) while something is still connecting
                             icon: !btList.powered ? "bluetooth_disabled" : btList.anyConnected ? "bluetooth_connected" : btList.anyConnecting ? "bluetooth_searching" : "bluetooth"
@@ -2390,7 +2542,7 @@ in
                                     when: btList.powered
                                     target: btList.adapter
                                     property: "discovering"
-                                    value: !!QsWindow.window && QsWindow.window.visible
+                                    value: btWidget.popupShown
                                 }
 
                                 // header: title on the left, on/off switch on the right
@@ -2650,7 +2802,7 @@ in
                                                             width: parent.width
                                                             height: 26
                                                             radius: height / 2
-                                                            color: btActionMouse.containsMouse && !busy ? tint : Theme.bg
+                                                            color: btActionMouse.containsMouse && !busy ? tint : Theme.glass
                                                             opacity: busy ? 0.5 : 1
                                                             scale: btActionMouse.pressed && !busy ? 0.85 : 1
 
@@ -3244,7 +3396,7 @@ in
                                         rightPadding: 12
                                         background: Rectangle {
                                             radius: height / 2
-                                            color: Theme.bg
+                                            color: Theme.glass
                                             border.width: 1
                                             border.color: search.activeFocus ? Theme.accent : Theme.pillIcon
                                         }
@@ -3443,7 +3595,7 @@ in
                                         Keys.onEscapePressed: text = ""
                                         background: Rectangle {
                                             radius: height / 2
-                                            color: Theme.bg
+                                            color: Theme.glass
                                             border.width: 1
                                             border.color: queueSearch.activeFocus ? Theme.accent : Theme.pillIcon
                                         }
@@ -3667,7 +3819,7 @@ in
                                                             width: confirmLabel.implicitWidth + 30
                                                             height: 26
                                                             radius: height / 2
-                                                            color: confirmMouse.containsMouse ? Theme.green : Theme.bg
+                                                            color: confirmMouse.containsMouse ? Theme.green : Theme.glass
                                                             border.width: 1
                                                             border.color: Theme.green
                                                             scale: confirmMouse.pressed ? 0.85 : 1
@@ -4863,6 +5015,7 @@ in
                             }
                         }
                         Widget {
+                            id: netWidget
                             anchors.verticalCenter: parent.verticalCenter
                             // What the pill shows, straight from NetworkManager (it changes the moment
                             // you connect or disconnect, no polling): the Wi-Fi network when Wi-Fi is
@@ -4988,7 +5141,7 @@ in
                                         Binding {
                                             target: modelData
                                             property: "scannerEnabled"
-                                            value: !!QsWindow.window && QsWindow.window.visible
+                                            value: netWidget.popupShown
                                         }
                                     }
                                 }
@@ -5175,7 +5328,7 @@ in
                                                             rightPadding: 12
                                                             background: Rectangle {
                                                                 radius: height / 2                // fully rounded ends
-                                                                color: Theme.bg
+                                                                color: Theme.glass
                                                                 border.width: 1
                                                                 border.color: passwordField.activeFocus ? Theme.accent : Theme.pillIcon
                                                             }
@@ -5208,7 +5361,7 @@ in
                                                             width: parent.width
                                                             height: 26
                                                             radius: height / 2
-                                                            color: disconnectMouse.containsMouse ? Theme.red : Theme.bg
+                                                            color: disconnectMouse.containsMouse ? Theme.red : Theme.glass
                                                             scale: disconnectMouse.pressed ? 0.85 : 1
 
                                                             Behavior on color {
@@ -5683,7 +5836,7 @@ in
                                                     height: 5
                                                     radius: height / 2
                                                     // the empty part of the meter: whichever of the two colors the row isn't
-                                                    color: partRow.picked ? Theme.bg : Theme.pill
+                                                    color: partRow.picked ? Theme.glass : Theme.pill
                                                     Rectangle {
                                                         width: Math.max(parent.height, parent.width * partRow.percent / 100)
                                                         height: parent.height
@@ -5901,13 +6054,6 @@ in
                                 }
                             }
                         }
-                    }
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        height: 3
-                        color: Theme.bg
                     }
                 }
             }
@@ -6147,7 +6293,10 @@ in
         }
 
         property color bg: c.bg
-        property color pill: c.overlay
+        // pills, buttons, hovered rows: the theme's overlay color, as see-through as
+        // the glass under them (glassOpacity below), so everything has the same look
+        property color pillSolid: c.overlay
+        readonly property color pill: Qt.rgba(pillSolid.r, pillSolid.g, pillSolid.b, glassOpacity)
         property color pillIcon: c.dim
         property color text: c.fg
         property color red: c.red
@@ -6160,7 +6309,7 @@ in
         property color accent: c.accent
 
         Behavior on bg { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
-        Behavior on pill { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+        Behavior on pillSolid { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
         Behavior on pillIcon { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
         Behavior on text { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
         Behavior on red { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
@@ -6171,6 +6320,17 @@ in
         Behavior on cyan { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
         Behavior on orange { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
         Behavior on accent { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+
+        // The bar, its widgets, the dock and the notification popups: the theme's
+        // background, see-through, with Hyprland blurring what's behind them (the layer
+        // rules in the Hyprland config: "bar", "dock", "notification-popups"). The
+        // pills, buttons and text boxes on them use it too (pill above, glass below).
+        // 1 = solid, 0 = clear. 0.8 = mostly solid, so the theme's colors stay clear,
+        // with a little of what's behind showing through.
+        // The bar and the widgets that drop out of it all use this one color, so an
+        // open widget and the bar read as one piece.
+        property real glassOpacity: 0.8
+        readonly property color glass: Qt.rgba(bg.r, bg.g, bg.b, glassOpacity)
 
         property int barHeight: 38
         // the bar curves inward under both ends (Theme.radius big), like it wraps
@@ -6212,8 +6372,17 @@ in
     // `button:` is what sits in the bar: any item (Image, Text, Row, Rectangle, ...).
     // Leave it out to get a plain icon from `icon:` instead.
     // Everything else you write inside Widget { } is the popup's content.
+    // `popupShown` is true while the popup is on screen (opening, open or closing), for
+    // content that should only do something while it can be seen.
     //
     // Popup size: leave popupWidth / popupHeight at 0 to fit the content, or set pixels.
+    //
+    // The popup is drawn inside the bar's own window, not in a window of its own. The
+    // bar's window covers the whole screen for that (shell.qml; everything outside the
+    // bar and an open popup is clear and lets clicks through), so the bar and an open
+    // popup are one surface: Hyprland blurs them together, in one go, and there's no
+    // edge between them. (As a separate popup window, Hyprland blurred it on its own,
+    // after the bar, and the bar's glass got blurred into its top edge: a visible line.)
     import QtQuick
     import QtQuick.Shapes
     import Quickshell
@@ -6243,27 +6412,19 @@ in
         function timeFor(base, height) {
             return Math.round(base * (0.9 + 0.3 * Math.min(1, height / 900)));
         }
-        property int headroom: 240       // extra window height if the screen's size isn't known yet
-
-        // The popup window's height. See implicitHeight in the PopupWindow below.
-        // It's the whole screen below the bar, every time: the empty part is
-        // invisible and click-through, and the popup never has to make its window
-        // bigger while it's open. (Growing an open popup's window didn't always take:
-        // the weather card, filling in after its data arrived on the first click,
-        // got its bottom cut off flat, rounded corners and all.) Not taller than
-        // that, or Hyprland would move it.
-        property real windowHeight: 0
-        function fitWindow() {
-            const bar = root.QsWindow.window;
-            const room = bar && bar.screen ? bar.screen.height - Theme.barHeight : 0;
-            windowHeight = room > 0 ? room : popup.bodyHeight + headroom;
-        }
 
         // true while the popup is open (or opening)
         property bool open: false
         // How far open the popup is: 0 = closed, 1 = fully open. This is what gets
         // animated; the shape's height and the content's position follow it.
         property real openness: 0
+        // the popup is on screen (opening, open, or closing)
+        readonly property bool popupShown: openness > 0
+
+        // For the bar (shell.qml): the window this sits in, and the popup's area, which
+        // the bar adds to the part of its window that takes clicks while it's open.
+        readonly property Item barContent: root.QsWindow.contentItem
+        readonly property Item popupItem: popup
 
         // Children written inside Widget { } go into `area`, inside the popup.
         default property alias content: area.data
@@ -6271,15 +6432,23 @@ in
         implicitWidth: Math.max(Theme.moduleHeight, buttonLoader.width)
         implicitHeight: Theme.moduleHeight
 
+        // Centered under the button, kept on the screen. Item positions aren't reactive,
+        // so this is worked out when it opens and when its width changes.
+        function place() {
+            const win = root.QsWindow.contentItem;
+            if (!win)
+                return;
+            const mid = root.mapToItem(win, root.width / 2, 0).x;
+            popup.x = Math.round(Math.max(0, Math.min(win.width - popup.width, mid - popup.width / 2)));
+        }
+
         function openPopup() {
             // one popup at a time: close whichever widget is open now (any monitor's bar)
             if (Ui.openWidget && Ui.openWidget !== root)
                 Ui.openWidget.closePopup()
             Ui.openWidget = root
-            root.fitWindow()
-            popup.visible = true
             root.open = true
-            grabBar = false
+            root.place()
             grab.active = true
             // Opening: sliding down out of the bar (openCurve)
             closeSlide.stop()
@@ -6294,11 +6463,9 @@ in
                 return
             root.open = false
             grab.active = false
-            grabBar = false
             if (Ui.openWidget === root)
                 Ui.openWidget = null
-            // Closing: back up into the bar (closeCurve). The window is hidden once
-            // this finishes (see onFinished).
+            // Closing: back up into the bar (closeCurve)
             openSlide.stop()
             resize.stop()
             closeSlide.duration = root.timeFor(root.closeDuration, popup.shownHeight)
@@ -6322,25 +6489,18 @@ in
             duration: root.closeDuration
             easing.type: Easing.BezierSpline
             easing.bezierCurve: root.closeCurve.concat([1, 1])
-            onFinished: if (root.openness === 0) popup.visible = false
         }
 
         // Click-off-to-close, through Hyprland's focus grab. While the popup is open the
-        // grab covers the popup and this bar: clicks there work normally (other widgets
-        // and bar buttons react on the first click), and typed keys go to the popup. A
-        // click anywhere else ends the grab and Hyprland tells us (onCleared), so the
-        // popup slides back into the bar. (Hyprland spends that outside click on ending
-        // the grab; it doesn't reach the app you clicked.)
-        //
-        // The bar joins the grab in a second step, after the grab has gone out with the
-        // popup alone: Hyprland hands the keyboard to one of the grabbed windows in no
-        // fixed order, so the popup goes first to be sure it gets your typing.
-        property bool grabBar: false
+        // grab covers the bar's window (and so the popup in it): clicks there work
+        // normally (other widgets and bar buttons react on the first click), and typed
+        // keys go to it (the bar takes the keyboard while a popup is open, see
+        // keyboardFocus in shell.qml). A click anywhere else ends the grab and Hyprland
+        // tells us (onCleared), so the popup slides back into the bar. (Hyprland spends
+        // that outside click on ending the grab; it doesn't reach the app you clicked.)
         HyprlandFocusGrab {
             id: grab
-            windows: root.grabBar ? [popup, root.QsWindow.window] : [popup]
-            onActiveChanged: if (active)
-                root.grabBar = true
+            windows: root.QsWindow.window ? [root.QsWindow.window] : []
             onCleared: root.closePopup()
         }
         // e.g. a monitor unplugged while its bar had the open popup
@@ -6348,7 +6508,6 @@ in
             Ui.openWidget = null
 
         // Log out / Restart / Power off: close, so the whole screen fades to black.
-        // (Popups are drawn above everything else, even the black fade layer.)
         Connections {
             target: Ui
             function onLeavingChanged() {
@@ -6389,45 +6548,25 @@ in
             }
         }
 
-        PopupWindow {
+        // The popup: drawn straight into the bar's window (see the top of this file),
+        // with its top on the bar's bottom edge.
+        Item {
             id: popup
-
-            anchor {
-                // Attach to the whole bar window (not just the button), so the
-                // popup can sit on the bar's bottom edge.
-                window: root.QsWindow.window
-
-                // Never move it up or down to make it fit. The window reaches the bottom
-                // of the screen (see fitWindow), and Hyprland was sliding it up a few
-                // pixels to fit, which hid most of the two curves into the bar behind
-                // the bar itself. Sideways is still fine (a popup near the screen's edge).
-                adjustment: PopupAdjustment.SlideX
-
-                // Runs right before the popup is placed. Item positions aren't reactive,
-                // so the position is worked out here instead of in a binding.
-                onAnchoring: {
-                    // Where this button sits inside the bar window.
-                    const pos = root.QsWindow.itemPosition(root)
-                    // Centered under the button...
-                    popup.anchor.rect.x = pos.x + root.width / 2 - popup.implicitWidth / 2
-                    // ...with its top exactly on the bar's bottom edge.
-                    popup.anchor.rect.y = Theme.barHeight   // the bar's edge (the window can be taller: Theme.barCurve)
-                }
-            }
+            parent: root.QsWindow.contentItem
+            z: 100                  // over the rest of the bar (its corner curves)
+            visible: root.popupShown
+            y: Theme.barHeight
+            width: implicitWidth
+            height: shape.height    // only the part showing takes clicks (the bar's mask)
 
             // Content size (+ padding), plus room for a curve on each side.
             readonly property real bodyWidth: root.popupWidth > 0 ? root.popupWidth : Math.ceil(area.childrenRect.width + root.padding * 2)
             readonly property real bodyHeight: root.popupHeight > 0 ? root.popupHeight : Math.ceil(area.childrenRect.height + root.padding * 2)
             implicitWidth: bodyWidth + root.curve * 2
-            // The window is as tall as the screen below the bar (see fitWindow) and doesn't
-            // change while it's open. Resizing a popup window makes it flash for a frame,
-            // which is what happened every time Bluetooth or Wi-Fi found something and the
-            // list got a row longer. Now only the shape inside grows; the window stays.
-            implicitHeight: Math.max(1, root.windowHeight)
-            // only if the screen's size wasn't known when it opened (see fitWindow)
+            onImplicitWidthChanged: if (root.open)
+                root.place()
+
             onBodyHeightChanged: {
-                if (root.open && bodyHeight > root.windowHeight)
-                    root.fitWindow();
                 // open (or opening): glide to the new size; closed: just take it
                 if (root.open) {
                     // a bit longer for a bigger change, so a whole section appearing
@@ -6438,11 +6577,6 @@ in
                 } else if (!closeSlide.running) {
                     shownHeight = bodyHeight;
                 }
-            }
-            // Clicks only land on the shape. The empty part of the window below it lets
-            // them through, as if the popup weren't there.
-            mask: Region {
-                item: shape
             }
 
             // The height the shape shows. It follows bodyHeight, and glides there on the
@@ -6456,21 +6590,6 @@ in
                 property: "shownHeight"
                 easing.type: Easing.BezierSpline
                 easing.bezierCurve: root.openCurve.concat([1, 1])
-            }
-
-            color: "transparent"    // the shape below is what you see
-            visible: false          // starts closed
-
-            // If the compositor ever hides the popup by itself, skip the animation
-            // and reset so the next click opens it again.
-            onClosed: {
-                openSlide.stop()
-                closeSlide.stop()
-                grab.active = false
-                root.openness = 0
-                root.open = false
-                if (Ui.openWidget === root)
-                    Ui.openWidget = null
             }
 
             // The background: a box whose top corners flare outward into the bar.
@@ -6492,7 +6611,7 @@ in
                 readonly property real boxRight: width - root.curve      // right side of the box
 
                 ShapePath {
-                    fillColor: Theme.bg            // same color as the bar, so they read as one piece
+                    fillColor: Theme.glass         // the bar's color, in the same window: one piece
                     strokeColor: "transparent"
 
                     // Start on the bar's edge, left of the box, and trace clockwise.
@@ -6542,7 +6661,6 @@ in
                     opacity: root.openness
                 }
             }
-
         }
     }
   '';
@@ -7563,7 +7681,7 @@ in
             property string selected: Planner.key(root.now)
 
             // back to this month and today each time it opens
-            readonly property bool open: !!QsWindow.window && QsWindow.window.visible
+            readonly property bool open: root.popupShown
             onOpenChanged: if (open) {
                 viewYear = root.now.getFullYear();
                 viewMonth = root.now.getMonth();
@@ -7994,7 +8112,7 @@ in
                             onAccepted: parent.submit()
                             background: Rectangle {
                                 radius: height / 2
-                                color: Theme.bg
+                                color: Theme.glass
                                 border.width: 1
                                 border.color: evTitle.activeFocus ? Theme.accent : Theme.pillIcon
                             }
@@ -8014,7 +8132,7 @@ in
                             onAccepted: parent.submit()
                             background: Rectangle {
                                 radius: height / 2
-                                color: Theme.bg
+                                color: Theme.glass
                                 border.width: 1
                                 border.color: evWhen.bad ? Theme.red : evWhen.activeFocus ? Theme.accent : Theme.pillIcon
                             }
@@ -8026,7 +8144,7 @@ in
                             width: 44
                             height: evWhen.height
                             radius: height / 2
-                            color: halfMouse.containsMouse && addRow.needsHalf ? Theme.pill : Theme.bg
+                            color: halfMouse.containsMouse && addRow.needsHalf ? Theme.pill : Theme.glass
                             border.width: 1
                             border.color: addRow.needsHalf ? Theme.accent : Theme.pillIcon
                             opacity: addRow.needsHalf || addRow.typed === "" ? 1 : 0.4
@@ -8530,7 +8648,7 @@ in
                             onAccepted: parent.submit()
                             background: Rectangle {
                                 radius: height / 2
-                                color: Theme.bg
+                                color: Theme.glass
                                 border.width: 1
                                 border.color: remTitle.activeFocus ? Theme.accent : Theme.pillIcon
                             }
@@ -8548,7 +8666,7 @@ in
                             onAccepted: parent.submit()
                             background: Rectangle {
                                 radius: height / 2
-                                color: Theme.bg
+                                color: Theme.glass
                                 border.width: 1
                                 border.color: remRow.bad ? Theme.red : remWhen.activeFocus ? Theme.accent : Theme.pillIcon
                             }
@@ -8740,7 +8858,7 @@ in
                         onAccepted: parent.start()
                         background: Rectangle {
                             radius: height / 2
-                            color: Theme.bg
+                            color: Theme.glass
                             border.width: 1
                             border.color: tLength.bad ? Theme.red : tLength.activeFocus ? Theme.accent : Theme.pillIcon
                         }
@@ -8758,7 +8876,7 @@ in
                         onAccepted: parent.start()
                         background: Rectangle {
                             radius: height / 2
-                            color: Theme.bg
+                            color: Theme.glass
                             border.width: 1
                             border.color: tLabel.activeFocus ? Theme.accent : Theme.pillIcon
                         }
@@ -10104,7 +10222,7 @@ in
                                 width: nameLabel.implicitWidth + 16
                                 height: 24
                                 radius: height / 2
-                                color: Theme.bg
+                                color: Theme.glass     // like the dock under it
                                 Text {
                                     id: nameLabel
                                     anchors.centerIn: parent
@@ -10291,7 +10409,7 @@ in
             readonly property real boxRight: width - pop.curve
 
             ShapePath {
-                fillColor: Theme.bg
+                fillColor: Theme.glass      // see-through and blurred, like the bar
                 strokeColor: "transparent"
 
                 // on the edge, left of the box; around clockwise
@@ -10385,7 +10503,7 @@ in
             spacing: 8
 
             // clear the search each time it opens
-            readonly property bool open: !!QsWindow.window && QsWindow.window.visible
+            readonly property bool open: root.popupShown
             onOpenChanged: if (!open)
                 search.text = ""
 
@@ -10528,7 +10646,7 @@ in
                 Keys.onEscapePressed: text = ""
                 background: Rectangle {
                     radius: height / 2
-                    color: Theme.bg
+                    color: Theme.glass
                     border.width: 1
                     border.color: search.activeFocus ? Theme.accent : Theme.pillIcon
                 }
@@ -11294,7 +11412,7 @@ in
             spacing: 12
 
             // fresh data each time it opens (if it's more than 10 minutes old)
-            readonly property bool open: !!QsWindow.window && QsWindow.window.visible
+            readonly property bool open: root.popupShown
             onOpenChanged: if (open)
                 WeatherData.refreshIfOld()
             else
@@ -11944,7 +12062,7 @@ in
 
         property bool mirrored: false
         property real size: Theme.radius
-        property color color: Theme.bg
+        property color color: Theme.glass       // the bar's color, see-through like it
 
         width: size
         height: size
@@ -12758,12 +12876,22 @@ in
       hl.bind("SUPER + CTRL + Right", hl.dsp.window.move({ workspace = "+1" }))
       hl.bind("SUPER + CTRL + Left", hl.dsp.window.move({ workspace = -1 }))
 
-      hl.config({
-          layerrule = {
-              "blur, quickshell-bar",
-              "ignorealpha 0.4, quickshell-bar", -- lets blur render through semi-transparent areas; tune threshold to your CSS alpha
-          }
-      })
+      -- The bar (and the widgets that drop out of it), the dock and the notification
+      -- popups are see-through (Theme.glassOpacity in Quickshell's
+      -- Theme.qml): blur what's behind them. ignore_alpha: leave the clear parts of their
+      -- windows alone (only blur under what's at least 10% solid; keep it under
+      -- Theme.glassOpacity), so the blur follows their shapes.
+      --
+      -- xray: which blur. On, a surface shows the blurred wallpaper (worked out once for
+      -- the whole screen); off, it blurs whatever is drawn under it right then, windows
+      -- included. The bar uses it on: its widgets are drawn inside the bar's own window
+      -- (Widget.qml), so the bar and an open widget are one surface with one blur and no
+      -- edge between them. (Behind the bar there's only wallpaper anyway; an open widget
+      -- over a window shows the blurred wallpaper.) The dock and notifications don't
+      -- touch anything, so they blur the windows behind them (xray off).
+      hl.layer_rule({ name = "bar-blur", match = { namespace = "bar" }, blur = true, ignore_alpha = 0.1, xray = true })
+      hl.layer_rule({ name = "dock-blur", match = { namespace = "dock" }, blur = true, ignore_alpha = 0.1, xray = false })
+      hl.layer_rule({ name = "notification-blur", match = { namespace = "notification-popups" }, blur = true, ignore_alpha = 0.1, xray = false })
 
 
       -- Consolidated decoration/blur block (previously split across 3 hl.config calls

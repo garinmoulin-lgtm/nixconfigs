@@ -62,6 +62,9 @@ in
     #  - consoleLogLevel 3 / quiet: only real errors from the kernel get printed on screen
     #    (driver warnings were the text that popped up now and then)
     #  - systemd/udev status lines off
+    #    (boot.initrd.verbose used to be here too: it was for the old scripted initrd,
+    #    which nixpkgs removed, so the option is gone. The systemd initrd that replaced
+    #    it follows quiet and systemd.show_status=false below.)
     # (In its own little block because boot.kernelParams is also set in the GPU section.)
     # Kernel settings: they take effect after a reboot. Everything still goes to the
     # journal (journalctl -b), it just isn't printed on the screen.
@@ -73,7 +76,6 @@ in
         "systemd.show_status=false"
       ];
       boot.consoleLogLevel = 3;
-      boot.initrd.verbose = false;
     }
     #./kernel.nix
   ];

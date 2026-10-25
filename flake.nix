@@ -32,6 +32,12 @@
       url = "github:rose-pine/gtk";
       flake = false;
     };
+    # Everblush's GTK theme (not in nixpkgs), for the everblush theme in home.nix.
+    # Also just the repo's files.
+    everblush-gtk = {
+      url = "github:Everblush/gtk";
+      flake = false;
+    };
   };
 
   outputs =
