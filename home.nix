@@ -1592,8 +1592,14 @@ in
 
             onNotification: n => {
                 n.tracked = true;              // without this the notification is discarded
-                if (n.lastGeneration)          // re-sent after a config reload: not new
+                if (n.lastGeneration) {        // re-sent after a config reload: not new
+                    // ...but a clock alarm still unread keeps ringing
+                    if (n.hints && n.hints["x-repeat-sound"] && unread.includes(n.id))
+                        startRinging(n);
                     return;
+                }
+                if (n.hints && n.hints["x-repeat-sound"])
+                    startRinging(n);
                 unread = unread.concat([n.id]);
                 arrived = Object.assign({}, arrived, {
                     [n.id]: new Date()
@@ -1608,6 +1614,59 @@ in
             function markAllRead() {
                 unread = [];
             }
+            function markRead(id) {
+                unread = unread.filter(x => x !== id);
+            }
+
+            // ── Ringing ──
+            // The clock's timers, events and reminders (Planner.qml's ring()) come with an
+            // x-repeat-sound hint: their sound plays, a short pause, plays again... until
+            // the notification is X'd (popup or notification center: dismissed) or marked
+            // read. Its popup stays up meanwhile (toasts below). A few at once ring as one,
+            // with the newest one's sound.
+            property var ringing: ({})        // notification id -> sound
+            readonly property bool isRinging: Object.keys(ringing).length > 0
+            property string ringSound: ""
+            function startRinging(n) {
+                ringing = Object.assign({}, ringing, {
+                    [n.id]: n.hints["x-repeat-sound"]
+                });
+                ringSound = n.hints["x-repeat-sound"];
+                n.closed.connect(() => stopRinging(n.id));   // X'd, or the app closed it
+                if (!ringer.running)
+                    ringer.running = Sounds.enabled;
+            }
+            function stopRinging(id) {
+                if (!(id in ringing))
+                    return;
+                const r = Object.assign({}, ringing);
+                delete r[id];
+                ringing = r;
+            }
+            // marked read (one or all): stops ringing
+            onUnreadChanged: {
+                for (const id in ringing)
+                    if (!unread.includes(Number(id)))
+                        stopRinging(Number(id));
+            }
+            // nothing left ringing: stop right away, even mid-sound
+            onIsRingingChanged: if (!isRinging) {
+                ringGap.stop();
+                ringer.running = false;
+            }
+        }
+        // plays the sound once; the pause after it, then again while something's ringing
+        Process {
+            id: ringer
+            command: ["${pkgs.pipewire}/bin/pw-play", Sounds.path(notifs.ringSound)]
+            onExited: if (notifs.isRinging)
+                ringGap.restart()
+        }
+        Timer {
+            id: ringGap
+            interval: 1500      // the pause between rings
+            onTriggered: if (notifs.isRinging && Sounds.enabled)
+                ringer.running = true
         }
 
         // ── Notification popups ──
@@ -1737,6 +1796,8 @@ in
                         required property int nid
                         readonly property var n: toasts.objs[nid] ?? null
                         readonly property bool critical: !!n && n.urgency === NotificationUrgency.Critical
+                        // a clock alarm that's ringing (notifs.ringing): stays up until you stop it
+                        readonly property bool ringing: nid in notifs.ringing
 
                         width: ListView.view.width
                         height: toastContent.implicitHeight + 24
@@ -1752,18 +1813,23 @@ in
                             from: 1
                             to: 0
                             duration: toasts.duration
-                            paused: toastHover.hovered
+                            paused: toastHover.hovered || toast.ringing
                             onFinished: toasts.remove(toast.nid)
                         }
 
                         HoverHandler {
                             id: toastHover
                         }
-                        // click anywhere: send it away now (it stays in the notification center)
+                        // click anywhere (or the x): send it away now. It stays in the notification
+                        // center; a ringing alarm is marked read there, which stops it.
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: toasts.remove(toast.nid)
+                            onClicked: {
+                                if (toast.ringing)
+                                    notifs.markRead(toast.nid);
+                                toasts.remove(toast.nid);
+                            }
                         }
 
                         Column {
@@ -1783,7 +1849,7 @@ in
                                     anchors.left: parent.left
                                     anchors.right: toastClose.left
                                     anchors.rightMargin: 8
-                                    text: (toast.n && toast.n.appName ? toast.n.appName : "Notification") + "  ·  " + Qt.formatDateTime(new Date(), "h:mm AP")
+                                    text: (toast.n && toast.n.appName ? toast.n.appName : "Notification") + "  ·  " + Qt.formatDateTime(new Date(), "h:mm AP") + (toast.ringing ? "  ·  click to stop" : "")
                                     elide: Text.ElideRight
                                     color: toast.critical ? Theme.red : Theme.accent
                                     font.family: Theme.font
@@ -6796,9 +6862,12 @@ in
                 save();
             }
         }
+        // A notification that rings: its sound plays over and over until you X it (on the
+        // popup or in the notification center) or mark it read. The notification server
+        // in shell.qml does the ringing, for any notification with an x-repeat-sound hint
+        // (the name of the sound, Sounds.qml).
         function ring(title, body, sound) {
-            Quickshell.execDetached(["${pkgs.libnotify}/bin/notify-send", "-a", "Clock", "-i", "alarm", "-h", "boolean:suppress-sound:true", title, body]);
-            Sounds.play(sound || "alarm-clock-elapsed");
+            Quickshell.execDetached(["${pkgs.libnotify}/bin/notify-send", "-a", "Clock", "-i", "alarm", "-h", "boolean:suppress-sound:true", "-h", "string:x-repeat-sound:" + (sound || "alarm-clock-elapsed"), title, body]);
         }
 
         // ── saving and loading ──
