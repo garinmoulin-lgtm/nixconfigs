@@ -3,6 +3,8 @@
   pkgs,
   lib,
   inputs,
+  # the NixOS config (configuration.nix), from home-manager's NixOS module
+  osConfig ? null,
   ...
 }:
 
@@ -1922,6 +1924,17 @@ in
             }
         }
 
+        // ── The workspaces dock ── (WorkspaceDock.qml): one per screen, hidden at the
+        // left edge
+        Variants {
+            model: Quickshell.screens
+
+            WorkspaceDock {
+                required property var modelData
+                screen: modelData
+            }
+        }
+
         Variants {
             model: Quickshell.screens
 
@@ -2020,9 +2033,7 @@ in
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: Theme.spacing
 
-                        Workspaces {
-                            screen: bar.screen
-                        }
+                        // (The workspace switcher is on the left edge now: WorkspaceDock.qml.)
 
                         // ── Display: brightness, night light, color filters ──
                         // Icon only, like Bluetooth. The icon shows what's on: a filter, night
@@ -10550,6 +10561,270 @@ in
     }
   '';
 
+  # The dock's body turned on its side, for the left edge (the workspaces dock).
+  xdg.configFile."quickshell/SidePanel.qml".text = ''
+    import QtQuick
+    import QtQuick.Shapes
+
+    // DockPanel.qml on its side: it sits flush on the left edge of the screen and grows
+    // out of it to the right, with the same flared curves where it meets the edge, the
+    // same rounded corners, glass, opening and closing curves and timing.
+    //
+    //   │╮
+    //   │╰──────────────╮
+    //   │ (the content)  │
+    //   │╭──────────────╯
+    //   │╯
+    //   left edge of the screen
+    Item {
+        id: pop
+
+        property bool open: false
+        property real anchorY: 0        // the middle (in the parent's coordinates)
+        property real baseX: 0          // the edge it grows out of
+
+        property int padding: 10
+        property int curve: 14          // the curves into the edge (Widget.qml: curve)
+        property int cornerRadius: 14   // the two right corners (Widget.qml: cornerRadius)
+        property int duration: 320
+        property int closeDuration: 260
+        property var openCurve: [0.3, 0.6, 0.35, 1]
+        property var closeCurve: [0.45, 0, 0.55, 1]
+
+        default property alias content: area.data
+
+        // 0 = closed (flat in the edge), 1 = all the way out
+        property real openness: 0
+        visible: openness > 0
+
+        readonly property real bodyWidth: Math.ceil(area.childrenRect.width + padding * 2)
+        readonly property real bodyHeight: Math.ceil(area.childrenRect.height + padding * 2)
+        // the size it's showing: glides to a new one when the content changes while open
+        // (a workspace appearing or going away)
+        property real shownWidth: bodyWidth
+        property real shownHeight: bodyHeight
+        Behavior on shownWidth {
+            enabled: pop.open && pop.openness === 1
+            NumberAnimation {
+                duration: 260
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: pop.openCurve.concat([1, 1])
+            }
+        }
+        Behavior on shownHeight {
+            enabled: pop.open && pop.openness === 1
+            NumberAnimation {
+                duration: 260
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: pop.openCurve.concat([1, 1])
+            }
+        }
+
+        x: baseX
+        y: anchorY - shownHeight / 2 - curve
+        width: openness * shownWidth
+        height: shownHeight + curve * 2
+
+        // a bigger one gets a little longer, like Widget.qml
+        function timeFor(base) {
+            return Math.round(base * (0.9 + 0.3 * Math.min(1, bodyWidth / 900)));
+        }
+        onOpenChanged: {
+            if (open) {
+                closeAnim.stop();
+                openAnim.duration = timeFor(duration);
+                openAnim.restart();
+            } else {
+                openAnim.stop();
+                closeAnim.duration = timeFor(closeDuration);
+                closeAnim.restart();
+            }
+        }
+        NumberAnimation {
+            id: openAnim
+            target: pop
+            property: "openness"
+            to: 1
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: pop.openCurve.concat([1, 1])
+        }
+        NumberAnimation {
+            id: closeAnim
+            target: pop
+            property: "openness"
+            to: 0
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: pop.closeCurve.concat([1, 1])
+        }
+
+        Shape {
+            id: shape
+            anchors.fill: parent
+            preferredRendererType: Shape.CurveRenderer
+
+            // the curves can't be bigger than half the width, so they grow in while opening
+            readonly property real c: Math.min(pop.curve, width / 2)
+            readonly property real r: Math.min(pop.cornerRadius, width / 2)
+            readonly property real boxTop: pop.curve
+            readonly property real boxBottom: height - pop.curve
+
+            ShapePath {
+                fillColor: Theme.glass      // see-through and blurred, like the bar
+                strokeColor: "transparent"
+
+                // on the edge, above the box; around clockwise
+                startX: 0
+                startY: shape.boxTop - shape.c
+                // top curve, out of the edge into the box's top side
+                PathArc {
+                    x: shape.c
+                    y: shape.boxTop
+                    radiusX: shape.c
+                    radiusY: shape.c
+                    direction: PathArc.Counterclockwise
+                }
+                PathLine {
+                    x: shape.width - shape.r
+                    y: shape.boxTop
+                }
+                // top-right corner
+                PathArc {
+                    x: shape.width
+                    y: shape.boxTop + shape.r
+                    radiusX: shape.r
+                    radiusY: shape.r
+                }
+                PathLine {
+                    x: shape.width
+                    y: shape.boxBottom - shape.r
+                }
+                // bottom-right corner
+                PathArc {
+                    x: shape.width - shape.r
+                    y: shape.boxBottom
+                    radiusX: shape.r
+                    radiusY: shape.r
+                }
+                PathLine {
+                    x: shape.c
+                    y: shape.boxBottom
+                }
+                // bottom curve, back out onto the edge
+                PathArc {
+                    x: 0
+                    y: shape.boxBottom + shape.c
+                    radiusX: shape.c
+                    radiusY: shape.c
+                    direction: PathArc.Counterclockwise
+                }
+            }
+        }
+
+        // The content rides the right edge as it opens and closes, so it comes out of
+        // the screen's edge. Anything outside the shape is cut off (clip).
+        Item {
+            y: pop.curve
+            width: parent.width
+            height: pop.shownHeight
+            clip: true
+
+            Item {
+                id: area
+                x: pop.width - pop.bodyWidth + pop.padding
+                y: (pop.shownHeight - pop.bodyHeight) / 2 + pop.padding
+                width: pop.bodyWidth - pop.padding * 2
+                height: pop.bodyHeight - pop.padding * 2
+                opacity: pop.openness
+            }
+        }
+    }
+  '';
+
+  # The workspaces dock: the workspace switcher on the left edge, hidden until you push
+  # the mouse against that edge (like the dock at the bottom).
+  xdg.configFile."quickshell/WorkspaceDock.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Wayland
+
+    // ── The workspaces dock ──
+    // This screen's workspaces (Workspaces.qml), down the left edge of the screen,
+    // hidden until you push the mouse against that edge. It grows out of the edge
+    // sideways, the way the dock grows up out of the bottom (SidePanel.qml: same
+    // curves, corners, glass and animation), and slides back in half a second after the
+    // mouse leaves it. It sits over your windows while it's out and doesn't take any
+    // space from them. Click a workspace to go there. (Super + Shift + Up / Down go to
+    // the one above / below from the keyboard.)
+    PanelWindow {
+        id: side
+
+        anchors {
+            left: true
+            top: true
+            bottom: true
+        }
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Top
+        WlrLayershell.namespace: "workspace-dock"   // its blur rule in the Hyprland config
+        color: "transparent"
+        implicitWidth: 120          // room to grow into
+
+        // ── showing and hiding ──
+        property bool shown: false
+        // the mouse is on the panel or the left edge
+        readonly property bool held: edgeHover.hovered || panelHover.hovered
+        onHeldChanged: {
+            if (held) {
+                hideDelay.stop();
+                shown = true;
+            } else {
+                hideDelay.restart();
+            }
+        }
+        Timer {
+            id: hideDelay
+            interval: 500
+            onTriggered: side.shown = false
+        }
+
+        // Only these take the mouse; the rest of the window lets clicks through. While
+        // it's in, that's just the left 2 px of the screen, below the bar (so going for
+        // the bar's first button doesn't bring it out).
+        mask: Region {
+            item: edge
+            Region {
+                item: panel.visible ? panel : null
+            }
+        }
+
+        // the left edge: push the mouse here to bring it out
+        Item {
+            id: edge
+            x: 0
+            y: Theme.barHeight + Theme.radius
+            width: 2
+            height: parent.height - y
+            HoverHandler {
+                id: edgeHover
+            }
+        }
+
+        SidePanel {
+            id: panel
+            open: side.shown
+            baseX: 0
+            anchorY: side.height / 2
+            HoverHandler {
+                id: panelHover
+            }
+
+            Workspaces {
+                screen: side.screen
+            }
+        }
+    }
+  '';
+
   # The dock's button in the top bar: pin, unpin and order the dock's apps.
   xdg.configFile."quickshell/DockControl.qml".text = ''
     import QtQuick
@@ -11971,95 +12246,104 @@ in
     import Quickshell
     import Quickshell.Hyprland
 
-    Rectangle {
+    // This screen's workspaces, top to bottom, for the workspaces dock on the left edge
+    // (WorkspaceDock.qml). Big targets: click one to go there. The highlight slides to
+    // the one you're on; the one under the mouse shrinks a little, like the bar's
+    // buttons.
+    Item {
         id: root
 
         required property var screen
 
-        property int cellWidth: 24
-        property int padding: 3
+        property int cell: 44           // a workspace's square
+        property int gap: 4
         property int slideTime: 300
 
         property var monitor: Hyprland.monitorFor(root.screen)
         property var list: !root.monitor ? [] : Hyprland.workspaces.values.filter(w => w.id > 0 && w.monitor === root.monitor)
         property int activeIndex: root.list.findIndex(w => w.active)
 
-        // Which number the mouse is over: -1 = none.
+        // Which one the mouse is over: -1 = none.
         property int hoveredIndex: -1
-        property real hoverShrink: 0.85   // size of the hovered number (same as the other bar buttons)
+        property real hoverShrink: 0.85
         property int hoverTime: 150
 
-        implicitWidth: root.list.length * root.cellWidth + root.padding * 2
-        implicitHeight: Theme.moduleHeight
-        radius: Theme.radius
-        color: Theme.pill
+        implicitWidth: root.cell
+        implicitHeight: root.list.length * (root.cell + root.gap) - root.gap
         visible: root.list.length > 0
 
+        // the highlight under the one you're on
         Rectangle {
-            x: root.padding + root.activeIndex * root.cellWidth
-            width: root.cellWidth
-            height: parent.height - 6
-            anchors.verticalCenter: parent.verticalCenter
+            y: root.activeIndex * (root.cell + root.gap)
+            width: root.cell
+            height: root.cell
             visible: root.activeIndex >= 0
-            radius: Theme.radius - 2
+            radius: Theme.radius + 2
             color: Qt.darker(Theme.accent, 3)
             opacity: 0.75
 
-            Behavior on x {
+            Behavior on y {
                 NumberAnimation {
                     duration: root.slideTime
                     easing.type: Easing.OutCubic
                 }
             }
         }
-        Row {
-            x: root.padding
-            height: parent.height
+        Column {
+            spacing: root.gap
 
             Repeater {
                 model: root.list
 
-                Text {
-                    id: wsNumber
+                Item {
+                    id: wsCell
                     required property var modelData
-                    required property int index        // 0, 1, 2... this number's place in the row
+                    required property int index     // 0, 1, 2... its place, top to bottom
 
-                    width: root.cellWidth
-                    height: parent.height
-                    text: modelData.name
-                    color: modelData.active ? Theme.accent : Theme.text
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
+                    width: root.cell
+                    height: root.cell
 
-                    font.family: Theme.font
-                    font.pixelSize: Theme.textSize
-                    font.weight: 600
-
-                    // only the hovered number shrinks; the rest stay as they are
-                    scale: root.hoveredIndex === wsNumber.index ? root.hoverShrink : 1
-
-                    Behavior on color {
-                        ColorAnimation {
-                            duration: root.slideTime
-                            easing.type: Easing.OutCubic
-                        }
+                    // a faint square behind each one, so they read as buttons
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Theme.radius + 2
+                        color: Theme.pill
+                        opacity: wsCell.modelData.active ? 0 : 0.6
                     }
-                    Behavior on scale {
-                        NumberAnimation {
-                            duration: root.hoverTime
-                            easing.type: Easing.OutCubic
+                    Text {
+                        anchors.centerIn: parent
+                        text: wsCell.modelData.name
+                        color: wsCell.modelData.active ? Theme.accent : Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 1.45
+                        font.weight: 700
+
+                        // only the hovered one shrinks; the rest stay as they are
+                        scale: root.hoveredIndex === wsCell.index ? root.hoverShrink : 1
+
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: root.slideTime
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+                        Behavior on scale {
+                            NumberAnimation {
+                                duration: root.hoverTime
+                                easing.type: Easing.OutCubic
+                            }
                         }
                     }
                     MouseArea {
                         anchors.fill: parent
-                        hoverEnabled: true             // needed for onEntered/onExited without clicking
+                        hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onEntered: root.hoveredIndex = wsNumber.index
-                        // only clear it if it's still ours: moving to the next number can
+                        onEntered: root.hoveredIndex = wsCell.index
+                        // only clear it if it's still ours: moving to the next one can
                         // run that one's onEntered before this onExited
-                        onExited: if (root.hoveredIndex === wsNumber.index)
+                        onExited: if (root.hoveredIndex === wsCell.index)
                             root.hoveredIndex = -1
-                        onClicked: wsNumber.modelData.activate()
+                        onClicked: wsCell.modelData.activate()
                     }
                 }
             }
@@ -12925,10 +13209,15 @@ in
       -- Environment variables live in home.nix (home.sessionVariables), which uwsm
       -- loads from ~/.config/uwsm/env before Hyprland starts. uwsm sets the XDG_* ones itself.
       --hyprmod settings
+      -- Super + Shift + Up / Down: the workspace above / below. Up and down to match
+      -- the workspace animation (slidevert) and the workspaces dock on the left edge,
+      -- which lists them top to bottom.
       hl.unbind("SUPER + SHIFT + Left")
-      hl.bind("SUPER + SHIFT + Left", hl.dsp.focus({ workspace = -1 }))
       hl.unbind("SUPER + SHIFT + Right")
-      hl.bind("SUPER + SHIFT + Right", hl.dsp.focus({ workspace = "+1" }))
+      hl.unbind("SUPER + SHIFT + Up")
+      hl.bind("SUPER + SHIFT + Up", hl.dsp.focus({ workspace = -1 }))
+      hl.unbind("SUPER + SHIFT + Down")
+      hl.bind("SUPER + SHIFT + Down", hl.dsp.focus({ workspace = "+1" }))
       hl.bind("Print", hl.dsp.exec_cmd("uwsm app -- hyprshot -m region --output-folder ~/Pictures/Screenshots"))
       -- Laptop brightness keys: hold to keep going, and they work on the lock screen too.
       -- --min-value=1 stops it at 1 instead of going fully black.
@@ -12945,7 +13234,7 @@ in
       hl.bind("SUPER + CTRL + Right", hl.dsp.window.move({ workspace = "+1" }))
       hl.bind("SUPER + CTRL + Left", hl.dsp.window.move({ workspace = -1 }))
 
-      -- The bar (and the widgets that drop out of it), the dock and the notification
+      -- The bar (and the widgets that drop out of it), the docks and the notification
       -- popups are see-through (Theme.glassOpacity in Quickshell's
       -- Theme.qml): blur what's behind them. ignore_alpha: leave the clear parts of their
       -- windows alone (only blur under what's at least 10% solid; keep it under
@@ -12960,6 +13249,7 @@ in
       -- touch anything, so they blur the windows behind them (xray off).
       hl.layer_rule({ name = "bar-blur", match = { namespace = "bar" }, blur = true, ignore_alpha = 0.1, xray = true })
       hl.layer_rule({ name = "dock-blur", match = { namespace = "dock" }, blur = true, ignore_alpha = 0.1, xray = false })
+      hl.layer_rule({ name = "workspace-dock-blur", match = { namespace = "workspace-dock" }, blur = true, ignore_alpha = 0.1, xray = false })
       hl.layer_rule({ name = "notification-blur", match = { namespace = "notification-popups" }, blur = true, ignore_alpha = 0.1, xray = false })
 
 
@@ -13058,7 +13348,9 @@ in
       hl.animation({ leaf = "windowsOut", enabled = true, speed = 1.6, bezier = "sharp", style = "popin 90%" })
       hl.animation({ leaf = "border", enabled = true, speed = 3, bezier = "linear" })
       hl.animation({ leaf = "fade", enabled = true, speed = 2, bezier = "sharp" })
-      hl.animation({ leaf = "workspaces", enabled = true, speed = 2.2, bezier = "snappy", style = "slide" })
+      -- slidevert: workspaces slide up and down (the next one comes up from below), to
+      -- match Super + Shift + Up / Down and the workspaces dock
+      hl.animation({ leaf = "workspaces", enabled = true, speed = 2.2, bezier = "snappy", style = "slidevert" })
       hl.animation({ leaf = "layers", enabled = true, speed = 1.6, bezier = "sharp" })
       hl.bind("Caps_Lock", hl.dsp.exec_cmd("sleep 0.1 && ~/.config/hypr/scripts/capslock.sh"))
 
@@ -13184,6 +13476,29 @@ in
       ]]
     '';
   };
+
+  # Reload Hyprland when its config changes, so a rebuild shows up right away.
+  # home-manager's Hyprland module does this itself, but only when it's given Hyprland's
+  # package, and it isn't here (package = null above: Hyprland comes from
+  # configuration.nix). Hyprland doesn't notice by itself either: it watches for its
+  # config file being written, and a switch swaps the link to a new file instead. This
+  # is the same command home-manager would run, with configuration.nix's Hyprland.
+  xdg.configFile."hypr/hyprland.lua".onChange =
+    let
+      hyprctl = "${
+        if osConfig != null then osConfig.programs.hyprland.package else pkgs.hyprland
+      }/bin/hyprctl";
+    in
+    ''
+      (
+        XDG_RUNTIME_DIR=''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+        if [[ -d "$XDG_RUNTIME_DIR/hypr" ]]; then
+          for i in $(${hyprctl} instances -j | ${pkgs.jq}/bin/jq -r ".[].instance"); do
+            ${hyprctl} -i "$i" reload config-only || true
+          done
+        fi
+      )
+    '';
 
   # App launcher (Super+Tab): apps only, a search bar, and your wallpaper as a square
   # on the left. To get the old tall launcher on the left edge back, set the window's
