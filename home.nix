@@ -9473,6 +9473,7 @@ in
 
     import QtQuick
     import Quickshell
+    import Quickshell.Hyprland
     import Quickshell.Io
     import Quickshell.Wayland
 
@@ -9535,6 +9536,52 @@ in
         function nameFor(key) {
             const e = entryFor(key);
             return e && e.name !== "" ? e.name : key;
+        }
+
+        // ── workspaces ──
+        // Hyprland's list of windows knows which workspace each is on; its `wayland` is
+        // the same window as the dock's (ToplevelManager), which is how they're matched.
+        // The workspace a window is on ("4"), or "" if Hyprland hasn't said yet.
+        function workspaceOf(t) {
+            for (const h of Hyprland.toplevels.values)
+                if (h.wayland === t)
+                    return h.workspace ? h.workspace.name : "";
+            return "";
+        }
+        // the workspaces an app's windows are on, lowest first, each once: ["2", "4"]
+        function workspacesOf(app) {
+            const out = [];
+            for (const w of app.windows) {
+                const n = workspaceOf(w);
+                if (n !== "" && !out.includes(n))
+                    out.push(n);
+            }
+            return out.sort((a, b) => (Number(a) || 0) - (Number(b) || 0) || a.localeCompare(b));
+        }
+        // the apps open on a workspace (Hyprland's), each once, in the order their
+        // windows were opened: [{ key, count }] (count = how many windows)
+        function appsOn(ws) {
+            const out = [];
+            const byKey = {};
+            if (!ws)
+                return out;
+            for (const h of ws.toplevels.values) {
+                const appId = h.wayland ? h.wayland.appId : ((h.lastIpcObject && h.lastIpcObject["class"]) || "");
+                const key = keyFor({
+                    "appId": appId,
+                    "title": h.title
+                });
+                if (byKey[key]) {
+                    byKey[key].count++;
+                } else {
+                    byKey[key] = {
+                        "key": key,
+                        "count": 1
+                    };
+                    out.push(byKey[key]);
+                }
+            }
+            return out;
         }
 
         // ── doing things ──
@@ -9863,8 +9910,8 @@ in
                                 Text {
                                     anchors.left: winDot.right
                                     anchors.leftMargin: 10
-                                    anchors.right: winClose.left
-                                    anchors.rightMargin: 4
+                                    anchors.right: winWs.visible ? winWs.left : winWs.right
+                                    anchors.rightMargin: 6
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: winRow.modelData.title || DockData.nameFor(dock.listLive ? dock.listLive.key : "")
                                     elide: Text.ElideRight
@@ -9872,6 +9919,28 @@ in
                                     font.family: Theme.font
                                     font.pixelSize: Theme.textSize * 0.95
                                     font.weight: winRow.modelData.activated ? 700 : 500
+                                }
+                                // the workspace it's on, in a little pill
+                                Rectangle {
+                                    id: winWs
+                                    readonly property string name: DockData.workspaceOf(winRow.modelData)
+                                    visible: name !== ""
+                                    anchors.right: winClose.visible ? winClose.left : parent.right
+                                    anchors.rightMargin: winClose.visible ? 4 : 10
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: Math.max(height, winWsText.implicitWidth + 12)
+                                    height: 20
+                                    radius: height / 2
+                                    color: Theme.pill
+                                    Text {
+                                        id: winWsText
+                                        anchors.centerIn: parent
+                                        text: winWs.name
+                                        color: winRow.modelData.activated ? Theme.accent : Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.8
+                                        font.weight: 700
+                                    }
                                 }
                                 // x: close that window (shows on hover)
                                 IconButton {
@@ -10306,7 +10375,17 @@ in
                                 Text {
                                     id: nameLabel
                                     anchors.centerIn: parent
-                                    text: DockData.nameFor(app.modelData.key) + (app.modelData.windows.length > 1 ? "  ·  " + app.modelData.windows.length : "")
+                                    // "Kitty  ·  workspace 4", "Kitty  ·  3 windows  ·  workspaces 2, 4"
+                                    text: {
+                                        const a = app.modelData;
+                                        const ws = DockData.workspacesOf(a);
+                                        let t = DockData.nameFor(a.key);
+                                        if (a.windows.length > 1)
+                                            t += "  ·  " + a.windows.length + " windows";
+                                        if (ws.length > 0)
+                                            t += "  ·  " + (ws.length === 1 ? "workspace " : "workspaces ") + ws.join(", ");
+                                        return t;
+                                    }
                                     color: Theme.text
                                     font.family: Theme.font
                                     font.pixelSize: Theme.textSize * 0.9
@@ -10767,7 +10846,9 @@ in
         WlrLayershell.layer: WlrLayer.Top
         WlrLayershell.namespace: "workspace-dock"   // its blur rule in the Hyprland config
         color: "transparent"
-        implicitWidth: 120          // room to grow into
+        // room for the panel to grow into: as wide as it gets (its rows with the app icons,
+        // padding and the scrollbar), plus a margin, so it's never cut off
+        implicitWidth: Math.max(120, panel.bodyWidth + 24)
 
         // ── showing and hiding ──
         property bool shown: false
@@ -12251,9 +12332,10 @@ in
     import Quickshell.Hyprland
 
     // This screen's workspaces, top to bottom, for the workspaces dock on the left edge
-    // (WorkspaceDock.qml). Big targets: click one to go there. The highlight slides to
-    // the one you're on; the one under the mouse shrinks a little, like the bar's
-    // buttons.
+    // (WorkspaceDock.qml). Each row: the workspace's number, then the icons of the apps
+    // open on it (one per app, the dock's icons; past four, three and a "+N"). Big
+    // targets: click a row to go there. The highlight slides to the one you're on; the
+    // number under the mouse shrinks a little, like the bar's buttons.
     //
     // No taller than maxHeight (WorkspaceDock.qml sets it so the dock fits between the
     // bar and the bottom of the screen). With more workspaces than fit, the list
@@ -12265,9 +12347,16 @@ in
         required property var screen
         property real maxHeight: 100000
 
-        property int cell: 44           // a workspace's square
+        property int cell: 44           // a workspace's row height, and its number's square
         property int gap: 4
         property int slideTime: 300
+        property int iconSize: 22       // the app icons
+        property int maxIcons: 4
+
+        // room for the icons, if any workspace has an app open
+        readonly property bool anyApps: root.list.some(w => w.toplevels.values.length > 0)
+        readonly property real iconsWidth: root.anyApps ? 6 + root.maxIcons * root.iconSize + (root.maxIcons - 1) * 4 + 10 : 0
+        readonly property real rowWidth: root.cell + root.iconsWidth
 
         property var monitor: Hyprland.monitorFor(root.screen)
         property var list: !root.monitor ? [] : Hyprland.workspaces.values.filter(w => w.id > 0 && w.monitor === root.monitor)
@@ -12282,7 +12371,7 @@ in
         readonly property real fullHeight: Math.max(0, root.list.length * root.step - root.gap)
         readonly property bool scrolls: root.fullHeight > root.maxHeight
 
-        implicitWidth: root.cell + (root.scrolls ? 10 : 0)    // room for the scrollbar
+        implicitWidth: root.rowWidth + (root.scrolls ? 10 : 0)    // and room for the scrollbar
         implicitHeight: Math.min(root.fullHeight, root.maxHeight)
         visible: root.list.length > 0
 
@@ -12329,7 +12418,7 @@ in
             // the highlight under the one you're on
             Rectangle {
                 y: root.activeIndex * root.step
-                width: root.cell
+                width: root.rowWidth
                 height: root.cell
                 visible: root.activeIndex >= 0
                 radius: Theme.radius + 2
@@ -12354,10 +12443,13 @@ in
                         required property var modelData
                         required property int index     // 0, 1, 2... its place, top to bottom
 
-                        width: root.cell
+                        width: root.rowWidth
                         height: root.cell
 
-                        // a faint square behind each one, so they read as buttons
+                        // the apps open on it (DockData.qml), for the icons
+                        readonly property var apps: DockData.appsOn(wsCell.modelData)
+
+                        // a faint background behind each one, so they read as buttons
                         Rectangle {
                             anchors.fill: parent
                             radius: Theme.radius + 2
@@ -12365,7 +12457,8 @@ in
                             opacity: wsCell.modelData.active ? 0 : 0.6
                         }
                         Text {
-                            anchors.centerIn: parent
+                            x: (root.cell - width) / 2
+                            anchors.verticalCenter: parent.verticalCenter
                             text: wsCell.modelData.name
                             color: wsCell.modelData.active ? Theme.accent : Theme.text
                             font.family: Theme.font
@@ -12386,6 +12479,39 @@ in
                                     duration: root.hoverTime
                                     easing.type: Easing.OutCubic
                                 }
+                            }
+                        }
+                        // its apps' icons
+                        Row {
+                            x: root.cell + 6
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 4
+                            visible: root.anyApps
+
+                            readonly property bool more: wsCell.apps.length > root.maxIcons
+                            Repeater {
+                                model: parent.more ? wsCell.apps.slice(0, root.maxIcons - 1) : wsCell.apps
+                                AppIcon {
+                                    required property var modelData
+                                    width: root.iconSize
+                                    height: root.iconSize
+                                    icon: DockData.iconFor(modelData.key)
+                                    name: DockData.nameFor(modelData.key)
+                                    opacity: wsCell.modelData.active ? 1 : 0.85
+                                }
+                            }
+                            Text {
+                                visible: parent.more
+                                width: root.iconSize
+                                height: root.iconSize
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                text: "+" + (wsCell.apps.length - (root.maxIcons - 1))
+                                color: Theme.text
+                                opacity: 0.7
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.85
+                                font.weight: 700
                             }
                         }
                         MouseArea {
