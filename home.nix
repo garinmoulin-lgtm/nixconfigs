@@ -13457,9 +13457,25 @@ in
       hl.bind("SUPER + SHIFT + F", hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" }))
       hl.bind("SUPER + V", hl.dsp.window.float())
 
-      -- Forces every window on the workspace into floating mode
-
-      hl.bind("SUPER + SHIFT + V", hl.dsp.exec_cmd("hyprctl clients -j| jq -r '.[]| select(.workspace.id=='$(hyprctl activeworkspace -j| jq '.id')')| . address'| xargs -I { } hyprctl dispatch togglefloating address:{ }"))
+      -- Super + Shift + V: every window on this workspace floating at once; again: all
+      -- back to tiling. If some float and some don't, the first press floats them all
+      -- (rather than flipping each one, which would just swap which ones float).
+      hl.bind("SUPER + SHIFT + V", function()
+          local ws = hl.get_active_workspace()
+          if not ws then
+              return
+          end
+          local windows = hl.get_workspace_windows(ws)
+          local allFloating = #windows > 0
+          for _, w in ipairs(windows) do
+              if not w.floating then
+                  allFloating = false
+              end
+          end
+          for _, w in ipairs(windows) do
+              hl.dispatch(hl.dsp.window.float({ action = allFloating and "disable" or "enable", window = w }))
+          end
+      end)
 
       -- Toggle Rofi App Launcher using Super and Tab
 
