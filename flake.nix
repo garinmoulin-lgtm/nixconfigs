@@ -38,6 +38,13 @@
       url = "github:Everblush/gtk";
       flake = false;
     };
+    # HyprMod, a settings app for Hyprland (live preview, undo, profiles). It saves to
+    # its own ~/.config/hypr/hyprland-gui.lua, which home.nix loads. From its own flake:
+    # newer than the copy in nixpkgs, with fixes for Lua configs like this one.
+    hyprmod = {
+      url = "github:BlueManCZ/hyprmod";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =

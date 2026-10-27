@@ -13040,7 +13040,8 @@ in
           cursor = {
               inactive_timeout = 0,
               -- don't move the mouse to the middle of a window when it gets focus (from
-              -- the dock, an app asking for attention, a focus keybind...)
+              -- the dock, an app asking for attention...). Super + arrows bring it along
+              -- on purpose (focusAndBringMouse above).
               no_warps = true,
               -- [GPU] NVIDIA needs software cursors; on AMD / Intel this can be false
               no_hardware_cursors = true,
@@ -13066,10 +13067,28 @@ in
       hl.bind("SUPER + J", hl.dsp.focus({ workspace = "-1" }))
       hl.bind("SUPER + K", hl.dsp.focus({ workspace = "+1" }))
 
-      hl.bind("SUPER + left", hl.dsp.focus({ direction = "left" }))
-      hl.bind("SUPER + right", hl.dsp.focus({ direction = "right" }))
-      hl.bind("SUPER + up", hl.dsp.focus({ direction = "up" }))
-      hl.bind("SUPER + down", hl.dsp.focus({ direction = "down" }))
+      -- Super + arrows: focus the window that way, and bring the mouse along to its
+      -- middle. cursor.no_warps (below) keeps focus changes from moving the mouse (so
+      -- the dock doesn't yank it), but with follow_mouse the window under a mouse left
+      -- behind would take focus back the moment you nudged it. So these four move the
+      -- mouse themselves. (no_warps only stops the move a focus change would make;
+      -- cursor.move is a move of its own.)
+      local function focusAndBringMouse(dir)
+          return function()
+              hl.dispatch(hl.dsp.focus({ direction = dir }))
+              local w = hl.get_active_window()
+              if w then
+                  hl.dispatch(hl.dsp.cursor.move({
+                      x = w.at.x + math.floor(w.size.x / 2),
+                      y = w.at.y + math.floor(w.size.y / 2),
+                  }))
+              end
+          end
+      end
+      hl.bind("SUPER + left", focusAndBringMouse("left"))
+      hl.bind("SUPER + right", focusAndBringMouse("right"))
+      hl.bind("SUPER + up", focusAndBringMouse("up"))
+      hl.bind("SUPER + down", focusAndBringMouse("down"))
 
 
       -- Trigger the rofi power menu
@@ -13112,8 +13131,17 @@ in
       -- systemd user service in home.nix (awww, playerctld,
       -- hyprpolkitagent, quickshell, music-player), started by uwsm's graphical-session.target.
 
-      -- HyprMod managed settings
-      --require("hyprland-gui")
+      -- HyprMod (the Hyprland settings app): what you save in it goes in
+      -- ~/.config/hypr/hyprland-gui.lua, loaded here, at the end, so it wins over
+      -- everything above. HyprMod would add this line itself, but home-manager makes
+      -- this file and it can't be written to; HyprMod sees the line is already here and
+      -- only writes its own file.
+      -- If that file isn't there (you haven't saved anything in HyprMod yet, or you
+      -- deleted it), nothing happens and the config above is all there is: Hyprland's
+      -- require reports a missing file as a plain Lua error, which pcall catches. A
+      -- file that's there but broken still shows in Hyprland's config errors, so you'd
+      -- know; the config above still applies.
+      pcall(function() require("hyprland-gui") end)
       -- hyprbars settings go inside hl.config under plugin
       --[[hl.config({
           plugin = {
@@ -13523,6 +13551,9 @@ in
   home.packages = [
     themeSwitch
     lockCmd
+    # HyprMod, the Hyprland settings app (the hyprmod flake input; the end of the
+    # Hyprland config says how its settings get loaded)
+    inputs.hyprmod.packages.${pkgs.stdenv.hostPlatform.system}.default
   ]
   # every theme's GTK theme, icons and cursor, so they're there when you switch
   ++ lib.unique (
