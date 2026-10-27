@@ -9516,6 +9516,14 @@ in
                 }
                 a.windows.push(t);
             }
+            // each app's windows by workspace, lowest first (the window list, and clicking
+            // its icon goes round them in this order); ones Hyprland hasn't placed yet last
+            const rank = t => {
+                const n = Number(workspaceOf(t));
+                return workspaceOf(t) === "" || isNaN(n) ? Infinity : n;
+            };
+            for (const a of out)
+                a.windows.sort((x, y) => rank(x) - rank(y));
             return out;
         }
 
@@ -9682,7 +9690,7 @@ in
     //     middle click  a new window
     //     right click   pin / unpin, new window, close
     //     drag it       left or right to rearrange (an unpinned one gets pinned there)
-    //     point at it   with more than one window open: after a second the dock grows
+    //     point at it   with more than one window open: after half a second the dock grows
     //                   a list of them above the icons (click one to go to it, x to
     //                   close it); it shrinks back when the mouse leaves
     //   Tray (right): the icons apps put up.
@@ -10350,10 +10358,10 @@ in
                                             DockData.focus(app.modelData);
                                     }
                                 }
-                                // more than one window: point at it for a second for the list
-                                // (pointing at another such app while one's open switches to it)
+                                // more than one window: point at it for half a second for the
+                                // list (pointing at another such app while one's open switches to it)
                                 Timer {
-                                    interval: 1000
+                                    interval: 500
                                     running: appMouse.containsMouse && !appMouse.pressed && dock.dragFrom < 0 && app.modelData.windows.length > 1 && (dock.extra === "" || (dock.extra === "list" && dock.listApp && dock.listApp.key !== app.modelData.key))
                                     onTriggered: dock.openList(app.modelData, appMouse)
                                 }
