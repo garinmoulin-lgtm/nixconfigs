@@ -10820,6 +10820,9 @@ in
 
             Workspaces {
                 screen: side.screen
+                // fits between the bar and the bottom of the screen (centered, so the
+                // same room above and below), past that it scrolls
+                maxHeight: side.height - 2 * (Theme.barHeight + 8) - 2 * (panel.curve + panel.padding)
             }
         }
     }
@@ -12243,6 +12246,7 @@ in
 
   xdg.configFile."quickshell/Workspaces.qml".text = ''
     import QtQuick
+    import QtQuick.Controls.Basic
     import Quickshell
     import Quickshell.Hyprland
 
@@ -12250,10 +12254,16 @@ in
     // (WorkspaceDock.qml). Big targets: click one to go there. The highlight slides to
     // the one you're on; the one under the mouse shrinks a little, like the bar's
     // buttons.
+    //
+    // No taller than maxHeight (WorkspaceDock.qml sets it so the dock fits between the
+    // bar and the bottom of the screen). With more workspaces than fit, the list
+    // scrolls (mouse wheel, or drag the thin scrollbar on its right), and it always
+    // scrolls to show the one you're on.
     Item {
         id: root
 
         required property var screen
+        property real maxHeight: 100000
 
         property int cell: 44           // a workspace's square
         property int gap: 4
@@ -12268,82 +12278,127 @@ in
         property real hoverShrink: 0.85
         property int hoverTime: 150
 
-        implicitWidth: root.cell
-        implicitHeight: root.list.length * (root.cell + root.gap) - root.gap
+        readonly property real step: root.cell + root.gap
+        readonly property real fullHeight: Math.max(0, root.list.length * root.step - root.gap)
+        readonly property bool scrolls: root.fullHeight > root.maxHeight
+
+        implicitWidth: root.cell + (root.scrolls ? 10 : 0)    // room for the scrollbar
+        implicitHeight: Math.min(root.fullHeight, root.maxHeight)
         visible: root.list.length > 0
 
-        // the highlight under the one you're on
-        Rectangle {
-            y: root.activeIndex * (root.cell + root.gap)
-            width: root.cell
-            height: root.cell
-            visible: root.activeIndex >= 0
-            radius: Theme.radius + 2
-            color: Qt.darker(Theme.accent, 3)
-            opacity: 0.75
-
-            Behavior on y {
-                NumberAnimation {
-                    duration: root.slideTime
-                    easing.type: Easing.OutCubic
-                }
+        // Scroll just enough to show the one you're on (when it changes, and when the
+        // dock comes out).
+        function showActive() {
+            if (!root.scrolls || root.activeIndex < 0)
+                return;
+            const top = root.activeIndex * root.step;
+            const bottom = top + root.cell;
+            let to = flick.contentY;
+            if (top < flick.contentY)
+                to = top;
+            else if (bottom > flick.contentY + flick.height)
+                to = bottom - flick.height;
+            if (to !== flick.contentY) {
+                follow.to = to;
+                follow.restart();
             }
         }
-        Column {
-            spacing: root.gap
+        onActiveIndexChanged: showActive()
+        onVisibleChanged: if (visible)
+            Qt.callLater(showActive)
+        onScrollsChanged: Qt.callLater(showActive)
 
-            Repeater {
-                model: root.list
+        Flickable {
+            id: flick
+            anchors.fill: parent
+            contentWidth: width
+            contentHeight: root.fullHeight
+            clip: true
+            interactive: root.scrolls
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ThinScrollBar {}
 
-                Item {
-                    id: wsCell
-                    required property var modelData
-                    required property int index     // 0, 1, 2... its place, top to bottom
+            NumberAnimation {
+                id: follow
+                target: flick
+                property: "contentY"
+                duration: root.slideTime
+                easing.type: Easing.OutCubic
+            }
 
-                    width: root.cell
-                    height: root.cell
+            // the highlight under the one you're on
+            Rectangle {
+                y: root.activeIndex * root.step
+                width: root.cell
+                height: root.cell
+                visible: root.activeIndex >= 0
+                radius: Theme.radius + 2
+                color: Qt.darker(Theme.accent, 3)
+                opacity: 0.75
 
-                    // a faint square behind each one, so they read as buttons
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: Theme.radius + 2
-                        color: Theme.pill
-                        opacity: wsCell.modelData.active ? 0 : 0.6
+                Behavior on y {
+                    NumberAnimation {
+                        duration: root.slideTime
+                        easing.type: Easing.OutCubic
                     }
-                    Text {
-                        anchors.centerIn: parent
-                        text: wsCell.modelData.name
-                        color: wsCell.modelData.active ? Theme.accent : Theme.text
-                        font.family: Theme.font
-                        font.pixelSize: Theme.textSize * 1.45
-                        font.weight: 700
+                }
+            }
+            Column {
+                spacing: root.gap
 
-                        // only the hovered one shrinks; the rest stay as they are
-                        scale: root.hoveredIndex === wsCell.index ? root.hoverShrink : 1
+                Repeater {
+                    model: root.list
 
-                        Behavior on color {
-                            ColorAnimation {
-                                duration: root.slideTime
-                                easing.type: Easing.OutCubic
+                    Item {
+                        id: wsCell
+                        required property var modelData
+                        required property int index     // 0, 1, 2... its place, top to bottom
+
+                        width: root.cell
+                        height: root.cell
+
+                        // a faint square behind each one, so they read as buttons
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: Theme.radius + 2
+                            color: Theme.pill
+                            opacity: wsCell.modelData.active ? 0 : 0.6
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            text: wsCell.modelData.name
+                            color: wsCell.modelData.active ? Theme.accent : Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 1.45
+                            font.weight: 700
+
+                            // only the hovered one shrinks; the rest stay as they are
+                            scale: root.hoveredIndex === wsCell.index ? root.hoverShrink : 1
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: root.slideTime
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                            Behavior on scale {
+                                NumberAnimation {
+                                    duration: root.hoverTime
+                                    easing.type: Easing.OutCubic
+                                }
                             }
                         }
-                        Behavior on scale {
-                            NumberAnimation {
-                                duration: root.hoverTime
-                                easing.type: Easing.OutCubic
-                            }
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onEntered: root.hoveredIndex = wsCell.index
+                            // only clear it if it's still ours: moving to the next one can
+                            // run that one's onEntered before this onExited
+                            onExited: if (root.hoveredIndex === wsCell.index)
+                                root.hoveredIndex = -1
+                            onClicked: wsCell.modelData.activate()
                         }
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onEntered: root.hoveredIndex = wsCell.index
-                        // only clear it if it's still ours: moving to the next one can
-                        // run that one's onEntered before this onExited
-                        onExited: if (root.hoveredIndex === wsCell.index)
-                            root.hoveredIndex = -1
-                        onClicked: wsCell.modelData.activate()
                     }
                 }
             }
