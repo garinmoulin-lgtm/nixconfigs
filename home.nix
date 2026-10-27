@@ -13297,12 +13297,11 @@ in
       --
       -- xray: which blur. On, a surface shows the blurred wallpaper (worked out once for
       -- the whole screen); off, it blurs whatever is drawn under it right then, windows
-      -- included. The bar uses it on: its widgets are drawn inside the bar's own window
-      -- (Widget.qml), so the bar and an open widget are one surface with one blur and no
-      -- edge between them. (Behind the bar there's only wallpaper anyway; an open widget
-      -- over a window shows the blurred wallpaper.) The dock and notifications don't
-      -- touch anything, so they blur the windows behind them (xray off).
-      hl.layer_rule({ name = "bar-blur", match = { namespace = "bar" }, blur = true, ignore_alpha = 0.1, xray = true })
+      -- included. All of these use it off, so what's behind them shows through blurred:
+      -- a window under an open widget or the dock, not just the wallpaper. The bar and
+      -- its widgets are one surface (the widgets are drawn inside the bar's own window,
+      -- Widget.qml), so they're blurred in one go and there's no edge between them.
+      hl.layer_rule({ name = "bar-blur", match = { namespace = "bar" }, blur = true, ignore_alpha = 0.1, xray = false })
       hl.layer_rule({ name = "dock-blur", match = { namespace = "dock" }, blur = true, ignore_alpha = 0.1, xray = false })
       hl.layer_rule({ name = "workspace-dock-blur", match = { namespace = "workspace-dock" }, blur = true, ignore_alpha = 0.1, xray = false })
       hl.layer_rule({ name = "notification-blur", match = { namespace = "notification-popups" }, blur = true, ignore_alpha = 0.1, xray = false })
