@@ -744,7 +744,9 @@ let
   #   <command> finish <name> <address> <floating> at=<x>,<y>   when you let go
   # (where the window was when you picked it up). It also makes letting go end the
   # drag wherever the mouse is: hyprbars ignored a release over a panel (like the
-  # workspaces dock), so the drop never happened. The change is the patch below; if
+  # workspaces dock), so the drop never happened. And the mouse pointer turns into a
+  # pointing hand over the bar's buttons, like the buttons in Quickshell. The change
+  # is the patch below; if
   # a hyprbars update stops it applying, the rebuild fails here and the patch needs
   # redoing.
   # Hyprland loads it from ~/.local/share/hypr/plugins (the link below), a path that
@@ -754,7 +756,13 @@ let
       (pkgs.writeText "hyprbars-on-drag.patch" ''
       --- a/barDeco.cpp
       +++ b/barDeco.cpp
-      @@ -27,6 +27,7 @@
+      @@ -22,11 +22,13 @@
+       #include <hyprland/src/layout/LayoutManager.hpp>
+       #include <hyprland/src/render/OpenGL.hpp>
+       #include <hyprland/src/state/MonitorState.hpp>
+      +#include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp>
+       
+       #include "globals.hpp"
        #include "BarPassElement.hpp"
        
        #include <climits>
@@ -762,7 +770,18 @@ let
        
        using namespace Render::GL;
        
-      @@ -123,6 +124,13 @@
+      @@ -56,6 +58,10 @@
+       
+       CHyprBar::~CHyprBar() {
+           std::erase(g_pGlobalState->bars, m_self);
+      +    if (g_pGlobalState->pointerOwner == this) {
+      +        g_pGlobalState->pointerOwner = nullptr;
+      +        Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
+      +    }
+       }
+       
+       SDecorationPositioningInfo CHyprBar::getPositioningInfo() {
+      @@ -123,6 +129,13 @@
        }
        
        void CHyprBar::onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent e) {
@@ -776,7 +795,16 @@ let
            if (!inputIsValid())
                return;
        
-      @@ -215,6 +223,7 @@
+      @@ -154,6 +167,8 @@
+           if (g_pGlobalState->config.iconOnHover->value())
+               damageOnButtonHover();
+       
+      +    updateButtonCursor();
+      +
+           if (!m_bDragPending || m_bTouchEv || !validMapped(m_pWindow) || m_touchId != 0)
+               return;
+       
+      @@ -215,6 +230,7 @@
                    if (m_bTouchEv)
                        g_pKeybindManager->m_dispatchers["settiled"]("activewindow");
                    g_pKeybindManager->m_dispatchers["mouse"]("0movewindow");
@@ -784,7 +812,7 @@ let
                    Log::logger->log(Log::DEBUG, "[hyprbars] Dragging ended on {:x}", (uintptr_t)PWINDOW.get());
                }
        
-      @@ -247,7 +256,7 @@
+      @@ -247,7 +263,7 @@
        }
        
        void CHyprBar::handleUpEvent(Event::SCallbackInfo& info) {
@@ -793,7 +821,7 @@ let
                return;
        
            if (m_bCancelledDown)
-      @@ -258,6 +267,7 @@
+      @@ -258,6 +274,7 @@
            if (m_bDraggingThis) {
                g_pKeybindManager->changeMouseBindMode(MBIND_INVALID);
                m_bDraggingThis = false;
@@ -801,7 +829,7 @@ let
                if (m_bTouchEv)
                    (void)Config::Actions::floatWindow(Config::Actions::eTogglableAction::TOGGLE_ACTION_DISABLE);
        
-      @@ -273,9 +283,33 @@
+      @@ -273,9 +290,33 @@
            g_pKeybindManager->changeMouseBindMode(MBIND_MOVE);
            m_bDraggingThis = true;
            Log::logger->log(Log::DEBUG, "[hyprbars] Dragging initiated on {:x}", (uintptr_t)m_pWindow.lock().get());
@@ -835,9 +863,56 @@ let
        bool CHyprBar::doButtonPress(Config::INTEGER barPadding, Config::INTEGER barButtonPadding, Config::INTEGER barHeight, Vector2D COORDS, const bool BUTTONSRIGHT) {
            //check if on a button
            float offset = barPadding;
+      @@ -664,6 +705,46 @@
+               m_bTitleColorChanged = true;
+       }
+       
+      +// a pointing hand while the mouse is on one of this bar's buttons
+      +void CHyprBar::updateButtonCursor() {
+      +    bool hovering = false;
+      +
+      +    if (!m_hidden && !m_bDraggingThis && validMapped(m_pWindow) && g_pGlobalState->config.enabled->value() && inputIsValid()) {
+      +        Desktop::CViewHitTester hitTester{*Desktop::viewState()};
+      +        const auto              WINDOWATCURSOR =
+      +            hitTester.windowAt(g_pInputManager->getMouseCoordsInternal(), Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
+      +
+      +        if (WINDOWATCURSOR == m_pWindow.lock()) {
+      +            const auto BARPADDING       = g_pGlobalState->config.barPadding->value();
+      +            const auto BARBUTTONPADDING = g_pGlobalState->config.barButtonPadding->value();
+      +            const auto HEIGHT           = g_pGlobalState->config.barHeight->value();
+      +            const bool BUTTONSRIGHT     = g_pGlobalState->config.barButtonsAlignment->value() != "left";
+      +            const auto COORDS           = cursorRelativeToBar();
+      +            float      offset           = BARPADDING;
+      +
+      +            for (auto& b : g_pGlobalState->buttons) {
+      +                const auto BARBUF     = Vector2D{(int)assignedBoxGlobal().w, HEIGHT};
+      +                Vector2D   currentPos = Vector2D{(BUTTONSRIGHT ? BARBUF.x - BARBUTTONPADDING - b.size - offset : offset), (BARBUF.y - b.size) / 2.0}.floor();
+      +
+      +                if (VECINRECT(COORDS, currentPos.x, currentPos.y, currentPos.x + b.size + BARBUTTONPADDING, currentPos.y + b.size)) {
+      +                    hovering = true;
+      +                    break;
+      +                }
+      +
+      +                offset += BARBUTTONPADDING + b.size;
+      +            }
+      +        }
+      +    }
+      +
+      +    if (hovering) {
+      +        g_pGlobalState->pointerOwner = this;
+      +        Pointer::Cursor::overrideController->setOverride("pointer", Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
+      +    } else if (g_pGlobalState->pointerOwner == this) {
+      +        g_pGlobalState->pointerOwner = nullptr;
+      +        Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
+      +    }
+      +}
+      +
+       void CHyprBar::damageOnButtonHover() {
+           const auto BARPADDING       = g_pGlobalState->config.barPadding->value();
+           const auto BARBUTTONPADDING = g_pGlobalState->config.barButtonPadding->value();
       --- a/barDeco.hpp
       +++ b/barDeco.hpp
-      @@ -107,6 +107,10 @@
+      @@ -107,6 +107,11 @@
            std::string         m_szLastTitle;
        
            bool                m_bDraggingThis  = false;
@@ -845,12 +920,22 @@ let
       +    std::string         m_dragArgs;      // on_drag: "<address> <floating> at=<x>,<y>" at its start
       +    void                notifyDragStart();
       +    void                notifyDragEnd();
+      +    void                updateButtonCursor();
            bool                m_bTouchEv       = false;
            bool                m_bDragPending   = false;
            bool                m_bCancelledDown = false;
       --- a/globals.hpp
       +++ b/globals.hpp
-      @@ -37,7 +37,7 @@
+      @@ -28,6 +28,8 @@
+           uint32_t                  nobarRuleIdx      = 0;
+           uint32_t                  barColorRuleIdx   = 0;
+           uint32_t                  titleColorRuleIdx = 0;
+      +    // the bar that set the pointing-hand cursor (over one of its buttons), or nullptr
+      +    CHyprBar*                 pointerOwner = nullptr;
+       
+           struct {
+               SP<Config::Values::CColorValue>      barColor, textColor, inactiveButtonColor;
+      @@ -37,7 +39,7 @@
                SP<Config::Values::CIntValue>        barPadding;
                SP<Config::Values::CIntValue>        barButtonPadding;
                SP<Config::Values::CBoolValue>       barBlur, barTitleEnabled, barPartOfWindow, barPrecedenceOverBorder, enabled, iconOnHover;
@@ -11401,7 +11486,7 @@ in
                 }
             }
 
-            // the title, in the middle (hyprbars' font)
+            // the title, in the middle (the bar's font, like the title bars)
             Text {
                 anchors.centerIn: parent
                 width: Math.min(implicitWidth, parent.width - 2 * (buttons.x + buttons.width + 12))
@@ -11409,9 +11494,10 @@ in
                 elide: Text.ElideRight
                 text: fsBar.win ? fsBar.win.title : ""
                 color: Theme.text
-                font.family: "SFProText Nerd Font"
-                font.pointSize: 11
-                font.weight: 500
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize
+                font.weight: 600
+                font.letterSpacing: Theme.letterSpacing
             }
         }
     }
@@ -14523,9 +14609,14 @@ in
                       bar_color = theme.bar_color,
                       ["col.text"] = theme.bar_text,
                       bar_blur = true,
-                      bar_text_font = "SFProText Nerd Font",
-                      bar_text_size = 11,
-                      bar_text_weight = 500,
+                      -- the title in the bar's font, size and weight (Theme.font,
+                      -- Theme.textSize and the bar's 600 in Quickshell). The size is
+                      -- in pixels, whole ones only: Quickshell's 12.5 is drawn at 12
+                      -- too (Qt rounds pixel sizes down). Quickshell's tighter letter
+                      -- spacing (-0.5) has no setting here.
+                      bar_text_font = "SFMono Nerd Font",
+                      bar_text_size = 12,
+                      bar_text_weight = 600,
                       bar_text_align = "center",
                       bar_buttons_alignment = "left",
                       bar_padding = 12,          -- the left edge to the first circle
