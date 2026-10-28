@@ -5318,6 +5318,23 @@ in
                                 PwObjectTracker {
                                     objects: [Pipewire.defaultAudioSink].filter(n => n)
                                 }
+
+                                // Scroll on it to change the volume without opening the slider:
+                                // 5% a notch (smaller steps from a touchpad, which scrolls in
+                                // smaller amounts), 0-100% like the slider. Scrolling up while
+                                // muted unmutes.
+                                WheelHandler {
+                                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                    onWheel: event => {
+                                        if (!parent.ready)
+                                            return;
+                                        const a = parent.sink.audio;
+                                        const step = event.angleDelta.y / 120 * 0.05;
+                                        if (step > 0 && a.muted)
+                                            a.muted = false;
+                                        a.volume = Math.max(0, Math.min(1, Math.round((a.volume + step) * 1000) / 1000));
+                                    }
+                                }
                             }
                             Row {
                                 spacing: 14
@@ -11518,6 +11535,7 @@ in
     //     artist's or an album's, with the line under it in full too (only when
     //     something was cut: `cut`)
     //   - album covers: the album and artist
+    //   - the workspaces dock: the apps behind a row's "+N", by name
     //   - icon buttons: what they do (IconButton.qml's `tip`)
     ToolTip {
         id: tip
@@ -11527,7 +11545,7 @@ in
         property string title: ""
         property string detail: ""          // the line under it, or ""
         property bool below: false          // under it instead (for things in the top bar)
-        readonly property real maxTextWidth: 360
+        property real maxTextWidth: 360     // narrower where the window is small
 
         visible: show && cut && title !== ""
         delay: 500
@@ -14053,7 +14071,9 @@ in
     // (WorkspaceDock.qml). Each row: the workspace's number, then the icons of the apps
     // open on it (one per app, the dock's icons; past four, three and a "+N"). Big
     // targets: click a row to go there. The highlight slides to the one you're on; the
-    // number under the mouse shrinks a little, like the bar's buttons.
+    // number under the mouse shrinks a little, like the bar's buttons. Past four apps a
+    // row shows three and "+N": rest the mouse on the "+N" for half a second to see which
+    // apps those are (HoverTip.qml).
     //
     // No taller than maxHeight (WorkspaceDock.qml sets it so the dock fits between the
     // bar and the bottom of the screen). With more workspaces than fit, the list
@@ -14217,6 +14237,17 @@ in
                         // the apps open on it (DockData.qml), for the icons
                         readonly property var apps: DockData.appsOn(wsCell.modelData)
 
+                        // point at the "+N": the apps it stands for, by name, with how many
+                        // windows each. Kept narrow: the dock's window is only a little wider
+                        // than the rows.
+                        readonly property var hiddenApps: wsCell.apps.length > root.maxIcons ? wsCell.apps.slice(root.maxIcons - 1) : []
+                        HoverTip {
+                            show: moreText.hovered && !root.dragging
+                            cut: wsCell.hiddenApps.length > 0
+                            title: wsCell.hiddenApps.length + " more"
+                            detail: wsCell.hiddenApps.map(a => DockData.nameFor(a.key) + (a.count > 1 ? "  ·  " + a.count + " windows" : "")).join("\n")
+                            maxTextWidth: Math.max(120, root.rowWidth - 16)
+                        }
                         // a faint background behind each one, so they read as buttons
                         Rectangle {
                             anchors.fill: parent
@@ -14285,6 +14316,10 @@ in
                                 }
                             }
                             Text {
+                                id: moreText
+                                // the mouse is on it (worked out from the row's mouse area,
+                                // which sits on top and takes the hover)
+                                readonly property bool hovered: visible && cellMouse.containsMouse && contains(mapFromItem(cellMouse, cellMouse.mouseX, cellMouse.mouseY))
                                 visible: parent.more
                                 width: root.iconSize
                                 height: root.iconSize
@@ -14299,6 +14334,7 @@ in
                             }
                         }
                         MouseArea {
+                            id: cellMouse
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
