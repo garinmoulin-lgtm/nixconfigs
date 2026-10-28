@@ -1611,6 +1611,17 @@ in
             function enqueue(path) {
                 send(["loadfile", path, "append-play"]);
             }
+            // add a whole list of songs to the end of the queue, in order
+            function enqueueAll(list) {
+                for (const s of list)
+                    send(["loadfile", s.path, "append-play"]);
+            }
+            // put a whole list of songs straight after the current one, in order (each goes
+            // in right after the current song, so they're sent last one first)
+            function playAllNext(list) {
+                for (let i = list.length - 1; i >= 0; i--)
+                    send(["loadfile", list[i].path, "insert-next-play"]);
+            }
             // replace the queue with a whole list of songs
             function playAll(list) {
                 if (list.length === 0)
@@ -3399,6 +3410,16 @@ in
                                         height: 144
                                         fillMode: Image.PreserveAspectCrop
                                         clip: true
+                                        // point at it: the album and artist
+                                        HoverHandler {
+                                            id: nowCoverHover
+                                        }
+                                        HoverTip {
+                                            show: nowCoverHover.hovered && !!media.player
+                                            cut: true
+                                            title: media.player ? (media.player.trackAlbum || media.player.trackTitle) : ""
+                                            detail: media.player ? media.player.trackArtist : ""
+                                        }
                                     }
                                     Text {
                                         padding: 5
@@ -3500,6 +3521,48 @@ in
                                     property var pick: null              // { kind, name, artist, songs } or null
                                     onViewChanged: pick = null
                                     onTabChanged: pick = null
+
+                                    // ── picking songs to queue together ──
+                                    // The checklist button (or Ctrl + click on a song) starts it: clicking
+                                    // songs then picks them (and unpicks them) instead of playing them, and
+                                    // a bar above the list adds them all to the queue at once, in the order
+                                    // you picked them. Picks stay while you go between Songs, artists and
+                                    // albums, so you can gather them from anywhere.
+                                    property bool selecting: false
+                                    property var selected: []            // the songs picked, in order
+                                    property int justAdded: 0            // "Added N" for a moment after
+                                    function isSelected(song) {
+                                        return selected.some(s => s.path === song.path);
+                                    }
+                                    function toggleSelected(song) {
+                                        selected = isSelected(song) ? selected.filter(s => s.path !== song.path) : selected.concat([song]);
+                                    }
+                                    function selectAll(list) {
+                                        selected = selected.concat(list.filter(song => !isSelected(song)));
+                                    }
+                                    function endSelecting() {
+                                        selecting = false;
+                                        selected = [];
+                                    }
+                                    function added(n) {
+                                        justAdded = n;
+                                        addedTimer.restart();
+                                    }
+                                    function queueSelected(next) {
+                                        if (selected.length === 0)
+                                            return;
+                                        if (next)
+                                            music.playAllNext(selected);
+                                        else
+                                            music.enqueueAll(selected);
+                                        added(selected.length);
+                                        endSelecting();
+                                    }
+                                    Timer {
+                                        id: addedTimer
+                                        interval: 2000
+                                        onTriggered: lib.justAdded = 0
+                                    }
 
                                     // ── sorting the library (the sort button next to Songs/Artists/Albums) ──
                                     // One choice for song lists and one for artist/album lists. "" is the
@@ -3701,24 +3764,46 @@ in
 
                                             IconButton {        // play everything that's listed (search applies)
                                                 icon: "playlist_play"
+                                                tip: "Play everything listed"
                                                 onClicked: music.playAll(lib.results)
+                                            }
+                                            IconButton {        // add everything that's listed to the end of the queue
+                                                icon: "playlist_add"
+                                                tip: "Add everything listed to the queue"
+                                                onClicked: {
+                                                    music.enqueueAll(lib.results);
+                                                    lib.added(lib.results.length);
+                                                }
+                                            }
+                                            IconButton {        // pick songs, then queue them together
+                                                icon: "checklist"
+                                                iconColor: lib.selecting ? Theme.accent : Theme.text
+                                                tip: lib.selecting ? "Stop picking songs" : "Pick songs to queue together"
+                                                onClicked: if (lib.selecting)
+                                                    lib.endSelecting()
+                                                else
+                                                    lib.selecting = true
                                             }
                                             IconButton {
                                                 icon: "shuffle"
+                                                tip: music.shuffled ? "Shuffle: on" : "Shuffle: off"
                                                 iconColor: music.shuffled ? Theme.accent : Theme.text
                                                 onClicked: music.toggleShuffle()
                                             }
                                             IconButton {
                                                 icon: music.repeat === "one" ? "repeat_one" : "repeat"
+                                                tip: music.repeat === "one" ? "Repeat: this song" : music.repeat === "all" ? "Repeat: the queue" : "Repeat: off"
                                                 iconColor: music.repeat === "off" ? Theme.text : Theme.accent
                                                 onClicked: music.cycleRepeat()
                                             }
                                             IconButton {        // empty the queue (keeps the song that's playing)
                                                 icon: "clear_all"
+                                                tip: "Empty the queue (keeps what's playing)"
                                                 onClicked: music.clearQueue()
                                             }
                                             IconButton {        // scan ~/Music again
                                                 icon: "refresh"
+                                                tip: music.scanning ? "Scanning ~/Music..." : "Scan ~/Music again"
                                                 iconColor: music.scanning ? Theme.accent : Theme.text
                                                 onClicked: music.rescan()
                                             }
@@ -3800,6 +3885,7 @@ in
                                             }
                                             IconButton {
                                                 icon: "sort"
+                                                tip: "Sort"
                                                 iconColor: lib.sortOpen || lib.activeSort !== "" ? Theme.accent : Theme.text
                                                 onClicked: lib.sortOpen = !lib.sortOpen
                                             }
@@ -3816,6 +3902,7 @@ in
                                             anchors.left: parent.left
                                             anchors.verticalCenter: parent.verticalCenter
                                             icon: "arrow_back"
+                                            tip: "Back"
                                             onClicked: lib.pick = null
                                         }
                                         Column {
@@ -3846,10 +3933,22 @@ in
                                         }
                                         IconButton {
                                             id: pickPlay
-                                            anchors.right: pickSort.left
+                                            anchors.right: pickQueue.left
                                             anchors.verticalCenter: parent.verticalCenter
                                             icon: "play_circle"
+                                            tip: "Play all"
                                             onClicked: music.playAll(lib.results)
+                                        }
+                                        IconButton {
+                                            id: pickQueue
+                                            anchors.right: pickSort.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            icon: "playlist_add"
+                                            tip: "Add all to the queue"
+                                            onClicked: {
+                                                music.enqueueAll(lib.results);
+                                                lib.added(lib.results.length);
+                                            }
                                         }
                                         // an artist's songs can be sorted too (an album keeps its track order)
                                         IconButton {
@@ -3859,6 +3958,7 @@ in
                                             visible: !!lib.pick && lib.pick.kind === "artists"
                                             width: visible ? implicitWidth : 0
                                             icon: "sort"
+                                            tip: "Sort"
                                             iconColor: lib.sortOpen || lib.songSort !== "" ? Theme.accent : Theme.text
                                             onClicked: lib.sortOpen = !lib.sortOpen
                                         }
@@ -3966,6 +4066,59 @@ in
                                         font.pixelSize: Theme.textSize
                                     }
 
+                                    // ── picking songs: how many, and what to do with them ──
+                                    // (also "Added N to the queue" for a moment after any of the queue-all
+                                    // buttons)
+                                    Rectangle {
+                                        visible: lib.tab === "library" && (lib.selecting || lib.justAdded > 0)
+                                        width: parent.width
+                                        height: 34
+                                        radius: Theme.radius
+                                        color: Theme.pill
+
+                                        Text {
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: 10
+                                            anchors.right: pickedButtons.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            elide: Text.ElideRight
+                                            text: lib.justAdded > 0 && !lib.selecting ? "Added " + lib.justAdded + (lib.justAdded === 1 ? " song" : " songs") + " to the queue" : lib.selected.length === 0 ? "Click songs to pick them" : lib.selected.length + (lib.selected.length === 1 ? " song picked" : " songs picked")
+                                            color: lib.justAdded > 0 && !lib.selecting ? Theme.accent : Theme.text
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.9
+                                            font.weight: 600
+                                        }
+                                        Row {
+                                            id: pickedButtons
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            visible: lib.selecting
+                                            IconButton {
+                                                icon: "select_all"
+                                                tip: "Pick everything listed"
+                                                onClicked: lib.selectAll(lib.results)
+                                            }
+                                            IconButton {
+                                                icon: "queue_play_next"
+                                                tip: "Play them next"
+                                                iconColor: lib.selected.length > 0 ? Theme.text : Theme.pillIcon
+                                                onClicked: lib.queueSelected(true)
+                                            }
+                                            IconButton {
+                                                icon: "playlist_add"
+                                                tip: "Add them to the end of the queue"
+                                                iconColor: lib.selected.length > 0 ? Theme.accent : Theme.pillIcon
+                                                onClicked: lib.queueSelected(false)
+                                            }
+                                            IconButton {
+                                                icon: "close"
+                                                iconColor: Theme.red
+                                                tip: "Stop picking (forget the picks)"
+                                                onClicked: lib.endSelecting()
+                                            }
+                                        }
+                                    }
+
                                     // ── the library list ──
                                     // ListView only creates rows that are on screen, so thousands of songs are fine.
                                     ListView {
@@ -3998,6 +4151,8 @@ in
                                             required property var modelData      // { path, title, artist, album, length, cover }
                                             // is this the song mpv is playing right now?
                                             readonly property bool playing: music.current >= 0 && music.queue[music.current].filename === modelData.path
+                                            // picked, while picking songs to queue together
+                                            readonly property bool picked: lib.selecting && lib.isSelected(modelData)
 
                                             // Queueing takes two clicks: pick "next" or "end", then confirm.
                                             property string pending: ""    // "", "next" or "end": waiting for confirm
@@ -4026,7 +4181,7 @@ in
                                             width: ListView.view.width - 8           // room for the scrollbar
                                             height: 46
                                             radius: Theme.radius
-                                            color: songMouse.containsMouse ? Theme.pill : "transparent"
+                                            color: song.picked ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, songMouse.containsMouse ? 0.32 : 0.22) : songMouse.containsMouse ? Theme.pill : "transparent"
                                             scale: songMouse.pressed ? 0.95 : 1
 
                                             Behavior on color {
@@ -4041,14 +4196,23 @@ in
                                                 }
                                             }
 
-                                            // Click the row to play it now. Everything else sits inside this
-                                            // MouseArea, so hovering the buttons still counts as hovering the row.
+                                            // Click the row to play it now (while picking songs: pick it, or
+                                            // unpick it; Ctrl + click starts picking). Everything else sits
+                                            // inside this MouseArea, so hovering the buttons still counts as
+                                            // hovering the row.
                                             MouseArea {
                                                 id: songMouse
                                                 anchors.fill: parent
                                                 hoverEnabled: true
                                                 cursorShape: Qt.PointingHandCursor
-                                                onClicked: music.playNow(song.modelData.path)
+                                                onClicked: mouse => {
+                                                    if (lib.selecting || (mouse.modifiers & Qt.ControlModifier)) {
+                                                        lib.selecting = true;
+                                                        lib.toggleSelected(song.modelData);
+                                                    } else {
+                                                        music.playNow(song.modelData.path);
+                                                    }
+                                                }
 
                                                 // album cover with rounded corners
                                                 ClippingRectangle {
@@ -4059,6 +4223,16 @@ in
                                                     height: 36
                                                     radius: 6
                                                     color: Theme.pill
+                                                    // point at it: the album and artist
+                                                    HoverHandler {
+                                                        id: songCoverHover
+                                                    }
+                                                    HoverTip {
+                                                        show: songCoverHover.hovered
+                                                        cut: true
+                                                        title: song.modelData.album || "No album"
+                                                        detail: song.modelData.artist
+                                                    }
 
                                                     Image {
                                                         anchors.fill: parent
@@ -4074,6 +4248,20 @@ in
                                                         color: Theme.pillIcon
                                                         font.family: Theme.iconFont
                                                         font.pixelSize: Theme.iconSize
+                                                    }
+                                                    // picked: a check over the cover
+                                                    Rectangle {
+                                                        anchors.fill: parent
+                                                        visible: song.picked
+                                                        color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.85)
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: "check"
+                                                            color: Theme.bg
+                                                            font.family: Theme.iconFont
+                                                            font.pixelSize: Theme.iconSize
+                                                            font.variableAxes: Theme.iconAxes
+                                                        }
                                                     }
                                                 }
 
@@ -4108,7 +4296,7 @@ in
                                                 }
                                                 // the whole title, if it's cut short (HoverTip.qml)
                                                 HoverTip {
-                                                    show: songMouse.containsMouse
+                                                    show: songMouse.containsMouse && !songCoverHover.hovered
                                                     cut: songTitle.truncated || songDetail.truncated
                                                     title: song.modelData.title
                                                     detail: songDetail.text
@@ -4131,7 +4319,7 @@ in
                                                         anchors.right: parent.right
                                                         anchors.rightMargin: 6
                                                         anchors.verticalCenter: parent.verticalCenter
-                                                        visible: !songMouse.containsMouse && song.pending === "" && !song.added
+                                                        visible: (!songMouse.containsMouse || lib.selecting) && song.pending === "" && !song.added
                                                         text: song.modelData.length > 0 ? lib.fmt(song.modelData.length) : ""
                                                         color: Theme.text
                                                         opacity: 0.6
@@ -4143,9 +4331,10 @@ in
                                                     Row {
                                                         id: songButtons
                                                         anchors.right: parent.right
-                                                        visible: songMouse.containsMouse && song.pending === "" && !song.added
+                                                        visible: songMouse.containsMouse && song.pending === "" && !song.added && !lib.selecting
                                                         IconButton {
                                                             icon: "queue_play_next"         // play after the current song
+                                                            tip: "Play next"
                                                             onClicked: {
                                                                 song.pending = "next";
                                                                 resetTimer.restart();
@@ -4153,6 +4342,7 @@ in
                                                         }
                                                         IconButton {
                                                             icon: "playlist_add"            // add to the end of the queue
+                                                            tip: "Add to the end of the queue"
                                                             onClicked: {
                                                                 song.pending = "end";
                                                                 resetTimer.restart();
@@ -4220,6 +4410,7 @@ in
                                                         IconButton {
                                                             icon: "close"
                                                             iconColor: Theme.red
+                                                            tip: "Cancel"
                                                             onClicked: song.pending = ""
                                                         }
                                                     }
@@ -4303,6 +4494,16 @@ in
                                                     height: 36
                                                     radius: group.modelData.kind === "artists" ? 18 : 6
                                                     color: Theme.pill
+                                                    // point at it: the album and artist (or the artist)
+                                                    HoverHandler {
+                                                        id: groupCoverHover
+                                                    }
+                                                    HoverTip {
+                                                        show: groupCoverHover.hovered
+                                                        cut: true
+                                                        title: group.modelData.name
+                                                        detail: groupDetail.text
+                                                    }
                                                     Image {
                                                         anchors.fill: parent
                                                         source: group.modelData.cover
@@ -4322,7 +4523,7 @@ in
                                                 Column {
                                                     anchors.left: groupCover.right
                                                     anchors.leftMargin: 10
-                                                    anchors.right: groupPlay.left
+                                                    anchors.right: groupQueue.left
                                                     anchors.rightMargin: 8
                                                     anchors.verticalCenter: parent.verticalCenter
                                                     Text {
@@ -4349,10 +4550,22 @@ in
                                                 }
                                                 // the whole name, if it's cut short (HoverTip.qml)
                                                 HoverTip {
-                                                    show: groupMouse.containsMouse
+                                                    show: groupMouse.containsMouse && !groupCoverHover.hovered
                                                     cut: groupName.truncated || groupDetail.truncated
                                                     title: group.modelData.name
                                                     detail: groupDetail.text
+                                                }
+                                                IconButton {        // add everything by this artist / on this album to the queue
+                                                    id: groupQueue
+                                                    anchors.right: groupPlay.left
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    visible: groupMouse.containsMouse
+                                                    icon: "playlist_add"
+                                                    tip: group.modelData.kind === "artists" ? "Add this artist to the queue" : "Add this album to the queue"
+                                                    onClicked: {
+                                                        music.enqueueAll(group.modelData.songs);
+                                                        lib.added(group.modelData.songs.length);
+                                                    }
                                                 }
                                                 IconButton {        // play everything by this artist / on this album
                                                     id: groupPlay
@@ -4361,6 +4574,7 @@ in
                                                     anchors.verticalCenter: parent.verticalCenter
                                                     visible: groupMouse.containsMouse
                                                     icon: "play_arrow"
+                                                    tip: group.modelData.kind === "artists" ? "Play this artist" : "Play this album"
                                                     onClicked: music.playAll(group.modelData.songs)
                                                 }
                                                 Text {
@@ -4641,6 +4855,16 @@ in
                                                     height: 36
                                                     radius: 6
                                                     color: Theme.pill
+                                                    // point at it: the album and artist
+                                                    HoverHandler {
+                                                        id: entryCoverHover
+                                                    }
+                                                    HoverTip {
+                                                        show: entryCoverHover.hovered && queueList.dragFrom < 0
+                                                        cut: true
+                                                        title: entry.info ? (entry.info.album || "No album") : "Not in your library"
+                                                        detail: entry.info ? entry.info.artist : entry.modelData.filename
+                                                    }
 
                                                     Image {
                                                         anchors.fill: parent
@@ -4693,7 +4917,7 @@ in
                                                 // the whole title, if it's cut short (HoverTip.qml); not while
                                                 // dragging songs around the queue
                                                 HoverTip {
-                                                    show: entryMouse.containsMouse && queueList.dragFrom < 0
+                                                    show: entryMouse.containsMouse && queueList.dragFrom < 0 && !entryCoverHover.hovered
                                                     cut: entryTitle.truncated || entryDetail.truncated
                                                     title: entryTitle.text
                                                     detail: entryDetail.text
@@ -4707,6 +4931,7 @@ in
                                                     visible: entryMouse.containsMouse        // only while hovered
                                                     icon: "close"
                                                     iconColor: Theme.red
+                                                    tip: "Take it out of the queue"
                                                     onClicked: music.remove(entry.queueIndex)
                                                 }
                                             }
@@ -4827,18 +5052,21 @@ in
 
                                 IconButton {
                                     icon: "skip_previous"
+                                    tip: "Previous"
                                     implicitWidth: 16
                                     onClicked: if (media.player && media.player.canGoPrevious)
                                         media.player.previous()
                                 }
                                 IconButton {
                                     icon: media.player && media.player.isPlaying ? "pause" : "play_arrow"
+                                    tip: media.player && media.player.isPlaying ? "Pause" : "Play"
                                     implicitWidth: 16
                                     onClicked: if (media.player && media.player.canTogglePlaying)
                                         media.player.togglePlaying()
                                 }
                                 IconButton {
                                     icon: "skip_next"
+                                    tip: "Next"
                                     implicitWidth: 16
                                     onClicked: if (media.player && media.player.canGoNext)
                                         media.player.next()
@@ -5775,6 +6003,26 @@ in
                         Clock {
                             anchors.verticalCenter: parent.verticalCenter
                             now: clock.date
+                        }
+                        // the timer's pause / play, beside the clock while one is going or
+                        // paused (the one the clock shows: Planner.barTimer)
+                        IconButton {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: Planner.barTimer !== null
+                            color: Theme.pill
+                            icon: Planner.barTimerPaused ? "play_arrow" : "pause"
+                            iconColor: Theme.accent
+                            tip: Planner.barTimerPaused ? "Start the timer again" : "Pause the timer"
+                            tipBelow: true
+                            onClicked: {
+                                const t = Planner.barTimer;
+                                if (!t)
+                                    return;
+                                if (Planner.barTimerPaused)
+                                    Planner.resumeTimer(t.id);
+                                else
+                                    Planner.pauseTimer(t.id);
+                            }
                         }
                         // ── System monitor ──
                         // Bar: the CPU package temperature. Popup: a graph of the last minute, every
@@ -7096,6 +7344,10 @@ in
             return best;
         }
         readonly property bool timersRunning: nextTimer !== null
+        // the timer the bar shows: the running one that ends first, else the last one you
+        // paused (the list is newest first); null if there's neither
+        readonly property var barTimer: nextTimer ?? (timers.find(t => !t.done && t.end === 0 && t.left > 0) ?? null)
+        readonly property bool barTimerPaused: barTimer !== null && barTimer.end === 0
 
         // today's events, and the one the bar shows: the next one today with a time (still
         // shown for 30 minutes after it starts), else today's all-day one; null if none
@@ -8013,7 +8265,8 @@ in
 
     // ── Clock ──
     // In the bar: the time, plus the time left on the timer that ends first while one
-    // runs. Click for the card: the time and date, then three tabs:
+    // runs (or on the one you paused, marked "paused"; the pause / play button beside
+    // the clock in shell.qml goes with it). Click for the card: the time and date, then three tabs:
     //   Calendar   the month (‹ › to change it, the month's name for back to today).
     //              Days with events get a dot. Click a day to see its events and to add
     //              one: a title, and a time if you want a reminder then ("9:30" with the
@@ -8036,9 +8289,10 @@ in
             function short(t) {
                 return t.length > 18 ? t.slice(0, 17).trim() + "…" : t;
             }
-            icon: Planner.timersRunning ? "timer" : ev ? "event" : "schedule"
-            iconColor: Planner.timersRunning || ev ? Theme.accent : Theme.red
-            text: Qt.formatDateTime(root.now, "hh:mm AP") + (Planner.timersRunning ? "  ·  " + Planner.fmtLeft(Planner.left(Planner.nextTimer)) : ev ? "  ·  " + short(ev.title) + (ev.time !== "" ? " " + Planner.fmtTime(ev.time) : "") : "")
+            readonly property var tm: Planner.barTimer
+            icon: tm ? "timer" : ev ? "event" : "schedule"
+            iconColor: tm || ev ? Theme.accent : Theme.red
+            text: Qt.formatDateTime(root.now, "hh:mm AP") + (tm ? "  ·  " + Planner.fmtLeft(Planner.left(tm)) + (Planner.barTimerPaused ? " paused" : "") : ev ? "  ·  " + short(ev.title) + (ev.time !== "" ? " " + Planner.fmtTime(ev.time) : "") : "")
         }
 
         Column {
@@ -11257,11 +11511,14 @@ in
     import QtQuick
     import QtQuick.Controls.Basic
 
-    // The whole of a title the list had to cut short ("…"): a song's, an artist's or an
-    // album's, with the line under it (artist · album) in full too. It shows once the
-    // mouse has rested on the row for half a second (only if something was cut), just
-    // above the row, in the bar's colors, and goes when the mouse leaves. Long titles
-    // wrap.
+    // A hover tip, in the bar's colors, just above what it's about. It shows once the
+    // mouse has rested there for half a second, and goes when the mouse leaves. Long
+    // text wraps. Used for:
+    //   - the whole of a title the music list had to cut short ("…"): a song's, an
+    //     artist's or an album's, with the line under it in full too (only when
+    //     something was cut: `cut`)
+    //   - album covers: the album and artist
+    //   - icon buttons: what they do (IconButton.qml's `tip`)
     ToolTip {
         id: tip
 
@@ -11269,6 +11526,7 @@ in
         property bool cut: false            // the title or the line under it doesn't fit
         property string title: ""
         property string detail: ""          // the line under it, or ""
+        property bool below: false          // under it instead (for things in the top bar)
         readonly property real maxTextWidth: 360
 
         visible: show && cut && title !== ""
@@ -11276,7 +11534,7 @@ in
         timeout: -1
         closePolicy: Popup.NoAutoClose      // it goes when the mouse leaves, nothing else
         x: 0
-        y: -height - 4
+        y: below ? parent.height + 4 : -height - 4
         padding: 8
 
         contentItem: Column {
@@ -11325,7 +11583,8 @@ in
     // edge slides this down over it: the same bar, drawn by Quickshell (same height,
     // glass, font, colors and circles; symbols on the circles while the mouse is on
     // them). It slides back up half a second after the mouse leaves it.
-    //   red: close   yellow: minimize   green, or double-click the title: leave fullscreen
+    //   red: close   yellow: minimize   green: leave fullscreen
+    //   double-click the title: maximized instead (like double-clicking a title bar)
     // It's on the overlay layer, the only one above fullscreen windows. While it's in,
     // only the top 2 px of the screen take the mouse (from the fullscreen window).
     PanelWindow {
@@ -11377,6 +11636,9 @@ in
         function minimize() {
             // like the yellow button on the title bar (and the dock's minimized windows)
             dispatchFor(a => 'hl.dsp.window.move({ workspace = "special:minimized", follow = false, window = "' + a + '" })');
+        }
+        function maximize() {
+            dispatchFor(a => 'hl.dsp.window.fullscreen({ mode = "maximized", action = "set", window = "' + a + '" })');
         }
         function leaveFullscreen() {
             dispatchFor(a => 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "unset", window = "' + a + '" })');
@@ -11439,10 +11701,10 @@ in
                 id: barHover
             }
 
-            // double-click the title: leave fullscreen (like on the title bar)
+            // double-click the title: maximized instead (like on the title bar)
             MouseArea {
                 anchors.fill: parent
-                onDoubleClicked: fsBar.leaveFullscreen()
+                onDoubleClicked: fsBar.maximize()
             }
 
             // the three circles, at hyprbars' sizes and spacing
@@ -12326,7 +12588,11 @@ in
     // One copy shared by every monitor's bar. The place you pick and °F/°C are saved in
     // ~/.local/state/quickshell/weather.json. Refreshes every 15 minutes.
     // Temperatures are always fetched in °C and converted for display (show()), so
-    // switching °F / °C is instant and doesn't need the internet.
+    // switching °F / °C is instant and doesn't need the internet. The same switch picks
+    // the other units: °F shows mph, inches, miles and inHg; °C shows km/h, mm, km and
+    // hPa (fetched in km/h, mm, m and hPa, converted the same way).
+    // Air quality and the UV index come from Open-Meteo's air quality service
+    // (air-quality-api.open-meteo.com), fetched alongside.
     Singleton {
         id: w
 
@@ -12341,6 +12607,10 @@ in
         // a temperature (°C, as stored) in the unit you picked
         function show(c) {
             return fahrenheit ? c * 9 / 5 + 32 : c;
+        }
+        // ...rounded, with a degree sign: "72°" ("--" when there's none)
+        function degText(c) {
+            return c === undefined || c === null || isNaN(c) ? "--" : Math.round(show(c)) + "°";
         }
 
         // ── what Open-Meteo sent ──
@@ -12360,6 +12630,68 @@ in
         readonly property bool isDay: hasData ? data.current.is_day === 1 : true
         readonly property real todayHigh: hasData ? data.daily.temperature_2m_max[0] : 0
         readonly property real todayLow: hasData ? data.daily.temperature_2m_min[0] : 0
+        readonly property real feelsLike: hasData ? data.current.apparent_temperature : NaN
+
+        // air quality and UV right now: { us_aqi, pm2_5, pm10, uv_index }, or null
+        property var air: null
+
+        // ── units (°F means US units throughout) ──
+        function windText(kmh) {
+            if (kmh === undefined || kmh === null || isNaN(kmh))
+                return "--";
+            return fahrenheit ? Math.round(kmh / 1.609344) + " mph" : Math.round(kmh) + " km/h";
+        }
+        function rainText(mm) {
+            if (mm === undefined || mm === null || isNaN(mm))
+                return "--";
+            return fahrenheit ? (mm / 25.4).toFixed(2) + " in" : mm.toFixed(1) + " mm";
+        }
+        function distText(m) {
+            if (m === undefined || m === null || isNaN(m))
+                return "--";
+            if (fahrenheit) {
+                const mi = m / 1609.344;
+                return (mi >= 10 ? Math.round(mi) : mi.toFixed(1)) + " mi";
+            }
+            return (m >= 10000 ? Math.round(m / 1000) : (m / 1000).toFixed(1)) + " km";
+        }
+        function pressureText(hpa) {
+            if (hpa === undefined || hpa === null || isNaN(hpa))
+                return "--";
+            return fahrenheit ? (hpa * 0.0295300).toFixed(2) + " inHg" : Math.round(hpa) + " hPa";
+        }
+        // wind direction in degrees (where it comes from) -> "NW"
+        function compass(deg) {
+            if (deg === undefined || deg === null || isNaN(deg))
+                return "";
+            return ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"][Math.round(deg / 22.5) % 16];
+        }
+        // seconds -> "11h 23m"
+        function spanText(sec) {
+            if (sec === undefined || sec === null || isNaN(sec))
+                return "--";
+            const m = Math.round(sec / 60);
+            return Math.floor(m / 60) + "h " + (m % 60) + "m";
+        }
+        // (short: with a plain space, for the small tiles)
+        function uvText(uv, short) {
+            if (uv === undefined || uv === null || isNaN(uv))
+                return "--";
+            const r = Math.round(uv);
+            return r + (short ? " " : "  ·  ") + (r <= 2 ? "Low" : r <= 5 ? "Moderate" : r <= 7 ? "High" : r <= 10 ? "Very high" : "Extreme");
+        }
+        // US AQI -> its EPA category
+        function aqiText(aqi, short) {
+            if (aqi === undefined || aqi === null || isNaN(aqi))
+                return "--";
+            const r = Math.round(aqi);
+            return r + (short ? " " : "  ·  ") + (r <= 50 ? "Good" : r <= 100 ? "Moderate" : r <= 150 ? "Unhealthy for some" : r <= 200 ? "Unhealthy" : r <= 300 ? "Very unhealthy" : "Hazardous");
+        }
+        function aqiColor(aqi) {
+            if (aqi === undefined || aqi === null || isNaN(aqi))
+                return Theme.text;
+            return aqi <= 50 ? Theme.green : aqi <= 100 ? Theme.yellow : aqi <= 150 ? Theme.orange : Theme.red;
+        }
 
         // ── loading and saving the settings ──
         FileView {
@@ -12423,9 +12755,9 @@ in
             loading = true;
             error = "";
             get("https://api.open-meteo.com/v1/forecast?latitude=" + place.lat + "&longitude=" + place.lon
-                + "&current=temperature_2m,weather_code,is_day"
-                + "&hourly=temperature_2m,weather_code,is_day"
-                + "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset"
+                + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,weather_code,is_day,cloud_cover,pressure_msl,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m"
+                + "&hourly=temperature_2m,apparent_temperature,weather_code,is_day,precipitation_probability"
+                + "&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,daylight_duration,sunshine_duration,uv_index_max,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant"
                 + "&timezone=auto&forecast_days=7", r => {
                 data = r;
                 fetchedAt = Date.now();
@@ -12433,6 +12765,13 @@ in
             }, e => {
                 error = e;
                 loading = false;
+            });
+            // air quality and UV (a separate service; the card just leaves them out if it fails)
+            get("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + place.lat + "&longitude=" + place.lon
+                + "&current=us_aqi,pm2_5,pm10,uv_index&timezone=auto", r => {
+                air = r.current || null;
+            }, e => {
+                air = null;
             });
         }
         function search(q) {
@@ -12559,8 +12898,8 @@ in
             return h12 + (m === "00" ? "" : ":" + m) + (h < 12 ? "AM" : "PM");
         }
 
-        // The next hours (now + 5), with sunrise / sunset slotted in where they happen.
-        // [{ label, icon, color, temp }]
+        // The next 24 hours (now first), with sunrise / sunset slotted in where they happen.
+        // [{ time, label, icon, color, temp, rain }] (rain: % chance, or -1)
         readonly property var hours: {
             if (!hasData)
                 return [];
@@ -12570,13 +12909,14 @@ in
             if (i < 0)
                 i = 0;
             const list = [];
-            for (let k = i; k < Math.min(i + 6, H.time.length); k++)
+            for (let k = i; k < Math.min(i + 24, H.time.length); k++)
                 list.push({
                     "time": H.time[k],
                     "label": k === i ? "Now" : clockLabel(H.time[k]),
                     "icon": icon(H.weather_code[k], H.is_day[k] === 1),
                     "color": iconColor(H.weather_code[k], H.is_day[k] === 1),
-                    "temp": k === i ? data.current.temperature_2m : H.temperature_2m[k]
+                    "temp": k === i ? data.current.temperature_2m : H.temperature_2m[k],
+                    "rain": H.precipitation_probability ? H.precipitation_probability[k] : -1
                 });
             const end = list.length ? list[list.length - 1].time : "";
             for (let d = 0; d < D.time.length; d++) {
@@ -12591,33 +12931,89 @@ in
                             "icon": "wb_twilight",
                             "color": Theme.orange,
                             "temp": j >= 0 ? H.temperature_2m[j] : NaN,
+                            "rain": -1,
                             "event": name
                         });
                     }
                 }
             }
             list.sort((a, b) => a.time < b.time ? -1 : a.time > b.time ? 1 : 0);
-            return list.slice(0, 6);
+            return list;
         }
 
-        // The next 5 days: [{ label, icon, color, low, high }], plus the week's range
+        // One day's 24 hours (d = 0 for today), for the day's page:
+        // [{ time, label, icon, color, temp, rain }]
+        function hoursOf(d) {
+            if (!hasData || d < 0 || d >= data.daily.time.length)
+                return [];
+            const H = data.hourly, day = data.daily.time[d];
+            const out = [];
+            for (let k = 0; k < H.time.length; k++) {
+                if (H.time[k].substr(0, 10) !== day)
+                    continue;
+                out.push({
+                    "time": H.time[k],
+                    "label": clockLabel(H.time[k]),
+                    "icon": icon(H.weather_code[k], H.is_day[k] === 1),
+                    "color": iconColor(H.weather_code[k], H.is_day[k] === 1),
+                    "temp": H.temperature_2m[k],
+                    "rain": H.precipitation_probability ? H.precipitation_probability[k] : -1
+                });
+            }
+            return out;
+        }
+
+        // The next 7 days, plus the week's range: [{ index, label, longLabel, code,
+        // icon, color, low, high, feelsLow, feelsHigh, rainChance, rainSum, windMax,
+        // gustMax, windDir, uvMax, sunrise, sunset, daylight, sunshine }]
+        // (temperatures °C, wind km/h, rain mm, times "2026-10-28T07:31", spans seconds)
         readonly property var days: {
             if (!hasData)
                 return [];
             const D = data.daily;
+            const v = (key, d) => D[key] ? D[key][d] : NaN;
             const out = [];
-            for (let d = 0; d < Math.min(5, D.time.length); d++) {
+            for (let d = 0; d < Math.min(7, D.time.length); d++) {
                 const p = D.time[d].split("-");
                 const date = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
                 out.push({
+                    "index": d,
                     "label": d === 0 ? "Today" : Qt.formatDate(date, "ddd"),
+                    "longLabel": (d === 0 ? "Today, " : d === 1 ? "Tomorrow, " : Qt.formatDate(date, "dddd") + ", ") + Qt.formatDate(date, "MMM d"),
+                    "code": D.weather_code[d],
                     "icon": icon(D.weather_code[d], true),
                     "color": iconColor(D.weather_code[d], true),
                     "low": D.temperature_2m_min[d],
-                    "high": D.temperature_2m_max[d]
+                    "high": D.temperature_2m_max[d],
+                    "feelsLow": v("apparent_temperature_min", d),
+                    "feelsHigh": v("apparent_temperature_max", d),
+                    "rainChance": v("precipitation_probability_max", d),
+                    "rainSum": v("precipitation_sum", d),
+                    "windMax": v("wind_speed_10m_max", d),
+                    "gustMax": v("wind_gusts_10m_max", d),
+                    "windDir": v("wind_direction_10m_dominant", d),
+                    "uvMax": v("uv_index_max", d),
+                    "sunrise": D.sunrise[d],
+                    "sunset": D.sunset[d],
+                    "daylight": v("daylight_duration", d),
+                    "sunshine": v("sunshine_duration", d)
                 });
             }
             return out;
+        }
+        // the next sunrise or sunset from now: { name, time } or null
+        readonly property var nextSun: {
+            if (!hasData)
+                return null;
+            const now = data.current.time;
+            for (const day of days)
+                for (const [name, t] of [["Sunrise", day.sunrise], ["Sunset", day.sunset]])
+                    if (t > now)
+                        return {
+                            "name": name,
+                            "time": t
+                        };
+            return null;
         }
         readonly property real weekLow: days.length ? Math.min(...days.map(d => d.low)) : 0
         readonly property real weekHigh: days.length ? Math.max(...days.map(d => d.high)) : 1
@@ -12631,9 +13027,16 @@ in
 
     // ── Weather ──
     // In the bar: the current conditions icon and temperature. Click for the card:
-    // place + now, the next hours (with sunrise/sunset), and the next 5 days with
-    // temperature range bars. Click the place name to search for another one;
-    // °F / °C switches in the top-right corner of the card.
+    //   place + now   the temperature, conditions, high / low and what it feels like
+    //   tiles         humidity, wind, UV, rain, air quality, the next sunrise / sunset;
+    //                 click one for everything about right now (the details page)
+    //   hours         the next 24 (scroll sideways: wheel, drag, or the thin scrollbar),
+    //                 with sunrise / sunset and the chance of rain
+    //   days          the next 7, with temperature range bars; click one for its page:
+    //                 feels like, rain, wind, UV, sunrise / sunset, daylight, its hours
+    // A page's back arrow (or closing the card) goes back. Click the place name to
+    // search for another one; °F / °C switches in the top-right corner of the card
+    // (°F also means mph, inches, miles).
     // Data: WeatherData.qml (Open-Meteo).
     Widget {
         id: root
@@ -12654,21 +13057,241 @@ in
 
         Column {
             id: card
-            width: 340
+            width: 360
             spacing: 12
 
-            // fresh data each time it opens (if it's more than 10 minutes old)
+            // which page: "main", "day" (the day at dayIndex) or "details" (right now)
+            property string page: "main"
+            property int dayIndex: 0
+            readonly property var day: WeatherData.days[dayIndex] ?? null
+            readonly property bool onMain: !root.shown && page === "main"
+
+            // fresh data each time it opens (if it's more than 10 minutes old); back to the
+            // main page when it closes
             readonly property bool open: root.popupShown
-            onOpenChanged: if (open)
-                WeatherData.refreshIfOld()
-            else
-                root.picking = false
+            onOpenChanged: if (open) {
+                WeatherData.refreshIfOld();
+            } else {
+                root.picking = false;
+                page = "main";
+            }
+
+            // ── pieces used below ──
+            // (Inline components can't see this file's ids, so what they need comes in
+            // through their own properties: a page header's back is a signal, temperatures
+            // go through WeatherData.degText.)
+            // a tile: an icon and a name, the value under them
+            component Tile: Rectangle {
+                id: tile
+                property string icon: ""
+                property color iconColor: Theme.accent
+                property string label: ""
+                property string value: ""
+                property color valueColor: Theme.text
+                property bool clickable: false
+                signal clicked
+                width: 116            // three to the card's 360, with the grid's gaps
+                height: 56
+                radius: Theme.radius
+                color: tileMouse.containsMouse && tile.clickable ? Theme.pill : Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, Theme.pill.a * 0.6)
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 120
+                    }
+                }
+                Column {
+                    x: 10
+                    width: tile.width - 20
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 3
+                    Row {
+                        spacing: 4
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: tile.icon
+                            color: tile.iconColor
+                            font.family: Theme.iconFont
+                            font.pixelSize: Theme.iconSize * 0.9
+                            font.variableAxes: Theme.iconAxes
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: tile.label
+                            color: Theme.text
+                            opacity: 0.7
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.8
+                            font.weight: 600
+                        }
+                    }
+                    Text {
+                        width: parent.width
+                        elide: Text.ElideRight
+                        text: tile.value
+                        color: tile.valueColor
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize
+                        font.weight: 700
+                    }
+                }
+                MouseArea {
+                    id: tileMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    enabled: tile.clickable
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: tile.clicked()
+                }
+            }
+            // hours side by side, six to the card's width, scrolling sideways past that
+            component HourStrip: Flickable {
+                id: strip
+                property var hours: []
+                readonly property real cellW: width / 6
+                width: parent ? parent.width : 360
+                height: 96
+                contentWidth: hours.length * cellW
+                contentHeight: height
+                clip: true
+                flickableDirection: Flickable.HorizontalFlick
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.horizontal: ThinScrollBar {}
+                // the mouse wheel scrolls it sideways
+                WheelHandler {
+                    onWheel: event => {
+                        const d = event.angleDelta.y !== 0 ? event.angleDelta.y : event.angleDelta.x;
+                        strip.contentX = Math.max(0, Math.min(strip.contentWidth - strip.width, strip.contentX - d));
+                    }
+                }
+                Row {
+                    Repeater {
+                        model: strip.hours
+                        Column {
+                            required property var modelData
+                            width: strip.cellW
+                            spacing: 4
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: modelData.label
+                                color: Theme.text
+                                opacity: 0.7
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.85
+                                font.weight: 600
+                            }
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: modelData.icon
+                                color: modelData.color
+                                font.family: Theme.iconFont
+                                font.pixelSize: 22
+                                font.variableAxes: ({
+                                        "FILL": 1,
+                                        "wght": 500,
+                                        "opsz": 24,
+                                        "GRAD": 0
+                                    })
+                            }
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: WeatherData.degText(modelData.temp)
+                                color: Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize
+                                font.weight: 700
+                            }
+                            // the chance of rain (sunrise / sunset have none)
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: modelData.event ? modelData.event : modelData.rain >= 0 ? modelData.rain + "%" : ""
+                                color: modelData.event ? Theme.orange : Theme.blue
+                                opacity: modelData.event || modelData.rain >= 20 ? 1 : 0.5
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize * 0.75
+                                font.weight: 600
+                            }
+                        }
+                    }
+                }
+            }
+            // a page's top: the back arrow and its title
+            component PageHeader: Item {
+                id: header
+                property string title: ""
+                signal back
+                width: parent ? parent.width : 360
+                height: 30
+                IconButton {
+                    id: backButton
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    icon: "arrow_back"
+                    tip: "Back"
+                    onClicked: header.back()
+                }
+                Text {
+                    anchors.left: backButton.right
+                    anchors.leftMargin: 6
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    elide: Text.ElideRight
+                    text: header.title
+                    color: Theme.text
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize * 1.2
+                    font.weight: 700
+                    font.letterSpacing: Theme.letterSpacing
+                }
+            }
+            // a line in the details list: icon, name, value
+            component DetailRow: Item {
+                id: drow
+                property string icon: ""
+                property string label: ""
+                property string value: ""
+                property color valueColor: Theme.text
+                width: parent ? parent.width : 360
+                height: 28
+                Text {
+                    id: drowIcon
+                    anchors.left: parent.left
+                    anchors.leftMargin: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 24
+                    text: drow.icon
+                    color: Theme.accent
+                    font.family: Theme.iconFont
+                    font.pixelSize: Theme.iconSize
+                    font.variableAxes: Theme.iconAxes
+                }
+                Text {
+                    anchors.left: drowIcon.right
+                    anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: drow.label
+                    color: Theme.text
+                    opacity: 0.75
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize
+                    font.weight: 600
+                }
+                Text {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: drow.value
+                    color: drow.valueColor
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize
+                    font.weight: 700
+                }
+            }
 
             // ── place + now ──
             Item {
                 width: parent.width
-                height: 108
-                visible: !root.shown
+                height: 124
+                visible: card.onMain
 
                 // place: click it to change it
                 Row {
@@ -12778,70 +13401,102 @@ in
                         font.pixelSize: Theme.textSize * 0.9
                         font.weight: 600
                     }
-                }
-            }
-
-            Rectangle {
-                visible: !root.shown && WeatherData.hasData
-                width: parent.width
-                height: 1
-                color: Theme.pill
-            }
-
-            // ── the next hours ──
-            Row {
-                visible: !root.shown && WeatherData.hasData
-                width: parent.width
-                Repeater {
-                    model: WeatherData.hours
-                    Column {
-                        required property var modelData
-                        width: card.width / 6
-                        spacing: 6
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: modelData.label
-                            color: Theme.text
-                            opacity: 0.7
-                            font.family: Theme.font
-                            font.pixelSize: Theme.textSize * 0.85
-                            font.weight: 600
-                        }
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: modelData.icon
-                            color: modelData.color
-                            font.family: Theme.iconFont
-                            font.pixelSize: 22
-                            font.variableAxes: ({
-                                    "FILL": 1,
-                                    "wght": 500,
-                                    "opsz": 24,
-                                    "GRAD": 0
-                                })
-                        }
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: root.deg(modelData.temp)
-                            color: Theme.text
-                            font.family: Theme.font
-                            font.pixelSize: Theme.textSize
-                            font.weight: 700
-                        }
+                    Text {
+                        anchors.right: parent.right
+                        visible: WeatherData.hasData
+                        text: "Feels like " + root.deg(WeatherData.feelsLike)
+                        color: Theme.text
+                        opacity: 0.7
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.9
+                        font.weight: 600
                     }
                 }
             }
 
             Rectangle {
-                visible: !root.shown && WeatherData.hasData
+                visible: card.onMain && WeatherData.hasData
                 width: parent.width
                 height: 1
                 color: Theme.pill
             }
 
-            // ── the next 5 days ──
+            // ── tiles: right now (click one for the details page) ──
+            Grid {
+                visible: card.onMain && WeatherData.hasData
+                columns: 3
+                spacing: 6
+                Tile {
+                    icon: "water_drop"
+                    label: "Humidity"
+                    value: WeatherData.hasData ? Math.round(WeatherData.data.current.relative_humidity_2m) + "%" : "--"
+                    clickable: true
+                    onClicked: card.page = "details"
+                }
+                Tile {
+                    icon: "air"
+                    label: "Wind"
+                    value: WeatherData.hasData ? WeatherData.windText(WeatherData.data.current.wind_speed_10m) + " " + WeatherData.compass(WeatherData.data.current.wind_direction_10m) : "--"
+                    clickable: true
+                    onClicked: card.page = "details"
+                }
+                Tile {
+                    icon: "wb_sunny"
+                    iconColor: Theme.yellow
+                    label: "UV index"
+                    value: WeatherData.air ? WeatherData.uvText(WeatherData.air.uv_index, true) : WeatherData.days.length ? WeatherData.uvText(WeatherData.days[0].uvMax, true) : "--"
+                    clickable: true
+                    onClicked: card.page = "details"
+                }
+                Tile {
+                    icon: "umbrella"
+                    iconColor: Theme.blue
+                    label: "Rain today"
+                    value: WeatherData.days.length && !isNaN(WeatherData.days[0].rainChance) ? WeatherData.days[0].rainChance + "% chance" : "--"
+                    clickable: true
+                    onClicked: card.page = "details"
+                }
+                Tile {
+                    icon: "aq"
+                    iconColor: WeatherData.air ? WeatherData.aqiColor(WeatherData.air.us_aqi) : Theme.accent
+                    label: "Air quality"
+                    value: WeatherData.air ? WeatherData.aqiText(WeatherData.air.us_aqi, true) : "--"
+                    clickable: true
+                    onClicked: card.page = "details"
+                }
+                Tile {
+                    icon: "wb_twilight"
+                    iconColor: Theme.orange
+                    label: WeatherData.nextSun ? WeatherData.nextSun.name : "Sun"
+                    value: WeatherData.nextSun ? WeatherData.clockLabel(WeatherData.nextSun.time) : "--"
+                    clickable: true
+                    onClicked: card.page = "details"
+                }
+            }
+
+            Rectangle {
+                visible: card.onMain && WeatherData.hasData
+                width: parent.width
+                height: 1
+                color: Theme.pill
+            }
+
+            // ── the next 24 hours ──
+            HourStrip {
+                visible: card.onMain && WeatherData.hasData
+                hours: WeatherData.hours
+            }
+
+            Rectangle {
+                visible: card.onMain && WeatherData.hasData
+                width: parent.width
+                height: 1
+                color: Theme.pill
+            }
+
+            // ── the next 7 days (click one for its page) ──
             Column {
-                visible: !root.shown && WeatherData.hasData
+                visible: card.onMain && WeatherData.hasData
                 width: parent.width
                 spacing: 4
                 Repeater {
@@ -12852,6 +13507,31 @@ in
                         required property int index
                         width: card.width
                         height: 30
+
+                        // click a day for its page
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.leftMargin: -6
+                            anchors.rightMargin: -6
+                            radius: Theme.radius
+                            color: Theme.pill
+                            opacity: dayMouse.containsMouse ? 1 : 0
+                            Behavior on opacity {
+                                NumberAnimation {
+                                    duration: 120
+                                }
+                            }
+                        }
+                        MouseArea {
+                            id: dayMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                card.dayIndex = dayRow.index;
+                                card.page = "day";
+                            }
+                        }
 
                         Text {
                             id: dayName
@@ -12969,6 +13649,226 @@ in
                 opacity: 0.6
                 font.family: Theme.font
                 font.pixelSize: Theme.textSize
+            }
+
+            // ════ a day's page ════
+            Column {
+                visible: !root.shown && card.page === "day" && card.day !== null
+                width: card.width
+                spacing: 12
+
+                PageHeader {
+                    title: card.day ? card.day.longLabel : ""
+                    onBack: card.page = "main"
+                }
+                // its weather, high / low, what it feels like
+                Item {
+                    width: card.width
+                    height: 54
+                    Text {
+                        id: dayBigIcon
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: card.day ? card.day.icon : ""
+                        color: card.day ? card.day.color : Theme.text
+                        font.family: Theme.iconFont
+                        font.pixelSize: 44
+                        font.variableAxes: ({
+                                "FILL": 1,
+                                "wght": 500,
+                                "opsz": 48,
+                                "GRAD": 0
+                            })
+                    }
+                    Column {
+                        anchors.left: dayBigIcon.right
+                        anchors.leftMargin: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 2
+                        Text {
+                            text: card.day ? WeatherData.describe(card.day.code) : ""
+                            color: Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 1.15
+                            font.weight: 700
+                        }
+                        Text {
+                            text: card.day ? "Feels like " + root.deg(card.day.feelsHigh) + " / " + root.deg(card.day.feelsLow) : ""
+                            color: Theme.text
+                            opacity: 0.7
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.9
+                            font.weight: 600
+                        }
+                    }
+                    Text {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: card.day ? "H:" + root.deg(card.day.high) + "  L:" + root.deg(card.day.low) : ""
+                        color: Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 1.1
+                        font.weight: 700
+                    }
+                }
+                Grid {
+                    columns: 3
+                    spacing: 6
+                    Tile {
+                        icon: "umbrella"
+                        iconColor: Theme.blue
+                        label: "Rain chance"
+                        value: card.day && !isNaN(card.day.rainChance) ? card.day.rainChance + "%" : "--"
+                    }
+                    Tile {
+                        icon: "rainy"
+                        iconColor: Theme.blue
+                        label: "Rain"
+                        value: card.day ? WeatherData.rainText(card.day.rainSum) : "--"
+                    }
+                    Tile {
+                        icon: "wb_sunny"
+                        iconColor: Theme.yellow
+                        label: "UV (highest)"
+                        value: card.day ? WeatherData.uvText(card.day.uvMax, true) : "--"
+                    }
+                    Tile {
+                        icon: "air"
+                        label: "Wind (most)"
+                        value: card.day ? WeatherData.windText(card.day.windMax) + " " + WeatherData.compass(card.day.windDir) : "--"
+                    }
+                    Tile {
+                        icon: "storm"
+                        label: "Gusts"
+                        value: card.day ? WeatherData.windText(card.day.gustMax) : "--"
+                    }
+                    Tile {
+                        icon: "light_mode"
+                        iconColor: Theme.yellow
+                        label: "Sunshine"
+                        value: card.day ? WeatherData.spanText(card.day.sunshine) : "--"
+                    }
+                    Tile {
+                        icon: "wb_twilight"
+                        iconColor: Theme.orange
+                        label: "Sunrise"
+                        value: card.day ? WeatherData.clockLabel(card.day.sunrise) : "--"
+                    }
+                    Tile {
+                        icon: "wb_twilight"
+                        iconColor: Theme.orange
+                        label: "Sunset"
+                        value: card.day ? WeatherData.clockLabel(card.day.sunset) : "--"
+                    }
+                    Tile {
+                        icon: "schedule"
+                        label: "Daylight"
+                        value: card.day ? WeatherData.spanText(card.day.daylight) : "--"
+                    }
+                }
+                Rectangle {
+                    width: card.width
+                    height: 1
+                    color: Theme.pill
+                }
+                // its hours
+                HourStrip {
+                    hours: card.page === "day" ? WeatherData.hoursOf(card.dayIndex) : []
+                }
+            }
+
+            // ════ the details page: everything about right now ════
+            Column {
+                visible: !root.shown && card.page === "details" && WeatherData.hasData
+                width: card.width
+                spacing: 2
+
+                readonly property var cur: WeatherData.hasData ? WeatherData.data.current : ({})
+
+                PageHeader {
+                    title: "Right now"
+                    onBack: card.page = "main"
+                }
+                Item {
+                    width: 1
+                    height: 6
+                }
+                DetailRow {
+                    icon: "thermostat"
+                    label: "Temperature"
+                    value: root.deg(parent.cur.temperature_2m)
+                }
+                DetailRow {
+                    icon: "accessibility_new"
+                    label: "Feels like"
+                    value: root.deg(parent.cur.apparent_temperature)
+                }
+                DetailRow {
+                    icon: "water_drop"
+                    label: "Humidity"
+                    value: parent.cur.relative_humidity_2m !== undefined ? Math.round(parent.cur.relative_humidity_2m) + "%" : "--"
+                }
+                DetailRow {
+                    icon: "dew_point"
+                    label: "Dew point"
+                    value: root.deg(parent.cur.dew_point_2m)
+                }
+                DetailRow {
+                    icon: "rainy"
+                    label: "Rain (last hour)"
+                    value: WeatherData.rainText(parent.cur.precipitation)
+                }
+                DetailRow {
+                    icon: "cloud"
+                    label: "Cloud cover"
+                    value: parent.cur.cloud_cover !== undefined ? Math.round(parent.cur.cloud_cover) + "%" : "--"
+                }
+                DetailRow {
+                    icon: "air"
+                    label: "Wind"
+                    value: WeatherData.windText(parent.cur.wind_speed_10m) + " " + WeatherData.compass(parent.cur.wind_direction_10m)
+                }
+                DetailRow {
+                    icon: "storm"
+                    label: "Gusts"
+                    value: WeatherData.windText(parent.cur.wind_gusts_10m)
+                }
+                DetailRow {
+                    icon: "compress"
+                    label: "Pressure"
+                    value: WeatherData.pressureText(parent.cur.pressure_msl)
+                }
+                DetailRow {
+                    icon: "visibility"
+                    label: "Visibility"
+                    value: WeatherData.distText(parent.cur.visibility)
+                }
+                DetailRow {
+                    icon: "wb_sunny"
+                    label: "UV index"
+                    value: WeatherData.air ? WeatherData.uvText(WeatherData.air.uv_index) : "--"
+                }
+                DetailRow {
+                    icon: "aq"
+                    label: "Air quality (US AQI)"
+                    value: WeatherData.air ? WeatherData.aqiText(WeatherData.air.us_aqi) : "--"
+                    valueColor: WeatherData.air ? WeatherData.aqiColor(WeatherData.air.us_aqi) : Theme.text
+                }
+                DetailRow {
+                    icon: "grain"
+                    label: "PM2.5"
+                    value: WeatherData.air && WeatherData.air.pm2_5 !== undefined ? Math.round(WeatherData.air.pm2_5) + " µg/m³" : "--"
+                }
+                DetailRow {
+                    icon: "grain"
+                    label: "PM10"
+                    value: WeatherData.air && WeatherData.air.pm10 !== undefined ? Math.round(WeatherData.air.pm10) + " µg/m³" : "--"
+                }
+                DetailRow {
+                    icon: "wb_twilight"
+                    label: WeatherData.nextSun ? "Next " + WeatherData.nextSun.name.toLowerCase() : "Sun"
+                    value: WeatherData.nextSun ? WeatherData.clockLabel(WeatherData.nextSun.time) : "--"
+                }
             }
 
             // ── picking a place ──
@@ -13163,6 +14063,10 @@ in
     // While you drag a window over it (WindowDrag.qml, WorkspaceDock.qml), the workspace
     // under the window gets an accent ring: let go and the window goes there. Hold it
     // near the top or bottom of a list that scrolls and the list scrolls.
+    //
+    // At the bottom, "+": a new workspace, numbered one past the highest there is (on
+    // any screen). Click it to go there; drop a window on it to send the window there.
+    // (Hyprland lets an empty workspace go once you leave it.)
     Item {
         id: root
 
@@ -13182,6 +14086,12 @@ in
 
         property var monitor: Hyprland.monitorFor(root.screen)
         property var list: !root.monitor ? [] : Hyprland.workspaces.values.filter(w => w.id > 0 && w.monitor === root.monitor)
+        // the "+" row's workspace: one past the highest numbered one anywhere
+        readonly property int newId: Hyprland.workspaces.values.reduce((m, w) => Math.max(m, w.id), 0) + 1
+        readonly property int rows: root.list.length + 1         // the workspaces, then "+"
+        function goToNew() {
+            Hyprland.dispatch('hl.dsp.focus({ workspace = "' + root.newId + '" })');
+        }
         property int activeIndex: root.list.findIndex(w => w.active)
 
         // Which one the mouse is over: -1 = none.
@@ -13194,14 +14104,20 @@ in
         property point dragPoint: Qt.point(-1, -1)  // the mouse, in the window's coordinates
         // the one under the mouse: -1 = none
         readonly property int dropIndex: root.dragging ? root.indexAt(root.dragPoint) : -1
-        readonly property var dropTarget: root.dropIndex >= 0 ? root.list[root.dropIndex] : null
+        // the "+" row stands for a workspace that doesn't exist yet (WindowDrag.qml only
+        // needs its id, name and whether it's the one showing)
+        readonly property var dropTarget: root.dropIndex < 0 ? null : root.dropIndex < root.list.length ? root.list[root.dropIndex] : ({
+                "id": root.newId,
+                "name": String(root.newId),
+                "active": false
+            })
         function indexAt(p) {
             const q = flick.mapFromItem(null, p.x, p.y);
             if (q.x < 0 || q.x >= root.rowWidth || q.y < 0 || q.y >= flick.height)
                 return -1;
             // the gaps between rows count as the nearest row, so it doesn't flicker
             const i = Math.floor((q.y + flick.contentY + root.gap / 2) / root.step);
-            return Math.max(0, Math.min(root.list.length - 1, i));
+            return Math.max(0, Math.min(root.rows - 1, i));
         }
         // held near the top (-1) or bottom (1) of a list that scrolls
         readonly property int dragScroll: {
@@ -13220,7 +14136,7 @@ in
         }
 
         readonly property real step: root.cell + root.gap
-        readonly property real fullHeight: Math.max(0, root.list.length * root.step - root.gap)
+        readonly property real fullHeight: Math.max(0, root.rows * root.step - root.gap)
         readonly property bool scrolls: root.fullHeight > root.maxHeight
 
         implicitWidth: root.rowWidth + (root.scrolls ? 10 : 0)    // and room for the scrollbar
@@ -13393,6 +14309,71 @@ in
                                 root.hoveredIndex = -1
                             onClicked: wsCell.modelData.activate()
                         }
+                    }
+                }
+
+                // "+": a new workspace (click to go there; drop a window on it)
+                Item {
+                    id: plusCell
+                    readonly property int index: root.list.length
+                    width: root.rowWidth
+                    height: root.cell
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Theme.radius + 2
+                        color: Theme.pill
+                        opacity: 0.6
+                    }
+                    Rectangle {          // the ring when a window you're dragging is over it
+                        anchors.fill: parent
+                        radius: Theme.radius + 2
+                        color: "transparent"
+                        border.color: Theme.accent
+                        border.width: 2
+                        opacity: root.dropIndex === plusCell.index ? 1 : 0
+                        Behavior on opacity {
+                            NumberAnimation {
+                                duration: root.hoverTime
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+                    }
+                    Text {
+                        x: (root.cell - width) / 2
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "add"
+                        color: root.dropIndex === plusCell.index ? Theme.accent : Theme.text
+                        font.family: Theme.iconFont
+                        font.pixelSize: Theme.iconSize * 1.2
+                        font.variableAxes: Theme.iconAxes
+                        scale: root.hoveredIndex === plusCell.index || root.dropIndex === plusCell.index ? root.hoverShrink : 1
+                        Behavior on scale {
+                            NumberAnimation {
+                                duration: root.hoverTime
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+                    }
+                    Text {
+                        x: root.cell + 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: root.anyApps
+                        text: "New workspace"
+                        color: Theme.text
+                        opacity: 0.7
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.85
+                        font.weight: 600
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onEntered: root.hoveredIndex = plusCell.index
+                        onExited: if (root.hoveredIndex === plusCell.index)
+                            root.hoveredIndex = -1
+                        onClicked: root.goToNew()
                     }
                 }
             }
@@ -13599,6 +14580,7 @@ in
         id: bar
         contentItem: Rectangle {
             implicitWidth: 4
+            implicitHeight: 4         // for a horizontal one
             radius: 2
             color: Theme.pillIcon
             opacity: bar.size < 1 ? (bar.active || bar.hovered ? 1 : 0.4) : 0
@@ -13620,6 +14602,10 @@ in
         property string icon: ""
         property color iconColor: Theme.text
         property int iconSize: Theme.iconSize
+        // what it does, shown after the mouse rests on it for half a second (HoverTip.qml);
+        // "" for none
+        property string tip: ""
+        property bool tipBelow: false       // the tip under it (for buttons in the top bar)
 
         signal clicked
 
@@ -13648,6 +14634,12 @@ in
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
             onClicked: root.clicked()
+        }
+        HoverTip {
+            show: mouse.containsMouse
+            cut: root.tip !== ""
+            title: root.tip
+            below: root.tipBelow
         }
     }
   '';
@@ -14574,7 +15566,7 @@ in
       -- ── Title bars (hyprbars) ──
       -- A thin bar on top of each window, macOS style: three small circles on the left
       -- (their symbols show when the mouse is on them), the title in the middle. Drag a
-      -- window by it; double-click it for true fullscreen. (On a fullscreen window
+      -- window by it; double-click it to maximize (or back). (On a fullscreen window
       -- Hyprland doesn't draw it: push the mouse against the top of the screen and
       -- Quickshell slides down a copy instead, FullscreenBar.qml.) Colors from the theme (bar_* in
       -- ~/.local/state/theme/current/hyprland.lua, "hyprland.lua" in home.nix), so they
@@ -14585,12 +15577,10 @@ in
       --     special workspace, "special:minimized", that's never shown. The dock lists
       --     it (point at the app's icon); click it there to bring it back to the
       --     workspace you're on (DockData.qml in home.nix).
-      --   green: maximize (or back), right away, like Super + F. True fullscreen is a
-      --     double-click on the title (like Super + Shift + F, which also gets you
-      --     back out: the bar isn't drawn on a fullscreen window). Not a double-click
-      --     on the green button: the first click moves the window, so the second
-      --     would land somewhere else, and waiting to see if a second click comes is
-      --     the delay you'd notice.
+      --   green: true fullscreen, like Super + Shift + F. The bar isn't drawn on a
+      --     fullscreen window: push the mouse against the top of the screen for its
+      --     stand-in (FullscreenBar.qml), whose green button leaves fullscreen.
+      --   double-click the title: maximize (or back), like Super + F.
       -- The plugin is built for this Hyprland (nixpkgs' hyprlandPlugins, the same
       -- version); Hyprland loads it once this file has been read, then reads it again,
       -- so hl.plugin.hyprbars only exists that second time (the `if`).
@@ -14625,7 +15615,7 @@ in
                       inactive_button_color = theme.bar_button_inactive,
                       bar_part_of_window = true, -- the window's space includes it
                       bar_precedence_over_border = true,
-                      on_double_click = [[hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" })']],
+                      on_double_click = [[hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" })']],
                       -- dragging a window by its bar: tell Quickshell, so it can be
                       -- dropped on a workspace in the workspaces dock (hyprbarsPatched
                       -- and WindowDrag.qml in home.nix)
@@ -14646,7 +15636,7 @@ in
           end
           button(theme.bar_close, "×", [[hyprctl dispatch 'hl.dsp.window.close()']])
           button(theme.bar_float, "−", [[hyprctl dispatch 'hl.dsp.window.move({ workspace = "special:minimized", follow = false })']])
-          button(theme.bar_fullscreen, "+", [[hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" })']])
+          button(theme.bar_fullscreen, "+", [[hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" })']])
       end
 
       -- HyprMod (the Hyprland settings app): what you save in it goes in
