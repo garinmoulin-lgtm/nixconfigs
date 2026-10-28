@@ -734,39 +734,6 @@ let
     bar_fullscreen = "rgb(${c.green})",
   '';
 
-  # The green button on a window's title bar (hyprbars): one click maximizes (fills the
-  # space between the bar and the screen's edges, like Super + F; again to go back), two
-  # quick clicks make it truly fullscreen (like Super + Shift + F, which also gets you
-  # back out: the title bar isn't drawn on a fullscreen window). hyprbars only knows "a
-  # click", so this tells them apart: a click waits 0.35 s, and if a second one comes in
-  # that time, it's fullscreen instead. (Waiting first means the window doesn't jump
-  # out from under the mouse between the two clicks.)
-  hyprbarsGreen =
-    let
-      hyprctl = "${
-        if osConfig != null then osConfig.programs.hyprland.package else pkgs.hyprland
-      }/bin/hyprctl";
-      cu = "${pkgs.coreutils}/bin";
-    in
-    pkgs.writeShellScript "hyprbars-green" ''
-      pending="''${XDG_RUNTIME_DIR:-/tmp}/hyprbars-green"
-      # the window clicked (hyprbars focuses it first)
-      win="address:$(${hyprctl} activewindow -j | ${pkgs.jq}/bin/jq -r .address)"
-      if [ -e "$pending" ]; then
-        # the second click: the first one's wait finds its note gone and does nothing
-        ${cu}/rm -f "$pending"
-        ${hyprctl} dispatch "hl.dsp.window.fullscreen({ mode = \"fullscreen\", action = \"set\", window = \"$win\" })"
-        exit 0
-      fi
-      me=$$
-      echo "$me" > "$pending"
-      ${cu}/sleep 0.35
-      if [ "$(${cu}/cat "$pending" 2>/dev/null)" = "$me" ]; then
-        ${cu}/rm -f "$pending"
-        ${hyprctl} dispatch "hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"toggle\", window = \"$win\" })"
-      fi
-    '';
-
   # hyprbars (the title bars), with a small addition: a setting, on_drag, for a
   # command to run when you start and stop dragging a window by its bar. hyprbars
   # handles those clicks itself, before Hyprland's binds see them, so without this
@@ -2133,6 +2100,17 @@ in
             model: Quickshell.screens
 
             WorkspaceDock {
+                required property var modelData
+                screen: modelData
+            }
+        }
+
+        // ── The title bar over a fullscreen window ── (FullscreenBar.qml): one per
+        // screen, there only while that screen's focused window is fullscreen
+        Variants {
+            model: Quickshell.screens
+
+            FullscreenBar {
                 required property var modelData
                 screen: modelData
             }
@@ -4022,6 +4000,7 @@ in
                                                     anchors.verticalCenter: parent.verticalCenter
 
                                                     Text {
+                                                        id: songTitle
                                                         width: parent.width
                                                         text: song.modelData.title
                                                         elide: Text.ElideRight
@@ -4032,6 +4011,7 @@ in
                                                         font.letterSpacing: Theme.letterSpacing
                                                     }
                                                     Text {
+                                                        id: songDetail
                                                         width: parent.width
                                                         text: [song.modelData.artist, song.modelData.album].filter(s => s).join("  ·  ")
                                                         elide: Text.ElideRight
@@ -4040,6 +4020,13 @@ in
                                                         font.family: Theme.font
                                                         font.pixelSize: Theme.textSize * 0.85
                                                     }
+                                                }
+                                                // the whole title, if it's cut short (HoverTip.qml)
+                                                HoverTip {
+                                                    show: songMouse.containsMouse
+                                                    cut: songTitle.truncated || songDetail.truncated
+                                                    title: song.modelData.title
+                                                    detail: songDetail.text
                                                 }
 
                                                 // Right side. Only one of these shows at a time:
@@ -4254,6 +4241,7 @@ in
                                                     anchors.rightMargin: 8
                                                     anchors.verticalCenter: parent.verticalCenter
                                                     Text {
+                                                        id: groupName
                                                         width: parent.width
                                                         text: group.modelData.name
                                                         elide: Text.ElideRight
@@ -4264,6 +4252,7 @@ in
                                                         font.letterSpacing: Theme.letterSpacing
                                                     }
                                                     Text {
+                                                        id: groupDetail
                                                         width: parent.width
                                                         text: (group.modelData.kind === "albums" && group.modelData.artist ? group.modelData.artist + "  ·  " : "") + group.modelData.songs.length + (group.modelData.songs.length === 1 ? " song" : " songs")
                                                         elide: Text.ElideRight
@@ -4272,6 +4261,13 @@ in
                                                         font.family: Theme.font
                                                         font.pixelSize: Theme.textSize * 0.85
                                                     }
+                                                }
+                                                // the whole name, if it's cut short (HoverTip.qml)
+                                                HoverTip {
+                                                    show: groupMouse.containsMouse
+                                                    cut: groupName.truncated || groupDetail.truncated
+                                                    title: group.modelData.name
+                                                    detail: groupDetail.text
                                                 }
                                                 IconButton {        // play everything by this artist / on this album
                                                     id: groupPlay
@@ -4586,6 +4582,7 @@ in
                                                     anchors.verticalCenter: parent.verticalCenter
 
                                                     Text {
+                                                        id: entryTitle
                                                         width: parent.width
                                                         // not in the library: show the file name
                                                         text: entry.info ? entry.info.title : entry.modelData.filename.split("/").pop()
@@ -4597,6 +4594,7 @@ in
                                                         font.letterSpacing: Theme.letterSpacing
                                                     }
                                                     Text {
+                                                        id: entryDetail
                                                         width: parent.width
                                                         visible: text !== ""
                                                         text: entry.info ? entry.info.artist : ""
@@ -4606,6 +4604,14 @@ in
                                                         font.family: Theme.font
                                                         font.pixelSize: Theme.textSize * 0.85
                                                     }
+                                                }
+                                                // the whole title, if it's cut short (HoverTip.qml); not while
+                                                // dragging songs around the queue
+                                                HoverTip {
+                                                    show: entryMouse.containsMouse && queueList.dragFrom < 0
+                                                    cut: entryTitle.truncated || entryDetail.truncated
+                                                    title: entryTitle.text
+                                                    detail: entryDetail.text
                                                 }
 
                                                 IconButton {
@@ -9808,10 +9814,9 @@ in
         function minimizedCount(app) {
             return app.windows.filter(w => isMinimized(w)).length;
         }
-        // whether pointing at its icon shows its windows: more than one, or any minimized
-        // (that's the only way back to one)
+        // whether pointing at its icon shows its windows (previews): any open
         function showsList(app) {
-            return app.windows.length > 1 || minimizedCount(app) > 0;
+            return app.windows.length > 0;
         }
         // back to the workspace you're on, focused
         function restore(t) {
@@ -9920,6 +9925,7 @@ in
   # The dock along the bottom of the screen (shell.qml makes one per monitor).
   xdg.configFile."quickshell/Dock.qml".text = ''
     import QtQuick
+    import QtQuick.Controls.Basic   // ScrollBar (the window previews' scrollbar)
     import Quickshell
     import Quickshell.Wayland
     import Quickshell.Services.SystemTray
@@ -9938,10 +9944,10 @@ in
     //     middle click  a new window
     //     right click   pin / unpin, new window, close
     //     drag it       left or right to rearrange (an unpinned one gets pinned there)
-    //     point at it   with more than one window open, or a minimized one: after half a
-    //                   second the dock grows a list of them above the icons (click one
-    //                   to go to it, or bring a minimized one back; x to close it); it
-    //                   shrinks back when the mouse leaves
+    //     point at it   with a window open: after half a second the dock grows previews
+    //                   of its windows above the icons (click one to go to it, or bring a
+    //                   minimized one back; x to close it; past two rows they scroll);
+    //                   it shrinks back when the mouse leaves
     //   Tray (right): the icons apps put up.
     //     click = the app's action, middle click = its second action,
     //     right click = its menu (the dock grows to show it, like the window list).
@@ -9957,8 +9963,8 @@ in
         WlrLayershell.layer: WlrLayer.Top
         WlrLayershell.namespace: "dock"
         color: "transparent"
-        // room for the dock to grow into (a window list or a menu above the icons)
-        implicitHeight: 480
+        // room for the dock to grow into (window previews or a menu above the icons)
+        implicitHeight: 520
 
         readonly property int iconSize: 36
         readonly property int cell: 48           // an icon's slot
@@ -10108,10 +10114,30 @@ in
                 spacing: 6
 
                 // ════ an app's windows ════
+                // A card for each: a preview of the window (a picture taken when the list
+                // opens; the one under the mouse plays live), its title and its workspace,
+                // up to three across. Click one to go to it (a minimized one comes back to
+                // the workspace you're on); x (on hover) closes it. Past two rows it
+                // scrolls: mouse wheel, or the thin scrollbar on the right.
                 Column {
                     id: listCol
                     visible: dock.extra === "list"
-                    width: Math.max(row.width, 240)
+                    spacing: 4
+
+                    readonly property int cardW: 200
+                    readonly property int previewH: 112
+                    readonly property int cardH: previewH + 44
+                    readonly property int gap: 6
+                    readonly property int count: dock.listLive ? dock.listLive.windows.length : 0
+                    readonly property int cols: Math.max(1, Math.min(3, count))
+                    readonly property int rows: Math.ceil(count / cols)
+                    readonly property real gridW: cols * cardW + (cols - 1) * gap
+                    readonly property real gridH: rows * cardH + (rows - 1) * gap
+                    // two rows and a peek at the third, so it shows there's more
+                    readonly property real maxGridH: 2 * cardH + gap + 40
+                    readonly property bool scrolls: gridH > maxGridH
+                    width: Math.max(row.width, gridW + (scrolls ? 12 : 0))
+
                     HoverHandler {
                         id: listHover
                     }
@@ -10119,7 +10145,6 @@ in
                     Text {
                         width: parent.width
                         leftPadding: 8
-                        bottomPadding: 4
                         elide: Text.ElideRight
                         // "Kitty  ·  3 windows  ·  1 minimized"
                         text: {
@@ -10136,89 +10161,139 @@ in
                         font.pixelSize: Theme.textSize * 0.85
                         font.weight: 600
                     }
-                    Repeater {
-                        model: dock.extra === "list" && dock.listLive ? dock.listLive.windows : []
 
-                        Rectangle {
-                            id: winRow
-                            required property var modelData
-                            readonly property bool minimized: DockData.isMinimized(modelData)
-                            width: listCol.width
-                            height: 32
-                            radius: Theme.radius
-                            color: winRowMouse.containsMouse ? Theme.pill : "transparent"
-                            Behavior on color {
-                                ColorAnimation {
-                                    duration: 120
-                                }
-                            }
-                            // click: go to that window
-                            MouseArea {
-                                id: winRowMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                // (a minimized one comes back to the workspace you're on)
-                                onClicked: {
-                                    DockData.show(winRow.modelData);
-                                    dock.closeExtras();
-                                }
+                    Flickable {
+                        id: listFlick
+                        width: listCol.width
+                        height: Math.min(listCol.gridH, listCol.maxGridH)
+                        contentWidth: width
+                        contentHeight: cards.height
+                        clip: true
+                        interactive: listCol.scrolls
+                        boundsBehavior: Flickable.StopAtBounds
+                        ScrollBar.vertical: ThinScrollBar {}
 
-                                Rectangle {      // the one you're in
-                                    id: winDot
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 10
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: 6
-                                    height: 6
-                                    radius: 3
-                                    color: winRow.modelData.activated ? Theme.accent : Theme.pillIcon
-                                }
-                                Text {
-                                    anchors.left: winDot.right
-                                    anchors.leftMargin: 10
-                                    anchors.right: winWs.visible ? winWs.left : winWs.right
-                                    anchors.rightMargin: 6
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: winRow.modelData.title || DockData.nameFor(dock.listLive ? dock.listLive.key : "")
-                                    elide: Text.ElideRight
-                                    color: winRow.modelData.activated ? Theme.accent : Theme.text
-                                    opacity: winRow.minimized ? 0.6 : 1
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize * 0.95
-                                    font.weight: winRow.modelData.activated ? 700 : 500
-                                }
-                                // the workspace it's on, in a little pill ("minimized" for those)
+                        Grid {
+                            id: cards
+                            // centered in the room left of the scrollbar
+                            x: Math.max(0, (listFlick.width - (listCol.scrolls ? 12 : 0) - width) / 2)
+                            columns: listCol.cols
+                            spacing: listCol.gap
+
+                            Repeater {
+                                model: dock.extra === "list" && dock.listLive ? dock.listLive.windows : []
+
                                 Rectangle {
-                                    id: winWs
-                                    readonly property string name: winRow.minimized ? "minimized" : DockData.workspaceOf(winRow.modelData)
-                                    visible: name !== ""
-                                    anchors.right: winClose.visible ? winClose.left : parent.right
-                                    anchors.rightMargin: winClose.visible ? 4 : 10
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: Math.max(height, winWsText.implicitWidth + 12)
-                                    height: 20
-                                    radius: height / 2
-                                    color: Theme.pill
-                                    Text {
-                                        id: winWsText
-                                        anchors.centerIn: parent
-                                        text: winWs.name
-                                        color: winRow.modelData.activated ? Theme.accent : Theme.text
-                                        font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 0.8
-                                        font.weight: 700
+                                    id: card
+                                    required property var modelData
+                                    readonly property bool minimized: DockData.isMinimized(modelData)
+                                    readonly property bool hovered: cardHover.hovered
+                                    width: listCol.cardW
+                                    height: listCol.cardH
+                                    radius: Theme.radius + 2
+                                    color: card.hovered ? Theme.pill : "transparent"
+                                    // the window you're in
+                                    border.width: card.modelData.activated ? 2 : 0
+                                    border.color: Theme.accent
+                                    Behavior on color {
+                                        ColorAnimation {
+                                            duration: 120
+                                        }
                                     }
-                                }
-                                // x: close that window (shows on hover)
-                                IconButton {
-                                    id: winClose
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    visible: winRowMouse.containsMouse
-                                    icon: "close"
-                                    iconColor: Theme.red
-                                    onClicked: winRow.modelData.close()
+
+                                    HoverHandler {
+                                        id: cardHover
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            DockData.show(card.modelData);
+                                            dock.closeExtras();
+                                        }
+                                    }
+
+                                    // the preview, fitted into its box
+                                    Rectangle {
+                                        id: shotBox
+                                        x: 8
+                                        y: 8
+                                        width: card.width - 16
+                                        height: listCol.previewH
+                                        radius: Theme.radius
+                                        color: Qt.rgba(0, 0, 0, 0.25)
+                                        clip: true
+
+                                        ScreencopyView {
+                                            id: shot
+                                            anchors.centerIn: parent
+                                            captureSource: card.modelData
+                                            // live while the mouse is on it; a still picture otherwise
+                                            live: card.hovered
+                                            constraintSize: Qt.size(shotBox.width, shotBox.height)
+                                            visible: hasContent
+                                            opacity: card.minimized ? 0.55 : 1
+                                        }
+                                        // until there's a picture (or if there can't be one): the app's icon
+                                        AppIcon {
+                                            anchors.centerIn: parent
+                                            visible: !shot.hasContent
+                                            width: 40
+                                            height: 40
+                                            icon: DockData.iconFor(dock.listLive ? dock.listLive.key : "")
+                                            name: DockData.nameFor(dock.listLive ? dock.listLive.key : "")
+                                            opacity: 0.8
+                                        }
+                                    }
+
+                                    // its title, and its workspace in a little pill ("minimized")
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 10
+                                        anchors.right: cardWs.visible ? cardWs.left : parent.right
+                                        anchors.rightMargin: 6
+                                        anchors.bottom: parent.bottom
+                                        anchors.bottomMargin: 10
+                                        text: card.modelData.title || DockData.nameFor(dock.listLive ? dock.listLive.key : "")
+                                        elide: Text.ElideRight
+                                        color: card.modelData.activated ? Theme.accent : Theme.text
+                                        opacity: card.minimized ? 0.6 : 1
+                                        font.family: Theme.font
+                                        font.pixelSize: Theme.textSize * 0.9
+                                        font.weight: card.modelData.activated ? 700 : 500
+                                    }
+                                    Rectangle {
+                                        id: cardWs
+                                        readonly property string name: card.minimized ? "minimized" : DockData.workspaceOf(card.modelData)
+                                        visible: name !== ""
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 8
+                                        anchors.bottom: parent.bottom
+                                        anchors.bottomMargin: 8
+                                        width: Math.max(height, cardWsText.implicitWidth + 12)
+                                        height: 20
+                                        radius: height / 2
+                                        color: Theme.pill
+                                        Text {
+                                            id: cardWsText
+                                            anchors.centerIn: parent
+                                            text: cardWs.name
+                                            color: card.modelData.activated ? Theme.accent : Theme.text
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.8
+                                            font.weight: 700
+                                        }
+                                    }
+                                    // x: close it (shows on hover), over the preview's corner
+                                    IconButton {
+                                        anchors.right: shotBox.right
+                                        anchors.top: shotBox.top
+                                        anchors.margins: 4
+                                        visible: card.hovered
+                                        icon: "close"
+                                        iconColor: Theme.red
+                                        onClicked: card.modelData.close()
+                                    }
                                 }
                             }
                         }
@@ -10618,9 +10693,8 @@ in
                                             DockData.focus(app.modelData);
                                     }
                                 }
-                                // more than one window, or a minimized one: point at it for half a
-                                // second for the list (pointing at another such app while one's
-                                // open switches to it)
+                                // a window open: point at it for half a second for the previews
+                                // (pointing at another open app while they're up switches to it)
                                 Timer {
                                     interval: 500
                                     running: appMouse.containsMouse && !appMouse.pressed && dock.dragFrom < 0 && DockData.showsList(app.modelData) && (dock.extra === "" || (dock.extra === "list" && dock.listApp && dock.listApp.key !== app.modelData.key))
@@ -11093,6 +11167,256 @@ in
 
   # The workspaces dock: the workspace switcher on the left edge, hidden until you push
   # the mouse against that edge (like the dock at the bottom).
+  # The music list's hover tip: a song's whole title when the list cuts it short.
+  xdg.configFile."quickshell/HoverTip.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+
+    // The whole of a title the list had to cut short ("…"): a song's, an artist's or an
+    // album's, with the line under it (artist · album) in full too. It shows once the
+    // mouse has rested on the row for half a second (only if something was cut), just
+    // above the row, in the bar's colors, and goes when the mouse leaves. Long titles
+    // wrap.
+    ToolTip {
+        id: tip
+
+        property bool show: false           // the mouse is on the row
+        property bool cut: false            // the title or the line under it doesn't fit
+        property string title: ""
+        property string detail: ""          // the line under it, or ""
+        readonly property real maxTextWidth: 360
+
+        visible: show && cut && title !== ""
+        delay: 500
+        timeout: -1
+        closePolicy: Popup.NoAutoClose      // it goes when the mouse leaves, nothing else
+        x: 0
+        y: -height - 4
+        padding: 8
+
+        contentItem: Column {
+            spacing: 2
+            Text {
+                width: Math.min(implicitWidth, tip.maxTextWidth)
+                text: tip.title
+                wrapMode: Text.Wrap
+                color: Theme.text
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize
+                font.weight: 700
+                font.letterSpacing: Theme.letterSpacing
+            }
+            Text {
+                visible: tip.detail !== ""
+                width: Math.min(implicitWidth, tip.maxTextWidth)
+                text: tip.detail
+                wrapMode: Text.Wrap
+                color: Theme.text
+                opacity: 0.7
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize * 0.85
+            }
+        }
+        background: Rectangle {
+            color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.95)
+            radius: Theme.radius
+            border.width: 1
+            border.color: Theme.pill
+        }
+    }
+  '';
+
+  # The title bar over a fullscreen window (see FullscreenBar.qml's comment).
+  xdg.configFile."quickshell/FullscreenBar.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Wayland
+    import Quickshell.Hyprland
+
+    // ── The title bar over a fullscreen window ──
+    // Hyprland doesn't draw window decorations (the hyprbars title bar) on a fullscreen
+    // window, and the window fills the screen, so there's no room for one anyway. So on
+    // a screen whose focused window is fullscreen, pushing the mouse against the top
+    // edge slides this down over it: the same bar, drawn by Quickshell (same height,
+    // glass, font, colors and circles; symbols on the circles while the mouse is on
+    // them). It slides back up half a second after the mouse leaves it.
+    //   red: close   yellow: minimize   green, or double-click the title: leave fullscreen
+    // It's on the overlay layer, the only one above fullscreen windows. While it's in,
+    // only the top 2 px of the screen take the mouse (from the fullscreen window).
+    PanelWindow {
+        id: fsBar
+
+        anchors {
+            top: true
+            left: true
+            right: true
+        }
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.namespace: "fullscreen-titlebar"   // its blur rule in the Hyprland config
+        color: "transparent"
+        implicitHeight: barHeight
+
+        readonly property int barHeight: 28           // hyprbars' bar_height
+
+        // the focused window, if it's fullscreen (not just maximized) on this screen
+        readonly property var win: {
+            const t = ToplevelManager.activeToplevel;
+            if (!t || !t.fullscreen)
+                return null;
+            for (const s of t.screens)
+                if (fsBar.screen && s && s.name === fsBar.screen.name)
+                    return t;
+            return null;
+        }
+        visible: win !== null
+
+        // its Hyprland address, for the commands below ("" until Hyprland has said)
+        function address() {
+            for (const h of Hyprland.toplevels.values)
+                if (h.wayland === fsBar.win && h.address !== "")
+                    return "address:0x" + h.address;
+            return "";
+        }
+        function dispatchFor(make) {
+            const a = fsBar.address();
+            if (a !== "")
+                Hyprland.dispatch(make(a));
+            fsBar.shown = false;
+        }
+        function close() {
+            if (fsBar.win)
+                fsBar.win.close();
+            fsBar.shown = false;
+        }
+        function minimize() {
+            // like the yellow button on the title bar (and the dock's minimized windows)
+            dispatchFor(a => 'hl.dsp.window.move({ workspace = "special:minimized", follow = false, window = "' + a + '" })');
+        }
+        function leaveFullscreen() {
+            dispatchFor(a => 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "unset", window = "' + a + '" })');
+        }
+
+        // ── showing and hiding ──
+        property bool shown: false
+        readonly property bool held: edgeHover.hovered || barHover.hovered
+        onHeldChanged: {
+            if (held) {
+                hideDelay.stop();
+                shown = true;
+            } else {
+                hideDelay.restart();
+            }
+        }
+        onWinChanged: if (!win) {
+            hideDelay.stop();
+            shown = false;
+        }
+        Timer {
+            id: hideDelay
+            interval: 500
+            onTriggered: fsBar.shown = false
+        }
+        // 0 = up out of sight, 1 = all the way down
+        property real openness: shown ? 1 : 0
+        Behavior on openness {
+            NumberAnimation {
+                duration: fsBar.shown ? 200 : 160
+                easing.type: fsBar.shown ? Easing.OutCubic : Easing.InCubic
+            }
+        }
+
+        mask: Region {
+            item: edge
+            Region {
+                item: fsBar.openness > 0 ? slide : null
+            }
+        }
+
+        // the top edge: push the mouse here
+        Item {
+            id: edge
+            width: parent.width
+            height: 2
+            HoverHandler {
+                id: edgeHover
+            }
+        }
+
+        Rectangle {
+            id: slide
+            width: parent.width
+            height: fsBar.barHeight
+            y: -height * (1 - fsBar.openness)
+            visible: fsBar.openness > 0
+            color: Theme.glass       // hyprbars' bar_color: the bar's glass, blurred
+            HoverHandler {
+                id: barHover
+            }
+
+            // double-click the title: leave fullscreen (like on the title bar)
+            MouseArea {
+                anchors.fill: parent
+                onDoubleClicked: fsBar.leaveFullscreen()
+            }
+
+            // the three circles, at hyprbars' sizes and spacing
+            Row {
+                id: buttons
+                x: 12
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 8
+                HoverHandler {
+                    id: buttonsHover
+                }
+
+                Repeater {
+                    model: [
+                        { "color": Theme.red, "icon": "×", "act": () => fsBar.close() },
+                        { "color": Theme.yellow, "icon": "−", "act": () => fsBar.minimize() },
+                        { "color": Theme.green, "icon": "+", "act": () => fsBar.leaveFullscreen() }
+                    ]
+
+                    Rectangle {
+                        required property var modelData
+                        width: 12
+                        height: 12
+                        radius: 6
+                        color: modelData.color
+                        Text {
+                            anchors.centerIn: parent
+                            visible: buttonsHover.hovered
+                            text: parent.modelData.icon
+                            color: Theme.bg
+                            font.pixelSize: 9
+                            font.weight: 700
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            anchors.margins: -4          // a little easier to hit
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: parent.modelData.act()
+                        }
+                    }
+                }
+            }
+
+            // the title, in the middle (hyprbars' font)
+            Text {
+                anchors.centerIn: parent
+                width: Math.min(implicitWidth, parent.width - 2 * (buttons.x + buttons.width + 12))
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                text: fsBar.win ? fsBar.win.title : ""
+                color: Theme.text
+                font.family: "SFProText Nerd Font"
+                font.pointSize: 11
+                font.weight: 500
+            }
+        }
+    }
+  '';
+
   # Dragging a window onto the workspaces dock (see WindowDrag.qml's comment).
   xdg.configFile."quickshell/WindowDrag.qml".text = ''
     pragma Singleton
@@ -13896,6 +14220,7 @@ in
       hl.layer_rule({ name = "dock-blur", match = { namespace = "dock" }, blur = true, ignore_alpha = 0.1, xray = false })
       hl.layer_rule({ name = "workspace-dock-blur", match = { namespace = "workspace-dock" }, blur = true, ignore_alpha = 0.1, xray = false })
       hl.layer_rule({ name = "notification-blur", match = { namespace = "notification-popups" }, blur = true, ignore_alpha = 0.1, xray = false })
+      hl.layer_rule({ name = "fullscreen-titlebar-blur", match = { namespace = "fullscreen-titlebar" }, blur = true, ignore_alpha = 0.1, xray = false })
 
 
       -- Consolidated decoration/blur block (previously split across 3 hl.config calls
@@ -14163,7 +14488,9 @@ in
       -- ── Title bars (hyprbars) ──
       -- A thin bar on top of each window, macOS style: three small circles on the left
       -- (their symbols show when the mouse is on them), the title in the middle. Drag a
-      -- window by it; double-click it to maximize (or back). Colors from the theme (bar_* in
+      -- window by it; double-click it for true fullscreen. (On a fullscreen window
+      -- Hyprland doesn't draw it: push the mouse against the top of the screen and
+      -- Quickshell slides down a copy instead, FullscreenBar.qml.) Colors from the theme (bar_* in
       -- ~/.local/state/theme/current/hyprland.lua, "hyprland.lua" in home.nix), so they
       -- change with it: `theme` reloads this config. The bar is the top bar's glass:
       -- see-through and blurred.
@@ -14172,8 +14499,12 @@ in
       --     special workspace, "special:minimized", that's never shown. The dock lists
       --     it (point at the app's icon); click it there to bring it back to the
       --     workspace you're on (DockData.qml in home.nix).
-      --   green: maximize (or back); click twice quickly for true fullscreen
-      --     (hyprbarsGreen in home.nix). Super + Shift + F leaves fullscreen.
+      --   green: maximize (or back), right away, like Super + F. True fullscreen is a
+      --     double-click on the title (like Super + Shift + F, which also gets you
+      --     back out: the bar isn't drawn on a fullscreen window). Not a double-click
+      --     on the green button: the first click moves the window, so the second
+      --     would land somewhere else, and waiting to see if a second click comes is
+      --     the delay you'd notice.
       -- The plugin is built for this Hyprland (nixpkgs' hyprlandPlugins, the same
       -- version); Hyprland loads it once this file has been read, then reads it again,
       -- so hl.plugin.hyprbars only exists that second time (the `if`).
@@ -14203,7 +14534,7 @@ in
                       inactive_button_color = theme.bar_button_inactive,
                       bar_part_of_window = true, -- the window's space includes it
                       bar_precedence_over_border = true,
-                      on_double_click = [[hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" })']],
+                      on_double_click = [[hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" })']],
                       -- dragging a window by its bar: tell Quickshell, so it can be
                       -- dropped on a workspace in the workspaces dock (hyprbarsPatched
                       -- and WindowDrag.qml in home.nix)
@@ -14224,7 +14555,7 @@ in
           end
           button(theme.bar_close, "×", [[hyprctl dispatch 'hl.dsp.window.close()']])
           button(theme.bar_float, "−", [[hyprctl dispatch 'hl.dsp.window.move({ workspace = "special:minimized", follow = false })']])
-          button(theme.bar_fullscreen, "+", "${hyprbarsGreen}")
+          button(theme.bar_fullscreen, "+", [[hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" })']])
       end
 
       -- HyprMod (the Hyprland settings app): what you save in it goes in
