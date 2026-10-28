@@ -717,248 +717,13 @@ let
     AWWW_TRANSITION_FPS = "240"; # frames per second; your monitor's refresh rate
   };
 
-  # The Hyprland colors from a theme: the window borders and the title bars (hyprbars).
-  # Read from "hyprland.lua" in each theme's folder (mkThemeDir), and the default theme's
-  # are written into the Hyprland config for when that file is missing.
-  # The title bar is the bar's see-through glass (Theme.glassOpacity, 0.8 = cc), blurred.
+  # The Hyprland colors from a theme: the window borders. Read from "hyprland.lua" in
+  # each theme's folder (mkThemeDir), and the default theme's are written into the
+  # Hyprland config for when that file is missing.
   hyprlandThemeColors = c: ''
     active_border = "rgba(${c.accent}ee)",
     inactive_border = "rgba(${c.border}99)",
-    -- title bars (hyprbars)
-    bar_color = "rgba(${c.bg}cc)",
-    bar_text = "rgb(${c.fg})",
-    bar_icon = "rgb(${c.bg})",               -- the symbols on the buttons
-    bar_button_inactive = "rgb(${c.light})", -- all three, on windows that aren't focused
-    bar_close = "rgb(${c.red})",
-    bar_float = "rgb(${c.yellow})",           -- the minimize button (named before it was)
-    bar_fullscreen = "rgb(${c.green})",
   '';
-
-  # hyprbars (the title bars), with a small addition: a setting, on_drag, for a
-  # command to run when you start and stop dragging a window by its bar. hyprbars
-  # handles those clicks itself, before Hyprland's binds see them, so without this
-  # nothing else knows about the drag. The Hyprland config sets it to tell Quickshell,
-  # so a window dragged by its title bar can be dropped on a workspace in the
-  # workspaces dock, like Super + drag (WindowDrag.qml). It runs
-  #   <command> start <name>                                when the drag starts
-  #   <command> finish <name> <address> <floating> at=<x>,<y>   when you let go
-  # (where the window was when you picked it up). It also makes letting go end the
-  # drag wherever the mouse is: hyprbars ignored a release over a panel (like the
-  # workspaces dock), so the drop never happened. And the mouse pointer turns into a
-  # pointing hand over the bar's buttons, like the buttons in Quickshell. The change
-  # is the patch below; if
-  # a hyprbars update stops it applying, the rebuild fails here and the patch needs
-  # redoing.
-  # Hyprland loads it from ~/.local/share/hypr/plugins (the link below), a path that
-  # doesn't change between rebuilds: see the comment where the Hyprland config loads it.
-  hyprbarsPatched = pkgs.hyprlandPlugins.hyprbars.overrideAttrs (old: {
-    patches = (old.patches or [ ]) ++ [
-      (pkgs.writeText "hyprbars-on-drag.patch" ''
-      --- a/barDeco.cpp
-      +++ b/barDeco.cpp
-      @@ -22,11 +22,13 @@
-       #include <hyprland/src/layout/LayoutManager.hpp>
-       #include <hyprland/src/render/OpenGL.hpp>
-       #include <hyprland/src/state/MonitorState.hpp>
-      +#include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp>
-       
-       #include "globals.hpp"
-       #include "BarPassElement.hpp"
-       
-       #include <climits>
-      +#include <ctime>
-       
-       using namespace Render::GL;
-       
-      @@ -56,6 +58,10 @@
-       
-       CHyprBar::~CHyprBar() {
-           std::erase(g_pGlobalState->bars, m_self);
-      +    if (g_pGlobalState->pointerOwner == this) {
-      +        g_pGlobalState->pointerOwner = nullptr;
-      +        Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
-      +    }
-       }
-       
-       SDecorationPositioningInfo CHyprBar::getPositioningInfo() {
-      @@ -123,6 +129,13 @@
-       }
-       
-       void CHyprBar::onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent e) {
-      +    // a drag by this bar ends wherever you let go, even over a layer surface (a dock),
-      +    // where inputIsValid() says no
-      +    if (e.state != WL_POINTER_BUTTON_STATE_PRESSED && m_bDraggingThis) {
-      +        handleUpEvent(info);
-      +        return;
-      +    }
-      +
-           if (!inputIsValid())
-               return;
-       
-      @@ -154,6 +167,8 @@
-           if (g_pGlobalState->config.iconOnHover->value())
-               damageOnButtonHover();
-       
-      +    updateButtonCursor();
-      +
-           if (!m_bDragPending || m_bTouchEv || !validMapped(m_pWindow) || m_touchId != 0)
-               return;
-       
-      @@ -215,6 +230,7 @@
-                   if (m_bTouchEv)
-                       g_pKeybindManager->m_dispatchers["settiled"]("activewindow");
-                   g_pKeybindManager->m_dispatchers["mouse"]("0movewindow");
-      +            notifyDragEnd();
-                   Log::logger->log(Log::DEBUG, "[hyprbars] Dragging ended on {:x}", (uintptr_t)PWINDOW.get());
-               }
-       
-      @@ -247,7 +263,7 @@
-       }
-       
-       void CHyprBar::handleUpEvent(Event::SCallbackInfo& info) {
-      -    if (m_pWindow.lock() != Desktop::focusState()->window())
-      +    if (m_pWindow.lock() != Desktop::focusState()->window() && !m_bDraggingThis)
-               return;
-       
-           if (m_bCancelledDown)
-      @@ -258,6 +274,7 @@
-           if (m_bDraggingThis) {
-               g_pKeybindManager->changeMouseBindMode(MBIND_INVALID);
-               m_bDraggingThis = false;
-      +        notifyDragEnd();
-               if (m_bTouchEv)
-                   (void)Config::Actions::floatWindow(Config::Actions::eTogglableAction::TOGGLE_ACTION_DISABLE);
-       
-      @@ -273,9 +290,33 @@
-           g_pKeybindManager->changeMouseBindMode(MBIND_MOVE);
-           m_bDraggingThis = true;
-           Log::logger->log(Log::DEBUG, "[hyprbars] Dragging initiated on {:x}", (uintptr_t)m_pWindow.lock().get());
-      +    notifyDragStart();
-           return;
-       }
-       
-      +void CHyprBar::notifyDragStart() {
-      +    const auto CMD     = g_pGlobalState->config.onDrag->value();
-      +    const auto PWINDOW = m_pWindow.lock();
-      +    m_dragName.clear();
-      +    if (CMD.empty() || !PWINDOW)
-      +        return;
-      +
-      +    static uint64_t dragCount = 0;
-      +    const auto      POS       = PWINDOW->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-      +    m_dragName                = std::format("bar-{}-{}", (long long)std::time(nullptr), ++dragCount);
-      +    m_dragArgs = std::format("0x{:x} {} at={},{}", (uintptr_t)PWINDOW.get(), PWINDOW->m_isFloating ? "true" : "false", (int)POS.x, (int)POS.y);
-      +    Config::Supplementary::executor()->spawn(std::format("{} start {}", CMD, m_dragName));
-      +}
-      +
-      +void CHyprBar::notifyDragEnd() {
-      +    const auto CMD = g_pGlobalState->config.onDrag->value();
-      +    if (CMD.empty() || m_dragName.empty())
-      +        return;
-      +
-      +    Config::Supplementary::executor()->spawn(std::format("{} finish {} {}", CMD, m_dragName, m_dragArgs));
-      +    m_dragName.clear();
-      +}
-      +
-       bool CHyprBar::doButtonPress(Config::INTEGER barPadding, Config::INTEGER barButtonPadding, Config::INTEGER barHeight, Vector2D COORDS, const bool BUTTONSRIGHT) {
-           //check if on a button
-           float offset = barPadding;
-      @@ -664,6 +705,46 @@
-               m_bTitleColorChanged = true;
-       }
-       
-      +// a pointing hand while the mouse is on one of this bar's buttons
-      +void CHyprBar::updateButtonCursor() {
-      +    bool hovering = false;
-      +
-      +    if (!m_hidden && !m_bDraggingThis && validMapped(m_pWindow) && g_pGlobalState->config.enabled->value() && inputIsValid()) {
-      +        Desktop::CViewHitTester hitTester{*Desktop::viewState()};
-      +        const auto              WINDOWATCURSOR =
-      +            hitTester.windowAt(g_pInputManager->getMouseCoordsInternal(), Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
-      +
-      +        if (WINDOWATCURSOR == m_pWindow.lock()) {
-      +            const auto BARPADDING       = g_pGlobalState->config.barPadding->value();
-      +            const auto BARBUTTONPADDING = g_pGlobalState->config.barButtonPadding->value();
-      +            const auto HEIGHT           = g_pGlobalState->config.barHeight->value();
-      +            const bool BUTTONSRIGHT     = g_pGlobalState->config.barButtonsAlignment->value() != "left";
-      +            const auto COORDS           = cursorRelativeToBar();
-      +            float      offset           = BARPADDING;
-      +
-      +            for (auto& b : g_pGlobalState->buttons) {
-      +                const auto BARBUF     = Vector2D{(int)assignedBoxGlobal().w, HEIGHT};
-      +                Vector2D   currentPos = Vector2D{(BUTTONSRIGHT ? BARBUF.x - BARBUTTONPADDING - b.size - offset : offset), (BARBUF.y - b.size) / 2.0}.floor();
-      +
-      +                if (VECINRECT(COORDS, currentPos.x, currentPos.y, currentPos.x + b.size + BARBUTTONPADDING, currentPos.y + b.size)) {
-      +                    hovering = true;
-      +                    break;
-      +                }
-      +
-      +                offset += BARBUTTONPADDING + b.size;
-      +            }
-      +        }
-      +    }
-      +
-      +    if (hovering) {
-      +        g_pGlobalState->pointerOwner = this;
-      +        Pointer::Cursor::overrideController->setOverride("pointer", Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
-      +    } else if (g_pGlobalState->pointerOwner == this) {
-      +        g_pGlobalState->pointerOwner = nullptr;
-      +        Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
-      +    }
-      +}
-      +
-       void CHyprBar::damageOnButtonHover() {
-           const auto BARPADDING       = g_pGlobalState->config.barPadding->value();
-           const auto BARBUTTONPADDING = g_pGlobalState->config.barButtonPadding->value();
-      --- a/barDeco.hpp
-      +++ b/barDeco.hpp
-      @@ -107,6 +107,11 @@
-           std::string         m_szLastTitle;
-       
-           bool                m_bDraggingThis  = false;
-      +    std::string         m_dragName;      // on_drag: this drag's name, "" when not reported
-      +    std::string         m_dragArgs;      // on_drag: "<address> <floating> at=<x>,<y>" at its start
-      +    void                notifyDragStart();
-      +    void                notifyDragEnd();
-      +    void                updateButtonCursor();
-           bool                m_bTouchEv       = false;
-           bool                m_bDragPending   = false;
-           bool                m_bCancelledDown = false;
-      --- a/globals.hpp
-      +++ b/globals.hpp
-      @@ -28,6 +28,8 @@
-           uint32_t                  nobarRuleIdx      = 0;
-           uint32_t                  barColorRuleIdx   = 0;
-           uint32_t                  titleColorRuleIdx = 0;
-      +    // the bar that set the pointing-hand cursor (over one of its buttons), or nullptr
-      +    CHyprBar*                 pointerOwner = nullptr;
-       
-           struct {
-               SP<Config::Values::CColorValue>      barColor, textColor, inactiveButtonColor;
-      @@ -37,7 +39,7 @@
-               SP<Config::Values::CIntValue>        barPadding;
-               SP<Config::Values::CIntValue>        barButtonPadding;
-               SP<Config::Values::CBoolValue>       barBlur, barTitleEnabled, barPartOfWindow, barPrecedenceOverBorder, enabled, iconOnHover;
-      -        SP<Config::Values::CStringValue>     barTextFont, barTextAlign, barButtonsAlignment, onDoubleClick;
-      +        SP<Config::Values::CStringValue>     barTextFont, barTextAlign, barButtonsAlignment, onDoubleClick, onDrag;
-           } config;
-       };
-       
-      --- a/main.cpp
-      +++ b/main.cpp
-      @@ -251,6 +251,9 @@
-           HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.enabled);
-           HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.iconOnHover);
-           HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.onDoubleClick);
-      +    g_pGlobalState->config.onDrag =
-      +        makeShared<Config::Values::CStringValue>("plugin:hyprbars:on_drag", "Command run when a drag by the bar starts and ends (start <name> / finish <name> <address> <floating> at=<x>,<y>)", "");
-      +    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.onDrag);
-       
-           if (Config::mgr()->type() == Config::CONFIG_LEGACY)
-               HyprlandAPI::addConfigKeyword(PHANDLE, "plugin:hyprbars:hyprbars-button", onNewButton, Hyprlang::SHandlerOptions{});
-      '')
-    ];
-  });
 
   mkThemeDir =
     id: t:
@@ -1217,7 +982,7 @@ let
         # shellcheck disable=SC1091
         . "$state/current/env"
         if [ -n "''${HYPRLAND_INSTANCE_SIGNATURE-}" ]; then
-          # Hyprland's config reads the theme's colors (window borders, title bars) from
+          # Hyprland's config reads the theme's colors (the window borders) from
           # "hyprland.lua", so read it again. First, so the lines below come after it.
           hyprctl reload >/dev/null || true
           hyprctl setcursor "$CURSOR_THEME" 24 >/dev/null || true
@@ -2196,17 +1961,6 @@ in
             model: Quickshell.screens
 
             WorkspaceDock {
-                required property var modelData
-                screen: modelData
-            }
-        }
-
-        // ── The title bar over a fullscreen window ── (FullscreenBar.qml): one per
-        // screen, there only while that screen's focused window is fullscreen
-        Variants {
-            model: Quickshell.screens
-
-            FullscreenBar {
                 required property var modelData
                 screen: modelData
             }
@@ -10166,9 +9920,9 @@ in
         }
 
         // ── minimized windows ──
-        // The yellow button on a window's title bar (hyprbars, in the Hyprland config)
-        // "minimizes" it: Hyprland has no minimizing, so it moves the window to a hidden
-        // special workspace that's never shown. Here they're listed in the dock (point at
+        // A window "minimized" by moving it to a hidden special workspace that's never
+        // shown, "special:minimized" (Hyprland has no minimizing of its own; nothing sends
+        // windows there right now, since the title bars' yellow button went away). Here they're listed in the dock (point at
         // the app's icon), and clicking one brings it back to the workspace you're on.
         readonly property string minimizedWorkspace: "special:minimized"
         function isMinimized(t) {
@@ -11594,202 +11348,6 @@ in
     }
   '';
 
-  # The title bar over a fullscreen window (see FullscreenBar.qml's comment).
-  xdg.configFile."quickshell/FullscreenBar.qml".text = ''
-    import QtQuick
-    import Quickshell
-    import Quickshell.Wayland
-    import Quickshell.Hyprland
-
-    // ── The title bar over a fullscreen window ──
-    // Hyprland doesn't draw window decorations (the hyprbars title bar) on a fullscreen
-    // window, and the window fills the screen, so there's no room for one anyway. So on
-    // a screen whose focused window is fullscreen, pushing the mouse against the top
-    // edge slides this down over it: the same bar, drawn by Quickshell (same height,
-    // glass, font, colors and circles; symbols on the circles while the mouse is on
-    // them). It slides back up half a second after the mouse leaves it.
-    //   red: close   yellow: minimize   green: leave fullscreen
-    //   double-click the title: maximized instead (like double-clicking a title bar)
-    // It's on the overlay layer, the only one above fullscreen windows. While it's in,
-    // only the top 2 px of the screen take the mouse (from the fullscreen window).
-    PanelWindow {
-        id: fsBar
-
-        anchors {
-            top: true
-            left: true
-            right: true
-        }
-        exclusionMode: ExclusionMode.Ignore
-        WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.namespace: "fullscreen-titlebar"   // its blur rule in the Hyprland config
-        color: "transparent"
-        implicitHeight: barHeight
-
-        readonly property int barHeight: 28           // hyprbars' bar_height
-
-        // the focused window, if it's fullscreen (not just maximized) on this screen
-        readonly property var win: {
-            const t = ToplevelManager.activeToplevel;
-            if (!t || !t.fullscreen)
-                return null;
-            for (const s of t.screens)
-                if (fsBar.screen && s && s.name === fsBar.screen.name)
-                    return t;
-            return null;
-        }
-        visible: win !== null
-
-        // its Hyprland address, for the commands below ("" until Hyprland has said)
-        function address() {
-            for (const h of Hyprland.toplevels.values)
-                if (h.wayland === fsBar.win && h.address !== "")
-                    return "address:0x" + h.address;
-            return "";
-        }
-        function dispatchFor(make) {
-            const a = fsBar.address();
-            if (a !== "")
-                Hyprland.dispatch(make(a));
-            fsBar.shown = false;
-        }
-        function close() {
-            if (fsBar.win)
-                fsBar.win.close();
-            fsBar.shown = false;
-        }
-        function minimize() {
-            // like the yellow button on the title bar (and the dock's minimized windows)
-            dispatchFor(a => 'hl.dsp.window.move({ workspace = "special:minimized", follow = false, window = "' + a + '" })');
-        }
-        function maximize() {
-            dispatchFor(a => 'hl.dsp.window.fullscreen({ mode = "maximized", action = "set", window = "' + a + '" })');
-        }
-        function leaveFullscreen() {
-            dispatchFor(a => 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "unset", window = "' + a + '" })');
-        }
-
-        // ── showing and hiding ──
-        property bool shown: false
-        readonly property bool held: edgeHover.hovered || barHover.hovered
-        onHeldChanged: {
-            if (held) {
-                hideDelay.stop();
-                shown = true;
-            } else {
-                hideDelay.restart();
-            }
-        }
-        onWinChanged: if (!win) {
-            hideDelay.stop();
-            shown = false;
-        }
-        Timer {
-            id: hideDelay
-            interval: 500
-            onTriggered: fsBar.shown = false
-        }
-        // 0 = up out of sight, 1 = all the way down
-        property real openness: shown ? 1 : 0
-        Behavior on openness {
-            NumberAnimation {
-                duration: fsBar.shown ? 200 : 160
-                easing.type: fsBar.shown ? Easing.OutCubic : Easing.InCubic
-            }
-        }
-
-        mask: Region {
-            item: edge
-            Region {
-                item: fsBar.openness > 0 ? slide : null
-            }
-        }
-
-        // the top edge: push the mouse here
-        Item {
-            id: edge
-            width: parent.width
-            height: 2
-            HoverHandler {
-                id: edgeHover
-            }
-        }
-
-        Rectangle {
-            id: slide
-            width: parent.width
-            height: fsBar.barHeight
-            y: -height * (1 - fsBar.openness)
-            visible: fsBar.openness > 0
-            color: Theme.glass       // hyprbars' bar_color: the bar's glass, blurred
-            HoverHandler {
-                id: barHover
-            }
-
-            // double-click the title: maximized instead (like on the title bar)
-            MouseArea {
-                anchors.fill: parent
-                onDoubleClicked: fsBar.maximize()
-            }
-
-            // the three circles, at hyprbars' sizes and spacing
-            Row {
-                id: buttons
-                x: 12
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 8
-                HoverHandler {
-                    id: buttonsHover
-                }
-
-                Repeater {
-                    model: [
-                        { "color": Theme.red, "icon": "×", "act": () => fsBar.close() },
-                        { "color": Theme.yellow, "icon": "−", "act": () => fsBar.minimize() },
-                        { "color": Theme.green, "icon": "+", "act": () => fsBar.leaveFullscreen() }
-                    ]
-
-                    Rectangle {
-                        required property var modelData
-                        width: 12
-                        height: 12
-                        radius: 6
-                        color: modelData.color
-                        Text {
-                            anchors.centerIn: parent
-                            visible: buttonsHover.hovered
-                            text: parent.modelData.icon
-                            color: Theme.bg
-                            font.pixelSize: 9
-                            font.weight: 700
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            anchors.margins: -4          // a little easier to hit
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: parent.modelData.act()
-                        }
-                    }
-                }
-            }
-
-            // the title, in the middle (the bar's font, like the title bars)
-            Text {
-                anchors.centerIn: parent
-                width: Math.min(implicitWidth, parent.width - 2 * (buttons.x + buttons.width + 12))
-                horizontalAlignment: Text.AlignHCenter
-                elide: Text.ElideRight
-                text: fsBar.win ? fsBar.win.title : ""
-                color: Theme.text
-                font.family: Theme.font
-                font.pixelSize: Theme.textSize
-                font.weight: 600
-                font.letterSpacing: Theme.letterSpacing
-            }
-        }
-    }
-  '';
-
   # Dragging a window onto the workspaces dock (see WindowDrag.qml's comment).
   xdg.configFile."quickshell/WindowDrag.qml".text = ''
     pragma Singleton
@@ -11807,10 +11365,8 @@ in
     // where it is. Push the window against the left edge and the workspaces dock comes
     // out (WorkspaceDock.qml); the workspace under the mouse lights up (Workspaces.qml);
     // let go there and the window goes to that workspace, and you go with it.
-    //
-    // Dragging a window by its title bar does the same: hyprbars handles those clicks
-    // itself, before Hyprland's binds see them, so it's patched to send the same two
-    // messages (its on_drag setting; hyprbarsPatched in home.nix).
+    // (Only Super + drag: a drag an app starts itself, by its own title bar, doesn't go
+    // through Hyprland's binds.)
     Singleton {
         id: drag
 
@@ -15341,7 +14897,6 @@ in
       hl.layer_rule({ name = "dock-blur", match = { namespace = "dock" }, blur = true, ignore_alpha = 0.1, xray = false })
       hl.layer_rule({ name = "workspace-dock-blur", match = { namespace = "workspace-dock" }, blur = true, ignore_alpha = 0.1, xray = false })
       hl.layer_rule({ name = "notification-blur", match = { namespace = "notification-popups" }, blur = true, ignore_alpha = 0.1, xray = false })
-      hl.layer_rule({ name = "fullscreen-titlebar-blur", match = { namespace = "fullscreen-titlebar" }, blur = true, ignore_alpha = 0.1, xray = false })
 
 
       -- Consolidated decoration/blur block (previously split across 3 hl.config calls
@@ -15606,82 +15161,6 @@ in
       -- systemd user service in home.nix (awww, playerctld,
       -- hyprpolkitagent, quickshell, music-player), started by uwsm's graphical-session.target.
 
-      -- ── Title bars (hyprbars) ──
-      -- A thin bar on top of each window, macOS style: three small circles on the left
-      -- (their symbols show when the mouse is on them), the title in the middle. Drag a
-      -- window by it; double-click it to maximize (or back). (On a fullscreen window
-      -- Hyprland doesn't draw it: push the mouse against the top of the screen and
-      -- Quickshell slides down a copy instead, FullscreenBar.qml.) Colors from the theme (bar_* in
-      -- ~/.local/state/theme/current/hyprland.lua, "hyprland.lua" in home.nix), so they
-      -- change with it: `theme` reloads this config. The bar is the top bar's glass:
-      -- see-through and blurred.
-      --   red: close
-      --   yellow: minimize. Hyprland has no minimizing, so the window goes to a hidden
-      --     special workspace, "special:minimized", that's never shown. The dock lists
-      --     it (point at the app's icon); click it there to bring it back to the
-      --     workspace you're on (DockData.qml in home.nix).
-      --   green: true fullscreen, like Super + Shift + F. The bar isn't drawn on a
-      --     fullscreen window: push the mouse against the top of the screen for its
-      --     stand-in (FullscreenBar.qml), whose green button leaves fullscreen.
-      --   double-click the title: maximize (or back), like Super + F.
-      -- The plugin is built for this Hyprland (nixpkgs' hyprlandPlugins, the same
-      -- version); Hyprland loads it once this file has been read, then reads it again,
-      -- so hl.plugin.hyprbars only exists that second time (the `if`).
-      -- It's loaded from a path that stays the same from one rebuild to the next
-      -- (~/.local/share/hypr/plugins, a link to the build: see hyprbarsPatched in
-      -- home.nix). A rebuild gives the plugin a new store path, and when the path in
-      -- this file changes, Hyprland swaps the plugin out while it's running, which can
-      -- crash it. With the same path it keeps the one it has, and a new build is
-      -- picked up the next time you log in.
-      hl.plugin.load(os.getenv("HOME") .. "/.local/share/hypr/plugins/libhyprbars.so")
-      if hl.plugin.hyprbars then
-          hl.config({
-              plugin = {
-                  hyprbars = {
-                      bar_height = 28,
-                      bar_color = theme.bar_color,
-                      ["col.text"] = theme.bar_text,
-                      bar_blur = true,
-                      -- the title in the bar's font, size and weight (Theme.font,
-                      -- Theme.textSize and the bar's 600 in Quickshell). The size is
-                      -- in pixels, whole ones only: Quickshell's 12.5 is drawn at 12
-                      -- too (Qt rounds pixel sizes down). Quickshell's tighter letter
-                      -- spacing (-0.5) has no setting here.
-                      bar_text_font = "SFMono Nerd Font",
-                      bar_text_size = 12,
-                      bar_text_weight = 600,
-                      bar_text_align = "center",
-                      bar_buttons_alignment = "left",
-                      bar_padding = 12,          -- the left edge to the first circle
-                      bar_button_padding = 8,    -- between the circles
-                      icon_on_hover = true,      -- symbols only while the mouse is on them
-                      inactive_button_color = theme.bar_button_inactive,
-                      bar_part_of_window = true, -- the window's space includes it
-                      bar_precedence_over_border = true,
-                      on_double_click = [[hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" })']],
-                      -- dragging a window by its bar: tell Quickshell, so it can be
-                      -- dropped on a workspace in the workspaces dock (hyprbarsPatched
-                      -- and WindowDrag.qml in home.nix)
-                      on_drag = "quickshell ipc call windowdrag",
-                  },
-              },
-          })
-          -- Left to right, in this order. A click focuses the window first, so each acts
-          -- on the window you clicked.
-          local function button(color, icon, action)
-              hl.plugin.hyprbars.add_button({
-                  bg_color = color,
-                  fg_color = theme.bar_icon,
-                  size = 12,
-                  icon = icon,
-                  action = action,
-              })
-          end
-          button(theme.bar_close, "×", [[hyprctl dispatch 'hl.dsp.window.close()']])
-          button(theme.bar_float, "−", [[hyprctl dispatch 'hl.dsp.window.move({ workspace = "special:minimized", follow = false })']])
-          button(theme.bar_fullscreen, "+", [[hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" })']])
-      end
-
       -- HyprMod (the Hyprland settings app): what you save in it goes in
       -- ~/.config/hypr/hyprland-gui.lua, loaded here, at the end, so it wins over
       -- everything above. HyprMod would add this line itself, but home-manager makes
@@ -15695,10 +15174,6 @@ in
       pcall(function() require("hyprland-gui") end)
     '';
   };
-
-  # The title bar plugin, at a path that stays the same between rebuilds (the Hyprland
-  # config loads it from here; see hyprbarsPatched at the top of this file).
-  xdg.dataFile."hypr/plugins/libhyprbars.so".source = "${hyprbarsPatched}/lib/libhyprbars.so";
 
   # Reload Hyprland when its config changes, so a rebuild shows up right away.
   # home-manager's Hyprland module does this itself, but only when it's given Hyprland's
