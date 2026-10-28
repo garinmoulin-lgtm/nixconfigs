@@ -5320,19 +5320,26 @@ in
                                 }
 
                                 // Scroll on it to change the volume without opening the slider:
-                                // 5% a notch (smaller steps from a touchpad, which scrolls in
-                                // smaller amounts), 0-100% like the slider. Scrolling up while
-                                // muted unmutes.
+                                // 1% a notch, 0-100% like the slider, always whole percents.
+                                // A touchpad scrolls in smaller amounts, so those add up until
+                                // they make a notch. Scrolling up while muted unmutes.
+                                property real wheelSum: 0      // notches scrolled, not used yet
                                 WheelHandler {
                                     acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                                     onWheel: event => {
-                                        if (!parent.ready)
+                                        const pill = parent;
+                                        if (!pill.ready)
                                             return;
-                                        const a = parent.sink.audio;
-                                        const step = event.angleDelta.y / 120 * 0.05;
-                                        if (step > 0 && a.muted)
+                                        pill.wheelSum += event.angleDelta.y / 120;
+                                        const notches = pill.wheelSum > 0 ? Math.floor(pill.wheelSum) : Math.ceil(pill.wheelSum);
+                                        if (notches === 0)
+                                            return;
+                                        pill.wheelSum -= notches;
+                                        const a = pill.sink.audio;
+                                        if (notches > 0 && a.muted)
                                             a.muted = false;
-                                        a.volume = Math.max(0, Math.min(1, Math.round((a.volume + step) * 1000) / 1000));
+                                        const pct = Math.round(a.volume * 100) + notches;
+                                        a.volume = Math.max(0, Math.min(100, pct)) / 100;
                                     }
                                 }
                             }
