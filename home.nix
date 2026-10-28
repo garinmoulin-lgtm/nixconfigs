@@ -717,6 +717,197 @@ let
     AWWW_TRANSITION_FPS = "240"; # frames per second; your monitor's refresh rate
   };
 
+  # The Hyprland colors from a theme: the window borders and the title bars (hyprbars).
+  # Read from "hyprland.lua" in each theme's folder (mkThemeDir), and the default theme's
+  # are written into the Hyprland config for when that file is missing.
+  # The title bar is the bar's see-through glass (Theme.glassOpacity, 0.8 = cc), blurred.
+  hyprlandThemeColors = c: ''
+    active_border = "rgba(${c.accent}ee)",
+    inactive_border = "rgba(${c.border}99)",
+    -- title bars (hyprbars)
+    bar_color = "rgba(${c.bg}cc)",
+    bar_text = "rgb(${c.fg})",
+    bar_icon = "rgb(${c.bg})",               -- the symbols on the buttons
+    bar_button_inactive = "rgb(${c.light})", -- all three, on windows that aren't focused
+    bar_close = "rgb(${c.red})",
+    bar_float = "rgb(${c.yellow})",           -- the minimize button (named before it was)
+    bar_fullscreen = "rgb(${c.green})",
+  '';
+
+  # The green button on a window's title bar (hyprbars): one click maximizes (fills the
+  # space between the bar and the screen's edges, like Super + F; again to go back), two
+  # quick clicks make it truly fullscreen (like Super + Shift + F, which also gets you
+  # back out: the title bar isn't drawn on a fullscreen window). hyprbars only knows "a
+  # click", so this tells them apart: a click waits 0.35 s, and if a second one comes in
+  # that time, it's fullscreen instead. (Waiting first means the window doesn't jump
+  # out from under the mouse between the two clicks.)
+  hyprbarsGreen =
+    let
+      hyprctl = "${
+        if osConfig != null then osConfig.programs.hyprland.package else pkgs.hyprland
+      }/bin/hyprctl";
+      cu = "${pkgs.coreutils}/bin";
+    in
+    pkgs.writeShellScript "hyprbars-green" ''
+      pending="''${XDG_RUNTIME_DIR:-/tmp}/hyprbars-green"
+      # the window clicked (hyprbars focuses it first)
+      win="address:$(${hyprctl} activewindow -j | ${pkgs.jq}/bin/jq -r .address)"
+      if [ -e "$pending" ]; then
+        # the second click: the first one's wait finds its note gone and does nothing
+        ${cu}/rm -f "$pending"
+        ${hyprctl} dispatch "hl.dsp.window.fullscreen({ mode = \"fullscreen\", action = \"set\", window = \"$win\" })"
+        exit 0
+      fi
+      me=$$
+      echo "$me" > "$pending"
+      ${cu}/sleep 0.35
+      if [ "$(${cu}/cat "$pending" 2>/dev/null)" = "$me" ]; then
+        ${cu}/rm -f "$pending"
+        ${hyprctl} dispatch "hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"toggle\", window = \"$win\" })"
+      fi
+    '';
+
+  # hyprbars (the title bars), with a small addition: a setting, on_drag, for a
+  # command to run when you start and stop dragging a window by its bar. hyprbars
+  # handles those clicks itself, before Hyprland's binds see them, so without this
+  # nothing else knows about the drag. The Hyprland config sets it to tell Quickshell,
+  # so a window dragged by its title bar can be dropped on a workspace in the
+  # workspaces dock, like Super + drag (WindowDrag.qml). It runs
+  #   <command> start <name>                                when the drag starts
+  #   <command> finish <name> <address> <floating> at=<x>,<y>   when you let go
+  # (where the window was when you picked it up). It also makes letting go end the
+  # drag wherever the mouse is: hyprbars ignored a release over a panel (like the
+  # workspaces dock), so the drop never happened. The change is the patch below; if
+  # a hyprbars update stops it applying, the rebuild fails here and the patch needs
+  # redoing.
+  # Hyprland loads it from ~/.local/share/hypr/plugins (the link below), a path that
+  # doesn't change between rebuilds: see the comment where the Hyprland config loads it.
+  hyprbarsPatched = pkgs.hyprlandPlugins.hyprbars.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      (pkgs.writeText "hyprbars-on-drag.patch" ''
+      --- a/barDeco.cpp
+      +++ b/barDeco.cpp
+      @@ -27,6 +27,7 @@
+       #include "BarPassElement.hpp"
+       
+       #include <climits>
+      +#include <ctime>
+       
+       using namespace Render::GL;
+       
+      @@ -123,6 +124,13 @@
+       }
+       
+       void CHyprBar::onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent e) {
+      +    // a drag by this bar ends wherever you let go, even over a layer surface (a dock),
+      +    // where inputIsValid() says no
+      +    if (e.state != WL_POINTER_BUTTON_STATE_PRESSED && m_bDraggingThis) {
+      +        handleUpEvent(info);
+      +        return;
+      +    }
+      +
+           if (!inputIsValid())
+               return;
+       
+      @@ -215,6 +223,7 @@
+                   if (m_bTouchEv)
+                       g_pKeybindManager->m_dispatchers["settiled"]("activewindow");
+                   g_pKeybindManager->m_dispatchers["mouse"]("0movewindow");
+      +            notifyDragEnd();
+                   Log::logger->log(Log::DEBUG, "[hyprbars] Dragging ended on {:x}", (uintptr_t)PWINDOW.get());
+               }
+       
+      @@ -247,7 +256,7 @@
+       }
+       
+       void CHyprBar::handleUpEvent(Event::SCallbackInfo& info) {
+      -    if (m_pWindow.lock() != Desktop::focusState()->window())
+      +    if (m_pWindow.lock() != Desktop::focusState()->window() && !m_bDraggingThis)
+               return;
+       
+           if (m_bCancelledDown)
+      @@ -258,6 +267,7 @@
+           if (m_bDraggingThis) {
+               g_pKeybindManager->changeMouseBindMode(MBIND_INVALID);
+               m_bDraggingThis = false;
+      +        notifyDragEnd();
+               if (m_bTouchEv)
+                   (void)Config::Actions::floatWindow(Config::Actions::eTogglableAction::TOGGLE_ACTION_DISABLE);
+       
+      @@ -273,9 +283,33 @@
+           g_pKeybindManager->changeMouseBindMode(MBIND_MOVE);
+           m_bDraggingThis = true;
+           Log::logger->log(Log::DEBUG, "[hyprbars] Dragging initiated on {:x}", (uintptr_t)m_pWindow.lock().get());
+      +    notifyDragStart();
+           return;
+       }
+       
+      +void CHyprBar::notifyDragStart() {
+      +    const auto CMD     = g_pGlobalState->config.onDrag->value();
+      +    const auto PWINDOW = m_pWindow.lock();
+      +    m_dragName.clear();
+      +    if (CMD.empty() || !PWINDOW)
+      +        return;
+      +
+      +    static uint64_t dragCount = 0;
+      +    const auto      POS       = PWINDOW->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+      +    m_dragName                = std::format("bar-{}-{}", (long long)std::time(nullptr), ++dragCount);
+      +    m_dragArgs = std::format("0x{:x} {} at={},{}", (uintptr_t)PWINDOW.get(), PWINDOW->m_isFloating ? "true" : "false", (int)POS.x, (int)POS.y);
+      +    Config::Supplementary::executor()->spawn(std::format("{} start {}", CMD, m_dragName));
+      +}
+      +
+      +void CHyprBar::notifyDragEnd() {
+      +    const auto CMD = g_pGlobalState->config.onDrag->value();
+      +    if (CMD.empty() || m_dragName.empty())
+      +        return;
+      +
+      +    Config::Supplementary::executor()->spawn(std::format("{} finish {} {}", CMD, m_dragName, m_dragArgs));
+      +    m_dragName.clear();
+      +}
+      +
+       bool CHyprBar::doButtonPress(Config::INTEGER barPadding, Config::INTEGER barButtonPadding, Config::INTEGER barHeight, Vector2D COORDS, const bool BUTTONSRIGHT) {
+           //check if on a button
+           float offset = barPadding;
+      --- a/barDeco.hpp
+      +++ b/barDeco.hpp
+      @@ -107,6 +107,10 @@
+           std::string         m_szLastTitle;
+       
+           bool                m_bDraggingThis  = false;
+      +    std::string         m_dragName;      // on_drag: this drag's name, "" when not reported
+      +    std::string         m_dragArgs;      // on_drag: "<address> <floating> at=<x>,<y>" at its start
+      +    void                notifyDragStart();
+      +    void                notifyDragEnd();
+           bool                m_bTouchEv       = false;
+           bool                m_bDragPending   = false;
+           bool                m_bCancelledDown = false;
+      --- a/globals.hpp
+      +++ b/globals.hpp
+      @@ -37,7 +37,7 @@
+               SP<Config::Values::CIntValue>        barPadding;
+               SP<Config::Values::CIntValue>        barButtonPadding;
+               SP<Config::Values::CBoolValue>       barBlur, barTitleEnabled, barPartOfWindow, barPrecedenceOverBorder, enabled, iconOnHover;
+      -        SP<Config::Values::CStringValue>     barTextFont, barTextAlign, barButtonsAlignment, onDoubleClick;
+      +        SP<Config::Values::CStringValue>     barTextFont, barTextAlign, barButtonsAlignment, onDoubleClick, onDrag;
+           } config;
+       };
+       
+      --- a/main.cpp
+      +++ b/main.cpp
+      @@ -251,6 +251,9 @@
+           HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.enabled);
+           HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.iconOnHover);
+           HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.onDoubleClick);
+      +    g_pGlobalState->config.onDrag =
+      +        makeShared<Config::Values::CStringValue>("plugin:hyprbars:on_drag", "Command run when a drag by the bar starts and ends (start <name> / finish <name> <address> <floating> at=<x>,<y>)", "");
+      +    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.onDrag);
+       
+           if (Config::mgr()->type() == Config::CONFIG_LEGACY)
+               HyprlandAPI::addConfigKeyword(PHANDLE, "plugin:hyprbars:hyprbars-button", onNewButton, Hyprlang::SHandlerOptions{});
+      '')
+    ];
+  });
+
   mkThemeDir =
     id: t:
     let
@@ -810,9 +1001,7 @@ let
       # read by hyprland.lua when Hyprland starts or reloads its config
       "hyprland.lua" = pkgs.writeText "hyprland-theme.lua" ''
         return {
-            active_border = "rgba(${c.accent}ee)",
-            inactive_border = "rgba(${c.border}99)",
-        }
+        ${hyprlandThemeColors c}}
       '';
 
       "gtk-3.0.ini" = pkgs.writeText "gtk-3.0.ini" gtkIni;
@@ -976,6 +1165,9 @@ let
         # shellcheck disable=SC1091
         . "$state/current/env"
         if [ -n "''${HYPRLAND_INSTANCE_SIGNATURE-}" ]; then
+          # Hyprland's config reads the theme's colors (window borders, title bars) from
+          # "hyprland.lua", so read it again. First, so the lines below come after it.
+          hyprctl reload >/dev/null || true
           hyprctl setcursor "$CURSOR_THEME" 24 >/dev/null || true
           # and for apps Hyprland starts from now on
           hyprctl eval "hl.env(\"XCURSOR_THEME\", \"$CURSOR_THEME\")" >/dev/null || true
@@ -1268,6 +1460,17 @@ in
                 target: "session"
                 function logout(): void {
                     session.logout();
+                }
+            }
+            // so the Super + drag bind can say when a window drag starts and ends
+            // (WindowDrag.qml): quickshell ipc call windowdrag start / finish ...
+            IpcHandler {
+                target: "windowdrag"
+                function start(name: string): void {
+                    WindowDrag.start(name);
+                }
+                function finish(name: string, address: string, floating: bool, at: string): void {
+                    WindowDrag.finish(name, address, floating, at);
                 }
             }
 
@@ -9557,11 +9760,12 @@ in
             return "";
         }
         // the workspaces an app's windows are on, lowest first, each once: ["2", "4"]
+        // (not the hidden one minimized windows are on)
         function workspacesOf(app) {
             const out = [];
             for (const w of app.windows) {
                 const n = workspaceOf(w);
-                if (n !== "" && !out.includes(n))
+                if (n !== "" && !n.startsWith("special:") && !out.includes(n))
                     out.push(n);
             }
             return out.sort((a, b) => (Number(a) || 0) - (Number(b) || 0) || a.localeCompare(b));
@@ -9592,6 +9796,44 @@ in
             return out;
         }
 
+        // ── minimized windows ──
+        // The yellow button on a window's title bar (hyprbars, in the Hyprland config)
+        // "minimizes" it: Hyprland has no minimizing, so it moves the window to a hidden
+        // special workspace that's never shown. Here they're listed in the dock (point at
+        // the app's icon), and clicking one brings it back to the workspace you're on.
+        readonly property string minimizedWorkspace: "special:minimized"
+        function isMinimized(t) {
+            return workspaceOf(t) === minimizedWorkspace;
+        }
+        function minimizedCount(app) {
+            return app.windows.filter(w => isMinimized(w)).length;
+        }
+        // whether pointing at its icon shows its windows: more than one, or any minimized
+        // (that's the only way back to one)
+        function showsList(app) {
+            return app.windows.length > 1 || minimizedCount(app) > 0;
+        }
+        // back to the workspace you're on, focused
+        function restore(t) {
+            let h = null;
+            for (const x of Hyprland.toplevels.values)
+                if (x.wayland === t)
+                    h = x;
+            const ws = Hyprland.focusedWorkspace;
+            if (!h || h.address === "" || !ws) {
+                t.activate();
+                return;
+            }
+            Hyprland.dispatch('hl.dsp.window.move({ workspace = "' + ws.id + '", window = "address:0x' + h.address + '" })');
+        }
+        // go to a window, bringing it back first if it's minimized
+        function show(t) {
+            if (isMinimized(t))
+                restore(t);
+            else
+                t.activate();
+        }
+
         // ── doing things ──
         // Started through uwsm, so each app gets its own place in your session instead
         // of being Quickshell's child (restarting Quickshell would close it otherwise).
@@ -9600,14 +9842,20 @@ in
                 Quickshell.execDetached(["uwsm", "app", "--", entryFor(key).id + ".desktop"]);
         }
         // Click: open it if nothing's open, go to its window if one is, and go round its
-        // windows one by one on more clicks.
+        // windows one by one on more clicks. Minimized ones are skipped, unless they're
+        // all minimized: then the first comes back.
         function focus(app) {
             if (app.windows.length === 0) {
                 launch(app.key);
                 return;
             }
-            const i = app.windows.findIndex(w => w.activated);
-            app.windows[(i + 1) % app.windows.length].activate();
+            const open = app.windows.filter(w => !isMinimized(w));
+            if (open.length === 0) {
+                restore(app.windows[0]);
+                return;
+            }
+            const i = open.findIndex(w => w.activated);
+            open[(i + 1) % open.length].activate();
         }
         function closeAll(app) {
             for (const w of app.windows)
@@ -9690,9 +9938,10 @@ in
     //     middle click  a new window
     //     right click   pin / unpin, new window, close
     //     drag it       left or right to rearrange (an unpinned one gets pinned there)
-    //     point at it   with more than one window open: after half a second the dock grows
-    //                   a list of them above the icons (click one to go to it, x to
-    //                   close it); it shrinks back when the mouse leaves
+    //     point at it   with more than one window open, or a minimized one: after half a
+    //                   second the dock grows a list of them above the icons (click one
+    //                   to go to it, or bring a minimized one back; x to close it); it
+    //                   shrinks back when the mouse leaves
     //   Tray (right): the icons apps put up.
     //     click = the app's action, middle click = its second action,
     //     right click = its menu (the dock grows to show it, like the window list).
@@ -9798,7 +10047,7 @@ in
         }
         // the listed app as it is now (windows come and go while the list is open)
         readonly property var listLive: listApp ? (DockData.apps.find(a => a.key === listApp.key) ?? null) : null
-        onListLiveChanged: if (extra === "list" && (!listLive || listLive.windows.length < 2))
+        onListLiveChanged: if (extra === "list" && (!listLive || !DockData.showsList(listLive)))
             closeExtras()
         // The window list goes a moment after the mouse leaves both the icon and the
         // list. (Menus stay until you pick something, click their icon again, or the
@@ -9872,7 +10121,15 @@ in
                         leftPadding: 8
                         bottomPadding: 4
                         elide: Text.ElideRight
-                        text: dock.listLive ? DockData.nameFor(dock.listLive.key) + "  ·  " + dock.listLive.windows.length + " windows" : ""
+                        // "Kitty  ·  3 windows  ·  1 minimized"
+                        text: {
+                            const a = dock.listLive;
+                            if (!a)
+                                return "";
+                            const n = a.windows.length;
+                            const m = DockData.minimizedCount(a);
+                            return DockData.nameFor(a.key) + "  ·  " + n + (n === 1 ? " window" : " windows") + (m > 0 ? "  ·  " + m + " minimized" : "");
+                        }
                         color: Theme.text
                         opacity: 0.7
                         font.family: Theme.font
@@ -9885,6 +10142,7 @@ in
                         Rectangle {
                             id: winRow
                             required property var modelData
+                            readonly property bool minimized: DockData.isMinimized(modelData)
                             width: listCol.width
                             height: 32
                             radius: Theme.radius
@@ -9900,8 +10158,9 @@ in
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
+                                // (a minimized one comes back to the workspace you're on)
                                 onClicked: {
-                                    winRow.modelData.activate();
+                                    DockData.show(winRow.modelData);
                                     dock.closeExtras();
                                 }
 
@@ -9924,14 +10183,15 @@ in
                                     text: winRow.modelData.title || DockData.nameFor(dock.listLive ? dock.listLive.key : "")
                                     elide: Text.ElideRight
                                     color: winRow.modelData.activated ? Theme.accent : Theme.text
+                                    opacity: winRow.minimized ? 0.6 : 1
                                     font.family: Theme.font
                                     font.pixelSize: Theme.textSize * 0.95
                                     font.weight: winRow.modelData.activated ? 700 : 500
                                 }
-                                // the workspace it's on, in a little pill
+                                // the workspace it's on, in a little pill ("minimized" for those)
                                 Rectangle {
                                     id: winWs
-                                    readonly property string name: DockData.workspaceOf(winRow.modelData)
+                                    readonly property string name: winRow.minimized ? "minimized" : DockData.workspaceOf(winRow.modelData)
                                     visible: name !== ""
                                     anchors.right: winClose.visible ? winClose.left : parent.right
                                     anchors.rightMargin: winClose.visible ? 4 : 10
@@ -10358,11 +10618,12 @@ in
                                             DockData.focus(app.modelData);
                                     }
                                 }
-                                // more than one window: point at it for half a second for the
-                                // list (pointing at another such app while one's open switches to it)
+                                // more than one window, or a minimized one: point at it for half a
+                                // second for the list (pointing at another such app while one's
+                                // open switches to it)
                                 Timer {
                                     interval: 500
-                                    running: appMouse.containsMouse && !appMouse.pressed && dock.dragFrom < 0 && app.modelData.windows.length > 1 && (dock.extra === "" || (dock.extra === "list" && dock.listApp && dock.listApp.key !== app.modelData.key))
+                                    running: appMouse.containsMouse && !appMouse.pressed && dock.dragFrom < 0 && DockData.showsList(app.modelData) && (dock.extra === "" || (dock.extra === "list" && dock.listApp && dock.listApp.key !== app.modelData.key))
                                     onTriggered: dock.openList(app.modelData, appMouse)
                                 }
                             }
@@ -10390,6 +10651,9 @@ in
                                         let t = DockData.nameFor(a.key);
                                         if (a.windows.length > 1)
                                             t += "  ·  " + a.windows.length + " windows";
+                                        const m = DockData.minimizedCount(a);
+                                        if (m > 0)
+                                            t += "  ·  " + m + " minimized";
                                         if (ws.length > 0)
                                             t += "  ·  " + (ws.length === 1 ? "workspace " : "workspaces ") + ws.join(", ");
                                         return t;
@@ -10829,6 +11093,117 @@ in
 
   # The workspaces dock: the workspace switcher on the left edge, hidden until you push
   # the mouse against that edge (like the dock at the bottom).
+  # Dragging a window onto the workspaces dock (see WindowDrag.qml's comment).
+  xdg.configFile."quickshell/WindowDrag.qml".text = ''
+    pragma Singleton
+
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+    import Quickshell.Hyprland
+
+    // ── Dragging a window onto the workspaces dock ──
+    // Super + left drag moves a window (its bind in the Hyprland config), and two more
+    // binds there say here when a drag starts and ends (`quickshell ipc call windowdrag
+    // ...`, the IpcHandler in shell.qml). While you drag, this follows the mouse, since
+    // Hyprland keeps the mouse to the window you're dragging and tells nothing else
+    // where it is. Push the window against the left edge and the workspaces dock comes
+    // out (WorkspaceDock.qml); the workspace under the mouse lights up (Workspaces.qml);
+    // let go there and the window goes to that workspace, and you go with it.
+    //
+    // Dragging a window by its title bar does the same: hyprbars handles those clicks
+    // itself, before Hyprland's binds see them, so it's patched to send the same two
+    // messages (its on_drag setting; hyprbarsPatched in home.nix).
+    Singleton {
+        id: drag
+
+        property bool active: false
+        // where the mouse is, on the whole desktop (Hyprland's coordinates, the same as
+        // the screens' x and y)
+        property real x: -100000
+        property real y: -100000
+        // the workspace the mouse is over in a workspaces dock, and that dock's screen
+        // (WorkspaceDock.qml sets them)
+        property var target: null
+        property var targetScreen: null
+
+        // Each drag has a name (the time and a count, from the bind). The two messages
+        // are two separate commands, so a quick drag's "finish" can get here before its
+        // "start": a start for a drag that's already over is ignored.
+        property var finished: []      // the last few drags' names
+
+        function start(name) {
+            console.info("windowdrag: start", name);
+            if (drag.finished.includes(name))
+                return;
+            drag.x = -100000;
+            drag.y = -100000;
+            drag.target = null;
+            drag.targetScreen = null;
+            drag.active = true;
+            giveUp.restart();
+        }
+
+        // address: the window's ("0x..."); floating: whether it was; at: where it was
+        // when you picked it up, "x,y" (an "at=" in front, so a negative x isn't
+        // read as an option by `quickshell ipc call`)
+        function finish(name, address, floating, at) {
+            drag.finished = drag.finished.concat([name]).slice(-16);
+            const ws = drag.target;
+            const screen = drag.targetScreen;
+            console.info("windowdrag: finish", name, address, "onto", ws ? ws.name : "nothing");
+            drag.active = false;
+            drag.target = null;
+            drag.targetScreen = null;
+            giveUp.stop();
+            // nowhere, or the workspace it's already on (the one showing on that screen)
+            if (!ws || ws.active || !/^0x[0-9a-f]+$/.test(address))
+                return;
+            const win = "address:" + address;
+            // the window goes there, and you go with it
+            Hyprland.dispatch('hl.dsp.window.move({ workspace = "' + ws.id + '", window = "' + win + '" })');
+            // A floating window would stay where you let go of it, against the left edge
+            // under the dock: put it back where it was, if that's on the same screen.
+            const m = at.match(/^at=(-?\d+),(-?\d+)$/);
+            if (floating && m && screen) {
+                const px = Number(m[1]);
+                const py = Number(m[2]);
+                if (px >= screen.x && px < screen.x + screen.width && py >= screen.y && py < screen.y + screen.height)
+                    Hyprland.dispatch('hl.dsp.window.move({ x = ' + px + ', y = ' + py + ', window = "' + win + '" })');
+            }
+        }
+
+        // the mouse position, about 30 times a second, only while dragging
+        Process {
+            id: cursor
+            command: ["hyprctl", "cursorpos"]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const m = text.match(/(-?\d+),\s*(-?\d+)/);
+                    if (m && drag.active) {
+                        drag.x = Number(m[1]);
+                        drag.y = Number(m[2]);
+                    }
+                }
+            }
+        }
+        Timer {
+            interval: 33
+            repeat: true
+            running: drag.active
+            onTriggered: if (!cursor.running)
+                cursor.running = true
+        }
+        // if the "finish" never comes (Quickshell or Hyprland restarted mid-drag),
+        // stop following the mouse after a minute
+        Timer {
+            id: giveUp
+            interval: 60000
+            onTriggered: drag.active = false
+        }
+    }
+  '';
+
   xdg.configFile."quickshell/WorkspaceDock.qml".text = ''
     import QtQuick
     import Quickshell
@@ -10841,7 +11216,9 @@ in
     // curves, corners, glass and animation), and slides back in half a second after the
     // mouse leaves it. It sits over your windows while it's out and doesn't take any
     // space from them. Click a workspace to go there. (Super + Shift + Up / Down go to
-    // the one above / below from the keyboard.)
+    // the one above / below from the keyboard.) Drag a window (Super + drag) against the
+    // left edge and it comes out too: let go of the window on a workspace to send it there
+    // (WindowDrag.qml).
     PanelWindow {
         id: side
 
@@ -10858,10 +11235,30 @@ in
         // padding and the scrollbar), plus a margin, so it's never cut off
         implicitWidth: Math.max(120, panel.bodyWidth + 24)
 
+        // ── a window being dragged here (WindowDrag.qml) ──
+        // The mouse, in this window's coordinates (it starts at the screen's top left).
+        // Hovering doesn't see it while a window is being dragged, so it comes from there.
+        readonly property real dragX: side.screen ? WindowDrag.x - side.screen.x : -1
+        readonly property real dragY: side.screen ? WindowDrag.y - side.screen.y : -1
+        readonly property bool dragOnScreen: WindowDrag.active && !!side.screen && side.dragX >= 0 && side.dragX < side.screen.width && side.dragY >= 0 && side.dragY < side.screen.height
+        // against the left edge (below the bar, like the mouse), or on the panel once it's out
+        readonly property bool dragHere: side.dragOnScreen && ((side.dragX <= 4 && side.dragY >= edge.y) || (panel.visible && panel.contains(panel.mapFromItem(null, side.dragX, side.dragY))))
+        // the workspace it would go to: tell WindowDrag.qml
+        readonly property var dropTarget: wsList.dropTarget
+        onDropTargetChanged: {
+            if (side.dropTarget) {
+                WindowDrag.target = side.dropTarget;
+                WindowDrag.targetScreen = side.screen;
+            } else if (WindowDrag.targetScreen === side.screen) {
+                WindowDrag.target = null;
+                WindowDrag.targetScreen = null;
+            }
+        }
+
         // ── showing and hiding ──
         property bool shown: false
-        // the mouse is on the panel or the left edge
-        readonly property bool held: edgeHover.hovered || panelHover.hovered
+        // the mouse (or a window you're dragging) is on the panel or the left edge
+        readonly property bool held: edgeHover.hovered || panelHover.hovered || side.dragHere
         onHeldChanged: {
             if (held) {
                 hideDelay.stop();
@@ -10908,7 +11305,10 @@ in
             }
 
             Workspaces {
+                id: wsList
                 screen: side.screen
+                dragging: side.dragHere
+                dragPoint: Qt.point(side.dragX, side.dragY)
                 // fits between the bar and the bottom of the screen (centered, so the
                 // same room above and below), past that it scrolls
                 maxHeight: side.height - 2 * (Theme.barHeight + 8) - 2 * (panel.curve + panel.padding)
@@ -12349,6 +12749,10 @@ in
     // bar and the bottom of the screen). With more workspaces than fit, the list
     // scrolls (mouse wheel, or drag the thin scrollbar on its right), and it always
     // scrolls to show the one you're on.
+    //
+    // While you drag a window over it (WindowDrag.qml, WorkspaceDock.qml), the workspace
+    // under the window gets an accent ring: let go and the window goes there. Hold it
+    // near the top or bottom of a list that scrolls and the list scrolls.
     Item {
         id: root
 
@@ -12374,6 +12778,36 @@ in
         property int hoveredIndex: -1
         property real hoverShrink: 0.85
         property int hoverTime: 150
+
+        // ── a window dragged over it ──
+        property bool dragging: false
+        property point dragPoint: Qt.point(-1, -1)  // the mouse, in the window's coordinates
+        // the one under the mouse: -1 = none
+        readonly property int dropIndex: root.dragging ? root.indexAt(root.dragPoint) : -1
+        readonly property var dropTarget: root.dropIndex >= 0 ? root.list[root.dropIndex] : null
+        function indexAt(p) {
+            const q = flick.mapFromItem(null, p.x, p.y);
+            if (q.x < 0 || q.x >= root.rowWidth || q.y < 0 || q.y >= flick.height)
+                return -1;
+            // the gaps between rows count as the nearest row, so it doesn't flicker
+            const i = Math.floor((q.y + flick.contentY + root.gap / 2) / root.step);
+            return Math.max(0, Math.min(root.list.length - 1, i));
+        }
+        // held near the top (-1) or bottom (1) of a list that scrolls
+        readonly property int dragScroll: {
+            if (!root.dragging || !root.scrolls)
+                return 0;
+            const q = flick.mapFromItem(null, root.dragPoint.x, root.dragPoint.y);
+            if (q.x < 0 || q.x >= flick.width)
+                return 0;
+            return q.y < root.cell / 2 ? -1 : q.y > flick.height - root.cell / 2 ? 1 : 0;
+        }
+        Timer {
+            interval: 16
+            repeat: true
+            running: root.dragScroll !== 0
+            onTriggered: flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height, flick.contentY + root.dragScroll * 6))
+        }
 
         readonly property real step: root.cell + root.gap
         readonly property real fullHeight: Math.max(0, root.list.length * root.step - root.gap)
@@ -12464,17 +12898,33 @@ in
                             color: Theme.pill
                             opacity: wsCell.modelData.active ? 0 : 0.6
                         }
+                        // the ring when a window you're dragging is over it
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: Theme.radius + 2
+                            color: "transparent"
+                            border.color: Theme.accent
+                            border.width: 2
+                            opacity: root.dropIndex === wsCell.index ? 1 : 0
+                            Behavior on opacity {
+                                NumberAnimation {
+                                    duration: root.hoverTime
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                        }
                         Text {
                             x: (root.cell - width) / 2
                             anchors.verticalCenter: parent.verticalCenter
                             text: wsCell.modelData.name
-                            color: wsCell.modelData.active ? Theme.accent : Theme.text
+                            color: wsCell.modelData.active || root.dropIndex === wsCell.index ? Theme.accent : Theme.text
                             font.family: Theme.font
                             font.pixelSize: Theme.textSize * 1.45
                             font.weight: 700
 
-                            // only the hovered one shrinks; the rest stay as they are
-                            scale: root.hoveredIndex === wsCell.index ? root.hoverShrink : 1
+                            // only the hovered one shrinks (or the one a dragged window is
+                            // over); the rest stay as they are
+                            scale: root.hoveredIndex === wsCell.index || root.dropIndex === wsCell.index ? root.hoverShrink : 1
 
                             Behavior on color {
                                 ColorAnimation {
@@ -13378,14 +13828,16 @@ in
 
       ---@module 'hl'
 
-      -- Colors from the theme you picked (see "Themes" in home.nix). If that file is
-      -- missing, the default theme's colors.
-      local okTheme, theme = pcall(dofile, os.getenv("HOME") .. "/.local/state/theme/current/hyprland.lua")
-      if not okTheme or type(theme) ~= "table" then
-          theme = {
-              active_border = "rgba(${themes.themes.${themes.default}.colors.accent}ee)",
-              inactive_border = "rgba(${themes.themes.${themes.default}.colors.border}99)",
-          }
+      -- Colors from the theme you picked (see "Themes" in home.nix). Anything that file
+      -- doesn't have (or the whole file, if it's missing) comes from the default theme:
+      -- an older copy of it, from before a color was added, still works.
+      local theme = {
+      ${hyprlandThemeColors themes.themes.${themes.default}.colors}}
+      local okTheme, picked = pcall(dofile, os.getenv("HOME") .. "/.local/state/theme/current/hyprland.lua")
+      if okTheme and type(picked) == "table" then
+          for k, v in pairs(picked) do
+              theme[k] = v
+          end
       end
 
       hl.monitor({
@@ -13422,6 +13874,11 @@ in
       hl.bind("XF86AudioPrev", hl.dsp.exec_cmd("playerctl previous"), { locked = true })
       hl.bind("SUPER + CTRL + Right", hl.dsp.window.move({ workspace = "+1" }))
       hl.bind("SUPER + CTRL + Left", hl.dsp.window.move({ workspace = -1 }))
+      -- Super + Ctrl + Up / Down: take the focused window to the workspace above /
+      -- below, and go with it (up and down like Super + Shift + Up / Down and the
+      -- workspaces dock)
+      hl.bind("SUPER + CTRL + Up", hl.dsp.window.move({ workspace = -1 }))
+      hl.bind("SUPER + CTRL + Down", hl.dsp.window.move({ workspace = "+1" }))
 
       -- The bar (and the widgets that drop out of it), the docks and the notification
       -- popups are see-through (Theme.glassOpacity in Quickshell's
@@ -13617,7 +14074,83 @@ in
 
       -- Delete or replace the bottom section with ONLY this line:
 
-      hl.bind("SUPER + mouse:272", hl.dsp.window.drag(), { mouse = true })
+      -- Super + left drag: move a window. Let go of it on a workspace in the workspaces
+      -- dock (push it against the left edge to bring the dock out) and it goes to that
+      -- workspace, and so do you. Two binds tell Quickshell (WindowDrag.qml in home.nix)
+      -- what happened; it does the rest:
+      --   1. Super + left press: the drag, and "a drag started", with the window under
+      --      the mouse;
+      --   2. any left-button release: "it ended" (if a drag was going).
+      -- Number 2 is its own bind because Hyprland 0.56.2 only runs bind 1 again on
+      -- release if Super is still held then, and letting go of Super first is normal.
+      -- When it does run bind 1 again, a drag is still marked as going (number 2 comes
+      -- after it), so it does nothing. Number 2 ignores which modifiers are held and is
+      -- non-consuming, so it never takes clicks away from your apps (it runs, and the
+      -- click still goes to the app). Each drag gets its own name (the time and a count),
+      -- so if a quick drag's "ended" gets to Quickshell before its "started", Quickshell
+      -- can tell, even after Hyprland reloads its config.
+      local dragging = nil     -- the window picked up, while dragging; nil otherwise
+      local dragCount = 0
+
+      -- the window under the mouse, the one a drag picks up (Hyprland doesn't say which
+      -- it took): the focused one if it's there, else a floating one (they're on top of
+      -- the tiled ones), else the tiled one
+      local function windowUnderCursor()
+          local c = hl.get_cursor_pos()
+          if not c then
+              return nil
+          end
+          local function under(w)
+              return w ~= nil and w.mapped and not w.hidden and w.workspace ~= nil and w.workspace.visible
+                  and c.x >= w.at.x and c.x < w.at.x + w.size.x
+                  and c.y >= w.at.y and c.y < w.at.y + w.size.y
+          end
+          local active = hl.get_active_window()
+          if under(active) then
+              return active
+          end
+          local tiled = nil
+          for _, w in ipairs(hl.get_windows()) do
+              if under(w) then
+                  if w.floating then
+                      return w
+                  end
+                  tiled = tiled or w
+              end
+          end
+          return tiled
+      end
+
+      -- 1. the drag, and it started
+      hl.bind("SUPER + mouse:272", function()
+          hl.dispatch(hl.dsp.window.drag())
+          if dragging then
+              return       -- run again on release (Super still held): number 2 handles it
+          end
+          local w = windowUnderCursor()
+          if not w then
+              dragging = nil
+              return
+          end
+          dragCount = dragCount + 1
+          dragging = {
+              name = string.format("%d-%d", os.time(), dragCount),
+              address = w.address,
+              floating = w.floating and "true" or "false",
+              at = string.format("at=%d,%d", math.floor(w.at.x), math.floor(w.at.y)),
+          }
+          hl.exec_cmd("quickshell ipc call windowdrag start " .. dragging.name)
+      end, { mouse = true })
+
+      -- 2. it ended: any left-button release, whatever is held (does nothing when
+      -- there's no drag)
+      hl.bind("mouse:272", function()
+          if dragging then
+              hl.exec_cmd(string.format("quickshell ipc call windowdrag finish %s %s %s %s",
+                  dragging.name, dragging.address, dragging.floating, dragging.at))
+          end
+          dragging = nil
+      end, { release = true, ignore_mods = true, non_consuming = true })
 
       hl.bind("SUPER + mouse:273", hl.dsp.window.resize(), { mouse = true })
 
@@ -13626,6 +14159,73 @@ in
       -- Autostart: nothing here anymore. Everything that used to start here is a
       -- systemd user service in home.nix (awww, playerctld,
       -- hyprpolkitagent, quickshell, music-player), started by uwsm's graphical-session.target.
+
+      -- ── Title bars (hyprbars) ──
+      -- A thin bar on top of each window, macOS style: three small circles on the left
+      -- (their symbols show when the mouse is on them), the title in the middle. Drag a
+      -- window by it; double-click it to maximize (or back). Colors from the theme (bar_* in
+      -- ~/.local/state/theme/current/hyprland.lua, "hyprland.lua" in home.nix), so they
+      -- change with it: `theme` reloads this config. The bar is the top bar's glass:
+      -- see-through and blurred.
+      --   red: close
+      --   yellow: minimize. Hyprland has no minimizing, so the window goes to a hidden
+      --     special workspace, "special:minimized", that's never shown. The dock lists
+      --     it (point at the app's icon); click it there to bring it back to the
+      --     workspace you're on (DockData.qml in home.nix).
+      --   green: maximize (or back); click twice quickly for true fullscreen
+      --     (hyprbarsGreen in home.nix). Super + Shift + F leaves fullscreen.
+      -- The plugin is built for this Hyprland (nixpkgs' hyprlandPlugins, the same
+      -- version); Hyprland loads it once this file has been read, then reads it again,
+      -- so hl.plugin.hyprbars only exists that second time (the `if`).
+      -- It's loaded from a path that stays the same from one rebuild to the next
+      -- (~/.local/share/hypr/plugins, a link to the build: see hyprbarsPatched in
+      -- home.nix). A rebuild gives the plugin a new store path, and when the path in
+      -- this file changes, Hyprland swaps the plugin out while it's running, which can
+      -- crash it. With the same path it keeps the one it has, and a new build is
+      -- picked up the next time you log in.
+      hl.plugin.load(os.getenv("HOME") .. "/.local/share/hypr/plugins/libhyprbars.so")
+      if hl.plugin.hyprbars then
+          hl.config({
+              plugin = {
+                  hyprbars = {
+                      bar_height = 28,
+                      bar_color = theme.bar_color,
+                      ["col.text"] = theme.bar_text,
+                      bar_blur = true,
+                      bar_text_font = "SFProText Nerd Font",
+                      bar_text_size = 11,
+                      bar_text_weight = 500,
+                      bar_text_align = "center",
+                      bar_buttons_alignment = "left",
+                      bar_padding = 12,          -- the left edge to the first circle
+                      bar_button_padding = 8,    -- between the circles
+                      icon_on_hover = true,      -- symbols only while the mouse is on them
+                      inactive_button_color = theme.bar_button_inactive,
+                      bar_part_of_window = true, -- the window's space includes it
+                      bar_precedence_over_border = true,
+                      on_double_click = [[hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" })']],
+                      -- dragging a window by its bar: tell Quickshell, so it can be
+                      -- dropped on a workspace in the workspaces dock (hyprbarsPatched
+                      -- and WindowDrag.qml in home.nix)
+                      on_drag = "quickshell ipc call windowdrag",
+                  },
+              },
+          })
+          -- Left to right, in this order. A click focuses the window first, so each acts
+          -- on the window you clicked.
+          local function button(color, icon, action)
+              hl.plugin.hyprbars.add_button({
+                  bg_color = color,
+                  fg_color = theme.bar_icon,
+                  size = 12,
+                  icon = icon,
+                  action = action,
+              })
+          end
+          button(theme.bar_close, "×", [[hyprctl dispatch 'hl.dsp.window.close()']])
+          button(theme.bar_float, "−", [[hyprctl dispatch 'hl.dsp.window.move({ workspace = "special:minimized", follow = false })']])
+          button(theme.bar_fullscreen, "+", "${hyprbarsGreen}")
+      end
 
       -- HyprMod (the Hyprland settings app): what you save in it goes in
       -- ~/.config/hypr/hyprland-gui.lua, loaded here, at the end, so it wins over
@@ -13638,48 +14238,12 @@ in
       -- file that's there but broken still shows in Hyprland's config errors, so you'd
       -- know; the config above still applies.
       pcall(function() require("hyprland-gui") end)
-      -- hyprbars settings go inside hl.config under plugin
-      --[[hl.config({
-          plugin = {
-              hyprbars = {
-                  bar_height = 20,
-                  bar_color = "rgb(2d353b)",
-                  ["col.text"] = "rgb(d3c6aa)",
-                  bar_text_size = 14,
-                  bar_text_font = "SF Pro Text",
-                  bar_button_padding = 10,
-                  bar_padding = 10,
-                  bar_precedence_over_border = true,
-                  bar_part_of_window = true,
-              }
-          }
-      })
-
-      -- buttons are added separately
-      hl.plugin.hyprbars.add_button({
-          bg_color = "rgb(e67e80)",
-          fg_color = "rgb(2d353b)",
-          size = 15,
-          icon = "󱎘",
-          action = "hyprctl dispatch 'hl.dsp.window.close()'",
-      })
-      hl.plugin.hyprbars.add_button({
-          bg_color = "rgb(a7c080)",
-          fg_color = "rgb(2d353b)",
-          size = 15,
-          icon = "",
-          action = "hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"toggle\" })'",
-      })
-      hl.plugin.hyprbars.add_button({
-          bg_color = "rgb(d699b6)",
-          fg_color = "rgb(2d353b)",
-          size = 15,
-          icon = "",
-          action = "hyprctl dispatch 'hl.dsp.window.float({action=\"toggle\"})'",
-      })
-      ]]
     '';
   };
+
+  # The title bar plugin, at a path that stays the same between rebuilds (the Hyprland
+  # config loads it from here; see hyprbarsPatched at the top of this file).
+  xdg.dataFile."hypr/plugins/libhyprbars.so".source = "${hyprbarsPatched}/lib/libhyprbars.so";
 
   # Reload Hyprland when its config changes, so a rebuild shows up right away.
   # home-manager's Hyprland module does this itself, but only when it's given Hyprland's
@@ -14102,7 +14666,9 @@ in
 
   # Each rebuild makes new copies of the theme folders, so point the link at this
   # build's copy of the theme you're using (and make it the first time).
-  home.activation.theme = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+  # Before onFilesChange, which reloads Hyprland when its config changed (onChange on
+  # hypr/hyprland.lua), so that reload already reads this build's theme colors.
+  home.activation.theme = lib.hm.dag.entryBetween [ "onFilesChange" ] [ "linkGeneration" ] ''
     run ${themeCmd} --refresh
   '';
   # At login: tell GTK (dconf) and the login screen which theme is on, and pick up
