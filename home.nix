@@ -644,6 +644,23 @@ let
   themeState = "${config.home.homeDirectory}/.local/state/theme";
   themeCmd = "${themeSwitch}/bin/theme";
 
+  # what Settings → About shows: key=value lines about this computer
+  aboutScript = pkgs.writeShellScript "shell-about" ''
+    export PATH=${lib.makeBinPath (with pkgs; [ coreutils gnugrep gnused gawk pciutils ])}:$PATH
+    # shellcheck disable=SC1091
+    . /etc/os-release 2>/dev/null
+    echo "os=$PRETTY_NAME"
+    echo "kernel=$(uname -r)"
+    echo "host=$(cat /proc/sys/kernel/hostname)"
+    echo "uptime=$(cut -d' ' -f1 /proc/uptime)"
+    echo "cpu=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')"
+    echo "mem=$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
+    lspci 2>/dev/null | grep -Ei 'vga|3d controller|display' | while IFS= read -r l; do
+      echo "gpu=$(echo "$l" | cut -d: -f3- | sed 's/^ *//')"
+    done | tail -n 1
+    echo "hyprland=$(hyprctl version 2>/dev/null | head -n 1 | cut -d' ' -f2)"
+  '';
+
   # `lock`: the lock screen. It lives with the login screen in /etc/greetd/greeter
   # (lock.qml in configuration.nix) and looks the same, because it's built from the
   # same pieces. -n: if it's already locked, don't start a second one.
@@ -822,6 +839,9 @@ let
       '';
 
       "gtk-3.0.ini" = pkgs.writeText "gtk-3.0.ini" gtkIni;
+      # ~/.config/gtk-3.0/gtk.css: empty for these themes (their GTK 3 theme has the
+      # colors already); the wallpaper theme puts its colors here (matugenTheme)
+      "gtk-3.0.css" = pkgs.writeText "gtk-3.0.css" (t.gtk3Css or "");
       "gtk-4.0.ini" = pkgs.writeText "gtk-4.0.ini" gtkIni;
       # libadwaita apps ignore gtk-theme-name but do load your own gtk.css, so the
       # theme comes in from there (the same thing home-manager's gtk4.theme does)
@@ -861,6 +881,165 @@ let
     colors = lib.mapAttrs (_: v: "#" + v) t.colors;
   }) themes.themes;
 
+  # ── The wallpaper theme: colors made from your wallpaper (matugen) ──
+  # One more theme next to the ones above, "From wallpaper", picked in Settings →
+  # Appearance (or `theme matugen` in a terminal). matugen works out a Material You
+  # palette from the picture, and those colors fill in the same slots the themes above
+  # have (bg, overlay, accent, red...), so everything that reads a theme reads this one
+  # the same way.
+  #
+  # The files are made by the theme command, not here: this is a theme folder like the
+  # others (mkThemeDir), but every color in it is a placeholder ("@bg@", or "@BG@" where
+  # a file wants capitals), and `theme matugen` copies the folder to
+  # ~/.local/state/theme/matugen/ with the wallpaper's colors put in.
+  #   GTK 3: adw-gtk3 with the colors (libadwaita's named colors, which adw-gtk3 reads
+  #   from ~/.config/gtk-3.0/gtk.css); GTK 4 / libadwaita apps: the same colors.
+  #   Icons and cursor: ones already installed for the themes above.
+  matugenSlots = builtins.attrNames themes.themes.${themes.default}.colors;
+  matugenAdwaita = ''
+    @define-color accent_bg_color #@accent@;
+    @define-color accent_fg_color #@bg@;
+    @define-color accent_color #@accent@;
+    @define-color destructive_bg_color #@red@;
+    @define-color destructive_fg_color #@bg@;
+    @define-color destructive_color #@red@;
+    @define-color success_bg_color #@green@;
+    @define-color success_fg_color #@bg@;
+    @define-color success_color #@green@;
+    @define-color warning_bg_color #@yellow@;
+    @define-color warning_fg_color #@bg@;
+    @define-color warning_color #@yellow@;
+    @define-color error_bg_color #@red@;
+    @define-color error_fg_color #@bg@;
+    @define-color error_color #@red@;
+    @define-color window_bg_color #@bg@;
+    @define-color window_fg_color #@fg@;
+    @define-color view_bg_color #@surface@;
+    @define-color view_fg_color #@fg@;
+    @define-color headerbar_bg_color #@bg@;
+    @define-color headerbar_fg_color #@fg@;
+    @define-color headerbar_backdrop_color @window_bg_color;
+    @define-color headerbar_shade_color #@bgDim@;
+    @define-color card_bg_color #@overlay@;
+    @define-color card_fg_color #@fg@;
+    @define-color card_shade_color #@bgDim@;
+    @define-color popover_bg_color #@overlay@;
+    @define-color popover_fg_color #@fg@;
+    @define-color dialog_bg_color #@overlay@;
+    @define-color dialog_fg_color #@fg@;
+    @define-color sidebar_bg_color #@surface@;
+    @define-color sidebar_fg_color #@fg@;
+    @define-color sidebar_backdrop_color #@surface@;
+  '';
+  matugenTheme = {
+    name = "From wallpaper";
+    variant = "Matugen";
+    colors = lib.genAttrs matugenSlots (n: "@${n}@");
+    gtk = {
+      name = "adw-gtk3-dark";
+      package = pkgs.adw-gtk3;
+    };
+    icons = themes.themes.catppuccin-mocha.icons; # Papirus-Dark
+    cursor = {
+      name = "Capitaine Cursors (Nord)"; # Everblush's (so the login screen has it too)
+      package = pkgs.capitaine-cursors-themed;
+    };
+    gtk3Css = matugenAdwaita;
+    # GTK 4 gets the same named colors: the file above, once it's filled in
+    gtk4Css = "${themeState}/current/gtk-3.0.css";
+    kitty = ''
+      background #@bg@
+      foreground #@fg@
+      cursor #@accent@
+      cursor_text_color #@bg@
+      selection_foreground #@fg@
+      selection_background #@midlight@
+      url_color #@link@
+      active_border_color #@accent@
+      inactive_border_color #@overlay@
+      active_tab_foreground #@bg@
+      active_tab_background #@accent@
+      inactive_tab_foreground #@subtle@
+      inactive_tab_background #@overlay@
+      tab_bar_background #@bg@
+      color0 #@overlay@
+      color1 #@red@
+      color2 #@green@
+      color3 #@yellow@
+      color4 #@blue@
+      color5 #@magenta@
+      color6 #@cyan@
+      color7 #@subtle@
+      color8 #@midlight@
+      color9 #@red@
+      color10 #@green@
+      color11 #@yellow@
+      color12 #@blue@
+      color13 #@magenta@
+      color14 #@cyan@
+      color15 #@fg@
+    '';
+  };
+  # the folder `theme matugen` fills in: mkThemeDir's files, and the colors for the
+  # bar (Theme.qml) and the login screen
+  matugenTemplate = pkgs.symlinkJoin {
+    name = "theme-matugen-template";
+    paths = [
+      (mkThemeDir "matugen" matugenTheme)
+      (pkgs.linkFarm "theme-matugen-extra" {
+        "qs-colors.json" = pkgs.writeText "qs-colors.json" (
+          builtins.toJSON (lib.genAttrs matugenSlots (n: "#@${n}@"))
+        );
+      })
+    ];
+  };
+  # matugen's settings: the named colors (red, green...) it makes for the theme. Each
+  # is nudged toward the wallpaper's main color ("blended"), so they sit well with it.
+  matugenConfig = pkgs.writeText "matugen.toml" ''
+    [config]
+    [config.custom_colors]
+    red = "#e5484d"
+    orange = "#f76b15"
+    yellow = "#ffc53d"
+    green = "#46a758"
+    cyan = "#12a594"
+    blue = "#3e63dd"
+    magenta = "#8e4ec6"
+
+    [templates]
+  '';
+  # Which of matugen's Material colors goes in each slot (the first one it has).
+  # The others: surface = the darkest, ..._highest = the lightest of the backgrounds.
+  matugenSlotsJq = pkgs.writeText "matugen-slots.jq" ''
+    .colors as $c
+    | def pick(names): ([names[] | $c[.].dark.color // empty][0] // "#888888") | ltrimstr("#") | .[0:6] | ascii_downcase;
+    {
+      bg: pick(["surface"]),
+      bgDim: pick(["surface_container_lowest", "surface_dim"]),
+      surface: pick(["surface_container_low", "surface"]),
+      overlay: pick(["surface_container_high", "surface_variant"]),
+      midlight: pick(["surface_container_highest", "surface_variant"]),
+      light: pick(["outline_variant", "outline"]),
+      dim: pick(["outline_variant", "outline"]),
+      border: pick(["outline_variant", "outline"]),
+      fg: pick(["on_surface"]),
+      fgBright: pick(["on_surface"]),
+      subtle: pick(["on_surface_variant", "on_surface"]),
+      placeholder: pick(["outline"]),
+      disabled: pick(["outline", "outline_variant"]),
+      red: pick(["red", "error"]),
+      orange: pick(["orange", "tertiary"]),
+      yellow: pick(["yellow", "tertiary"]),
+      green: pick(["green", "secondary"]),
+      cyan: pick(["cyan", "secondary"]),
+      blue: pick(["blue", "primary"]),
+      magenta: pick(["magenta", "tertiary"]),
+      accent: pick(["primary"]),
+      link: pick(["primary"]),
+      linkVisited: pick(["tertiary", "primary"])
+    }
+  '';
+
   # `theme`: lists the themes, or switches to one. The bar's theme button runs it.
   #   theme                 which one is on, and the list
   #   theme <id>            switch (e.g. theme rose-pine)
@@ -879,6 +1058,10 @@ let
       dconf
       systemd
       awww
+      jq
+      gnused
+      gnugrep
+      matugen
     ];
     text = ''
       state="$HOME/.local/state/theme"
@@ -890,8 +1073,63 @@ let
 
       dir_for() {
         case "''${1-}" in
-      ${lib.concatMapStrings (id: "    ${id}) echo ${themeDirs.${id}} ;;\n") themes.order}    *) return 1 ;;
+      ${lib.concatMapStrings (id: "    ${id}) echo ${themeDirs.${id}} ;;\n") themes.order}    matugen) if [ -f "$state/matugen/env" ]; then echo "$state/matugen"; else return 1; fi ;;
+          *) return 1 ;;
         esac
+      }
+
+      # ── the wallpaper theme (matugen; matugenTheme in home.nix) ──
+      mstate="$state/matugen.json"    # its settings: { scheme, index, contrast }
+      mdir="$state/matugen"           # its files: matugenTemplate, filled in
+      # one of its settings, or the default
+      mopt() {
+        local v
+        v=$(jq -r --arg k "$1" '.[$k] // empty' "$mstate" 2>/dev/null || true)
+        echo "''${v:-$2}"
+      }
+      # The colors for a picture, into $mdir/slots.json ({ "bg": "1e1e2e", ... }). Also
+      # the picture's main colors, most to least of it ($mdir/sources: Settings shows
+      # them, and `index` picks which one the palette is built around).
+      matugen_colors() {
+        local img="$1" scheme index contrast sources n json
+        scheme=$(mopt scheme scheme-tonal-spot)
+        index=$(mopt index 0)
+        contrast=$(mopt contrast 0)
+        mkdir -p "$mdir"
+        if ! sources=$(matugen image "$img" -c ${matugenConfig} --show-source-colors -q); then
+          echo "theme: matugen couldn't read $img" >&2
+          return 1
+        fi
+        n=$(printf '%s\n' "$sources" | grep -c '^#' || true)
+        [ "$n" -gt 0 ] || n=1
+        [ "$index" -lt "$n" ] || index=$((n - 1))
+        # --source-color-index: without it matugen asks which color, and there's no one
+        # to answer. --dry-run: just print the colors (no templates, no wallpaper).
+        if ! json=$(matugen image "$img" -c ${matugenConfig} -t "$scheme" -m dark --contrast "$contrast" \
+          --source-color-index "$index" --json hex --dry-run -q); then
+          echo "theme: matugen couldn't make colors from $img" >&2
+          return 1
+        fi
+        printf '%s\n' "$json" | jq -c -f ${matugenSlotsJq} >"$mdir/slots.json.new" || return 1
+        mv -f "$mdir/slots.json.new" "$mdir/slots.json"
+        printf '%s\n' "$sources" | grep '^#' >"$mdir/sources.new" || true
+        mv -f "$mdir/sources.new" "$mdir/sources"
+      }
+      # The theme folder with those colors in it: every "@name@" (and "@NAME@") in the
+      # template's files swapped for the color. Each file is swapped in whole (mv).
+      matugen_render() {
+        local f name script
+        [ -f "$mdir/slots.json" ] || return 1
+        script=$(jq -r 'to_entries[] | select(.value | test("^[0-9a-f]{6}$"))
+          | "s/@\(.key)@/\(.value)/g", "s/@\(.key | ascii_upcase)@/\(.value | ascii_upcase)/g"' "$mdir/slots.json")
+        for f in ${matugenTemplate}/*; do
+          name=$(basename "$f")
+          sed -e "$script" "$f" >"$mdir/$name.new"
+          mv -f "$mdir/$name.new" "$mdir/$name"
+        done
+      }
+      make_matugen() {
+        matugen_colors "$1" && matugen_render
       }
       current() {
         local t
@@ -965,7 +1203,12 @@ let
         done
         # a new stamp means "you switched themes": the login screen then shows the
         # theme's wallpaper, even if you'd picked another one there before
-        printf '{"theme":"%s","wallpaper":"%s","stamp":"%s"}\n' "$id" "$dst" "$stamp" >"$greeter/state.json.new"
+        # the wallpaper theme isn't one the login screen knows: it gets the colors too
+        local colors=null
+        if [ "$id" = matugen ] && [ -f "$mdir/slots.json" ]; then
+          colors=$(jq -c 'map_values("#" + .) | { bg, inner: .surface, pill: .overlay, text: .fg, accent, yellow, red }' "$mdir/slots.json")
+        fi
+        printf '{"theme":"%s","wallpaper":"%s","stamp":"%s","colors":%s}\n' "$id" "$dst" "$stamp" "$colors" >"$greeter/state.json.new"
         mv -f "$greeter/state.json.new" "$greeter/state.json"
       }
       # GTK apps that are open follow the GNOME settings (dconf)
@@ -1013,10 +1256,14 @@ let
             if [ "$id" = "$now" ]; then mark="*"; else mark=" "; fi
             printf '%s %-17s %s\n' "$mark" "$id" "$name"
           done
+          if [ "$now" = matugen ]; then mark="*"; else mark=" "; fi
+          printf '%s %-17s %s\n' "$mark" matugen "From wallpaper (matugen)"
           ;;
         -h | --help)
-          echo "usage: theme [${lib.concatStringsSep "|" themes.order}]"
+          echo "usage: theme [${lib.concatStringsSep "|" themes.order}|matugen]"
           echo "       theme --wallpaper FILE   (this theme's wallpaper, remembered for it)"
+          echo "       theme --matugen [scheme NAME] [index 0-3] [contrast -1..1]"
+          echo "                                (how the wallpaper theme makes its colors)"
           ;;
         --wallpaper)
           f=$(realpath -s -- "''${2-}" 2>/dev/null || true)
@@ -1028,27 +1275,84 @@ let
           mkdir -p "$state/wallpapers"
           printf '%s\n' "$f" >"$state/wallpapers/$id"
           use_wallpaper "$id"
-          awww img "$state/wallpaper" >/dev/null 2>&1 || true
-          systemctl --user start --no-block rofi-wallpaper.service || true
+          if [ "$id" = matugen ]; then
+            # new picture, new colors: everything gets them, like switching themes
+            make_matugen "$f" || exit 1
+            tell_session
+          else
+            awww img "$state/wallpaper" >/dev/null 2>&1 || true
+            systemctl --user start --no-block rofi-wallpaper.service || true
+          fi
           sync_greeter
+          ;;
+        --matugen)
+          shift
+          mkdir -p "$state"
+          [ -f "$mstate" ] || echo '{}' >"$mstate"
+          while [ $# -gt 0 ]; do
+            key="$1" val="''${2-}"
+            case "$key" in
+              scheme)
+                case "$val" in
+                  scheme-content | scheme-expressive | scheme-fidelity | scheme-fruit-salad | scheme-monochrome | \
+                    scheme-neutral | scheme-rainbow | scheme-tonal-spot | scheme-vibrant) json="\"$val\"" ;;
+                  *) echo "theme: no matugen scheme called '$val'" >&2; exit 1 ;;
+                esac ;;
+              index)
+                case "$val" in
+                  0 | 1 | 2 | 3) json="$val" ;;
+                  *) echo "theme: index is 0 to 3" >&2; exit 1 ;;
+                esac ;;
+              contrast)
+                if printf '%s' "$val" | grep -Eq '^-?(0(\.[0-9]+)?|1(\.0+)?|\.[0-9]+)$'; then
+                  json=$(jq -n "$val")
+                else
+                  echo "theme: contrast is -1 to 1" >&2
+                  exit 1
+                fi ;;
+              *) echo "theme: --matugen takes scheme, index or contrast" >&2; exit 1 ;;
+            esac
+            jq -c --arg k "$key" --argjson v "$json" '.[$k] = $v' "$mstate" >"$mstate.new" && mv -f "$mstate.new" "$mstate"
+            shift
+            [ $# -gt 0 ] && shift
+          done
+          if [ "$(current)" = matugen ]; then
+            make_matugen "$(wallpaper_for matugen)" || exit 1
+            tell_session
+            sync_greeter
+          fi
           ;;
         --refresh)
           # home-manager runs this on every rebuild: the theme folders get new store
           # paths, so the link is pointed at this build's copy of the same theme
+          # (the wallpaper theme's files: made again from this build's template)
+          [ "$(current)" = matugen ] && { matugen_render || true; }
           use "$(current)"
           [ -e "$state/wallpaper" ] || use_wallpaper "$(current)"
           note_wallpaper
           ;;
         --login)
           # at login (theme-session service): pick up new pictures in the folder too
+          [ "$(current)" = matugen ] && { matugen_render || true; }
           use "$(current)"
           use_wallpaper "$(current)"
           tell_gtk
           sync_greeter
           ;;
         *)
-          if ! dir_for "$1" >/dev/null; then
-            echo "theme: no theme called '$1'. These exist: $ids" >&2
+          if [ "$1" = matugen ]; then
+            # The wallpaper theme starts out with the wallpaper you have now (after
+            # that it keeps its own, like the others).
+            if [ -z "$(picked_for matugen)" ]; then
+              f=$(readlink -f "$state/wallpaper" 2>/dev/null || true)
+              if [ -f "$f" ]; then
+                mkdir -p "$state/wallpapers"
+                printf '%s\n' "$f" >"$state/wallpapers/matugen"
+              fi
+            fi
+            make_matugen "$(wallpaper_for matugen)" || exit 1
+          elif ! dir_for "$1" >/dev/null; then
+            echo "theme: no theme called '$1'. These exist: $ids matugen" >&2
             exit 1
           fi
           use "$1"
@@ -1637,10 +1941,15 @@ in
                 arrived = Object.assign({}, arrived, {
                     [n.id]: new Date()
                 });
+                // Do not disturb (Settings → Notifications): no popup and no sound,
+                // except for critical ones. It's still in the notification center.
+                const critical = n.urgency === NotificationUrgency.Critical;
+                if (Settings.v.dnd && !critical)
+                    return;
                 toasts.add(n);                 // the popup at the top right (below)
                 // its sound (Sounds.qml), unless it asks for none (the clock and the
-                // device notices play their own)
-                if (!(n.hints && n.hints["suppress-sound"]))
+                // device notices play their own) or you turned them off
+                if (Settings.v.notifSounds && !(n.hints && n.hints["suppress-sound"]))
                     Sounds.play(n.urgency === NotificationUrgency.Critical ? "software-update-urgent" : "message-new-instant");
             }
 
@@ -1710,8 +2019,9 @@ in
         Scope {
             id: toasts
 
-            readonly property int duration: 10000   // ms on screen
-            readonly property int maxShown: 4
+            // (Settings → Notifications: how long, how many)
+            readonly property int duration: Settings.v.toastSeconds * 1000   // ms on screen
+            readonly property int maxShown: Settings.v.toastMax
             property var objs: ({})                   // notification id -> notification
 
             ListModel {
@@ -1882,7 +2192,7 @@ in
                                     anchors.left: parent.left
                                     anchors.right: toastClose.left
                                     anchors.rightMargin: 8
-                                    text: (toast.n && toast.n.appName ? toast.n.appName : "Notification") + "  ·  " + Qt.formatDateTime(new Date(), "h:mm AP") + (toast.ringing ? "  ·  click to stop" : "")
+                                    text: (toast.n && toast.n.appName ? toast.n.appName : "Notification") + "  ·  " + Settings.time(new Date()) + (toast.ringing ? "  ·  click to stop" : "")
                                     elide: Text.ElideRight
                                     color: toast.critical ? Theme.red : Theme.accent
                                     font.family: Theme.font
@@ -1947,7 +2257,7 @@ in
 
         // ── The dock ── (Dock.qml): one per screen, hidden at the bottom edge
         Variants {
-            model: Quickshell.screens
+            model: Settings.v.dock ? Quickshell.screens : []     // (Settings → Dock: off)
 
             Dock {
                 required property var modelData
@@ -1955,10 +2265,29 @@ in
             }
         }
 
+        // ── Settings ── (SettingsWindow.qml): a window of its own, opened from the bar's
+        // gear button or Super + I (quickshell ipc call settings toggle). Only exists
+        // while it's open.
+        LazyLoader {
+            active: Settings.open
+            SettingsWindow {}
+        }
+        IpcHandler {
+            target: "settings"
+            function toggle(): void {
+                Settings.toggle();
+            }
+            // straight to one page: appearance, bar, docks (or dock / workspaces for
+            // that half of it), sound, bluetooth, notifications, general, about
+            function show(page: string): void {
+                Settings.show(page);
+            }
+        }
+
         // ── The workspaces dock ── (WorkspaceDock.qml): one per screen, hidden at the
         // left edge
         Variants {
-            model: Quickshell.screens
+            model: Settings.v.wsDock ? Quickshell.screens : []   // (Settings → Workspaces dock: off)
 
             WorkspaceDock {
                 required property var modelData
@@ -2201,6 +2530,17 @@ in
                                     printErrors: false
                                 }
                                 property bool restored: false
+                                // Hyprland puts every setting back to the config's when it reloads
+                                // its config (a rebuild, a theme switch, HyprMod saving), and the
+                                // config doesn't set the screen shader, so night light and the
+                                // filters would switch off until you touched them. Put them back.
+                                Connections {
+                                    target: Hyprland
+                                    function onRawEvent(event) {
+                                        if (event.name === "configreloaded" && disp.restored)
+                                            disp.applyEffects();
+                                    }
+                                }
 
                                 // Read the real brightness (and whether there's a backlight at all)
                                 // at start and each time the popup opens, so the keys are picked up.
@@ -2478,646 +2818,15 @@ in
                             }
                         }
 
-                        // ── Bluetooth ──
-                        // In the bar: just the icon, no pill. Click it for the device list.
-                        Widget {
-                            id: btWidget
+                        // ── Settings ── (SettingsWindow.qml): themes and wallpaper, Bluetooth,
+                        // sound, the bar's and docks' sizes... Also Super + I.
+                        IconButton {
                             anchors.verticalCenter: parent.verticalCenter
-                            // bluetooth_searching (the one with waves) while something is still connecting
-                            icon: !btList.powered ? "bluetooth_disabled" : btList.anyConnected ? "bluetooth_connected" : btList.anyConnecting ? "bluetooth_searching" : "bluetooth"
-
-                            Column {
-                                id: btList
-                                spacing: 4
-
-                                readonly property var adapter: Bluetooth.defaultAdapter
-                                readonly property bool powered: !!adapter && adapter.enabled
-                                // "Connected" here means actually usable (see ready() below), not just
-                                // "BlueZ has a radio link".
-                                readonly property bool anyConnected: Bluetooth.devices.values.some(d => ready(d))
-                                readonly property bool anyConnecting: Bluetooth.devices.values.some(d => d.state === BluetoothDeviceState.Connecting || (d.connected && !ready(d)))
-
-                                // ── When is a device really connected? ──
-                                // BlueZ (and so Quickshell) flips a device to "Connected" as soon as the
-                                // Bluetooth link is up. For headphones and speakers the audio part (A2DP)
-                                // takes a few more seconds; that's the gap you saw with the AirPods.
-                                // WirePlumber only creates the device's audio node once audio is ready,
-                                // and names it after the MAC address with _ for : (from WirePlumber's
-                                // monitor-utils.lua: "bluez_output.C0_1E_7C_D0_1C_84.1", or
-                                // "bluez_input..." for a mic). So an audio device counts as connected
-                                // once a node with its address exists.
-                                // Mice, keyboards, phones etc. have no node; for them BlueZ's
-                                // "Connected" is used as-is.
-                                readonly property var btNodeNames: Pipewire.nodes.values.filter(n => n.name.startsWith("bluez_")).map(n => n.name)
-                                function isAudio(device) {
-                                    return device.icon.startsWith("audio");
-                                }
-                                function hasNode(device) {
-                                    const key = device.address.replace(/:/g, "_");
-                                    return btNodeNames.some(n => n.includes(key));
-                                }
-                                // Safety net: if an audio device is linked but never gets a node (say
-                                // it only connected for something other than audio), call it connected
-                                // after 15 s anyway instead of saying "Connecting..." forever.
-                                property var linkedSince: ({})  // address -> time BlueZ said Connected
-                                property double now: Date.now()
-                                function ready(device) {
-                                    if (device.state !== BluetoothDeviceState.Connected)
-                                        return false;
-                                    if (!isAudio(device) || hasNode(device))
-                                        return true;
-                                    const t = linkedSince[device.address];
-                                    return t !== undefined && now - t >= 15000;
-                                }
-                                Timer {
-                                    // only ticks while an audio device is linked but has no node yet
-                                    running: Bluetooth.devices.values.some(d => d.connected && btList.isAudio(d) && !btList.hasNode(d))
-                                    interval: 1000
-                                    repeat: true
-                                    triggeredOnStart: true
-                                    onTriggered: {
-                                        btList.now = Date.now();
-                                        const next = {};
-                                        for (const d of Bluetooth.devices.values)
-                                            if (d.connected)
-                                                next[d.address] = btList.linkedSince[d.address] ?? btList.now;
-                                        btList.linkedSince = next; // reassign so bindings notice
-                                    }
-                                }
-
-                                // Devices that have a name (or that you've paired): connected first, then
-                                // paired, then A to Z. Nameless ones are usually random nearby gadgets.
-                                readonly property var devices: Bluetooth.devices.values.filter(d => d.paired || d.deviceName !== "").sort((a, b) => (b.connected - a.connected) || (b.paired - a.paired) || a.name.localeCompare(b.name))
-
-                                // Like the network list, the open drop-down is remembered here, not in the
-                                // rows: the list re-sorts when a device connects, and rows can be rebuilt.
-                                property var active: null       // the device whose drop-down is open
-                                property var pairingDevice: null // a new device we're pairing, to connect once paired
-                                property var failedDevice: null  // shows "Pairing failed" for a few seconds
-
-                                function toggle(device) {
-                                    active = active === device ? null : device;
-                                }
-                                // Status shown next to each device.
-                                function stateText(device) {
-                                    if (device.state === BluetoothDeviceState.Connected)
-                                        return ready(device) ? "Connected" : "Connecting...";
-                                    if (device.state === BluetoothDeviceState.Connecting)
-                                        return "Connecting...";
-                                    if (device.state === BluetoothDeviceState.Disconnecting)
-                                        return "Disconnecting...";
-                                    if (device.pairing)
-                                        return "Pairing...";
-                                    if (device === failedDevice)
-                                        return "Pairing failed";
-                                    return device.paired ? "Not connected" : "New";
-                                }
-                                function busy(device) {
-                                    return device.pairing || device.state === BluetoothDeviceState.Connecting || device.state === BluetoothDeviceState.Disconnecting;
-                                }
-                                function connectOrDisconnect(device) {
-                                    if (busy(device))
-                                        return;
-                                    if (device.connected) {
-                                        device.disconnect();
-                                    } else if (!device.paired) {
-                                        // never paired: pair first; the Connections below connects afterwards
-                                        device.trusted = true;      // lets it reconnect by itself next time
-                                        failedDevice = null;
-                                        pairingDevice = device;
-                                        device.pair();
-                                    } else {
-                                        device.connect();
-                                    }
-                                }
-                                // Material Symbols icon for the kind of device (BlueZ gives freedesktop icon names).
-                                function glyph(device) {
-                                    const i = device.icon;
-                                    if (i.startsWith("audio-head"))
-                                        return "headphones";
-                                    if (i.startsWith("audio"))
-                                        return "speaker";
-                                    if (i === "input-mouse")
-                                        return "mouse";
-                                    if (i === "input-keyboard")
-                                        return "keyboard";
-                                    if (i === "input-gaming")
-                                        return "sports_esports";
-                                    if (i === "phone")
-                                        return "smartphone";
-                                    if (i === "computer")
-                                        return "computer";
-                                    return "bluetooth";
-                                }
-
-                                Connections {
-                                    target: btList.pairingDevice
-                                    function onPairedChanged() {
-                                        const device = btList.pairingDevice;
-                                        btList.pairingDevice = null;
-                                        pairCheck.stop();
-                                        if (device.paired && !device.connected)
-                                            device.connect();
-                                    }
-                                    // The pairing attempt ended. If it isn't paired a moment later
-                                    // (BlueZ can report "paired" just after), it failed.
-                                    function onPairingChanged() {
-                                        if (!btList.pairingDevice.pairing && !btList.pairingDevice.paired)
-                                            pairCheck.restart();
-                                    }
-                                }
-                                Timer {
-                                    id: pairCheck
-                                    interval: 1500
-                                    onTriggered: {
-                                        const device = btList.pairingDevice;
-                                        if (!device || device.paired)
-                                            return;
-                                        btList.pairingDevice = null;
-                                        btList.failedDevice = device;
-                                        failedReset.restart();
-                                    }
-                                }
-                                // "Pairing failed" goes back to "New" after 4 s
-                                Timer {
-                                    id: failedReset
-                                    interval: 4000
-                                    onTriggered: btList.failedDevice = null
-                                }
-
-                                // Look for nearby devices only while this popup is open (and Bluetooth is on).
-                                Binding {
-                                    when: btList.powered
-                                    target: btList.adapter
-                                    property: "discovering"
-                                    value: btWidget.popupShown
-                                }
-
-                                // header: title on the left, on/off switch on the right
-                                Item {
-                                    width: 280
-                                    height: 26
-
-                                    Text {
-                                        anchors.left: parent.left
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: "Bluetooth"
-                                        color: Theme.text
-                                        font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 1.2
-                                        font.weight: 700
-                                        font.letterSpacing: Theme.letterSpacing
-                                    }
-                                    Rectangle {
-                                        anchors.right: parent.right
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        visible: !!btList.adapter
-                                        width: btPowerLabel.implicitWidth + 24
-                                        height: 24
-                                        radius: height / 2
-                                        color: btList.powered ? Theme.accent : btPowerMouse.containsMouse ? Theme.pill : "transparent"
-                                        border.width: 1
-                                        border.color: btList.powered ? Theme.accent : Theme.pill
-                                        scale: btPowerMouse.pressed ? 0.85 : 1
-
-                                        Behavior on color {
-                                            ColorAnimation {
-                                                duration: 120
-                                            }
-                                        }
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 120
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        Text {
-                                            id: btPowerLabel
-                                            anchors.centerIn: parent
-                                            text: btList.powered ? "On" : "Off"
-                                            color: btList.powered ? Theme.bg : Theme.text
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize * 0.9
-                                            font.weight: 700
-                                        }
-                                        MouseArea {
-                                            id: btPowerMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: btList.adapter.enabled = !btList.adapter.enabled
-                                        }
-                                    }
-                                }
-
-                                // what to show when there's no list
-                                Text {
-                                    width: 280
-                                    wrapMode: Text.Wrap
-                                    visible: text !== ""
-                                    text: {
-                                        if (!btList.adapter)
-                                            return "No Bluetooth adapter found.";
-                                        if (!btList.powered)
-                                            return "Bluetooth is off.";
-                                        if (btList.devices.length === 0)
-                                            return btList.adapter.discovering ? "Searching for devices..." : "No devices found.";
-                                        return "";
-                                    }
-                                    color: Theme.text
-                                    opacity: 0.6
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.textSize
-                                }
-
-                                // "Devices", with "Searching..." on the right while it scans
-                                Item {
-                                    width: 280
-                                    height: devicesLabel.implicitHeight
-                                    visible: btList.powered && btList.devices.length > 0
-
-                                    Text {
-                                        id: devicesLabel
-                                        text: "Devices"
-                                        color: Theme.text
-                                        opacity: 0.6
-                                        font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 0.85
-                                        font.weight: 600
-                                    }
-                                    Text {
-                                        anchors.right: parent.right
-                                        visible: !!btList.adapter && btList.adapter.discovering
-                                        text: "Searching..."
-                                        color: Theme.accent
-                                        opacity: 0.8
-                                        font.family: Theme.font
-                                        font.pixelSize: Theme.textSize * 0.85
-                                    }
-                                }
-
-                                // Scrolls once the list is taller than 360 px (lots of devices or networks around).
-                                Flickable {
-                                    id: btScroll
-                                    width: 280
-                                    height: Math.min(contentHeight, 360)
-                                    contentHeight: btRows.implicitHeight
-                                    visible: btRows.implicitHeight > 0
-                                    clip: true
-                                    boundsBehavior: Flickable.StopAtBounds
-                                    ScrollBar.vertical: ThinScrollBar {}
-
-                                    // Scrolls just enough to show all of `row` (used while a row's drop-down opens).
-                                    function show(row) {
-                                        if (row.y + row.height > contentY + height)
-                                            contentY = Math.min(row.y + row.height, contentHeight) - height;
-                                        if (row.y < contentY)
-                                            contentY = row.y;
-                                    }
-
-                                    Column {
-                                        id: btRows
-                                        width: btScroll.width
-                                        spacing: 4
-
-                                        Repeater {
-                                            // ScriptModel only builds rows for new devices instead of rebuilding them all.
-                                            model: ScriptModel {
-                                                values: btList.powered ? btList.devices : []
-                                            }
-
-                                            Rectangle {
-                                                id: btRow
-                                                required property var modelData
-                                                readonly property var device: modelData
-                                                readonly property bool expanded: btList.active === device
-                                                readonly property bool ready: btList.ready(device)  // really connected
-                                                // keep it in view while its drop-down glides open
-                                                onHeightChanged: if (expanded)
-                                                    btScroll.show(btRow)
-
-                                                width: 280
-                                                height: btHeader.height + btDrop.height
-                                                radius: Theme.radius
-                                                // a device that shows up fades in instead of popping in
-                                                NumberAnimation on opacity {
-                                                    from: 0
-                                                    to: 1
-                                                    duration: 200
-                                                }
-                                                color: btHeaderMouse.containsMouse || expanded ? Theme.pill : "transparent"
-                                                clip: true
-
-                                                Behavior on color {
-                                                    ColorAnimation {
-                                                        duration: 120
-                                                    }
-                                                }
-
-                                                // ── the row itself: icon, name, status ──
-                                                Item {
-                                                    id: btHeader
-                                                    width: parent.width
-                                                    height: 30
-                                                    scale: btHeaderMouse.pressed ? 0.85 : 1
-
-                                                    Behavior on scale {
-                                                        NumberAnimation {
-                                                            duration: 120
-                                                            easing.type: Easing.OutCubic
-                                                        }
-                                                    }
-
-                                                    Text {
-                                                        id: btGlyph
-                                                        anchors.left: parent.left
-                                                        anchors.leftMargin: 10
-                                                        anchors.verticalCenter: parent.verticalCenter
-                                                        text: btList.glyph(btRow.device)
-                                                        color: btRow.ready ? Theme.accent : Theme.text
-                                                        font.family: Theme.iconFont
-                                                        font.pixelSize: Theme.iconSize
-                                                        font.variableAxes: Theme.iconAxes
-                                                    }
-                                                    Text {
-                                                        anchors {
-                                                            left: btGlyph.right
-                                                            right: btStatus.left
-                                                            leftMargin: 8
-                                                            rightMargin: 8
-                                                            verticalCenter: parent.verticalCenter
-                                                        }
-                                                        text: btRow.device.name
-                                                        elide: Text.ElideRight
-                                                        color: btRow.ready ? Theme.accent : Theme.text
-                                                        font.family: Theme.font
-                                                        font.pixelSize: Theme.textSize
-                                                        font.weight: btRow.ready ? 700 : 500
-                                                        font.letterSpacing: Theme.letterSpacing
-                                                    }
-                                                    // per-device status (and battery, when the device reports it)
-                                                    Text {
-                                                        id: btStatus
-                                                        anchors {
-                                                            right: parent.right
-                                                            rightMargin: 10
-                                                            verticalCenter: parent.verticalCenter
-                                                        }
-                                                        text: btList.stateText(btRow.device) + (btRow.device.batteryAvailable ? "  ·  " + Math.round(btRow.device.battery * 100) + "%" : "")
-                                                        color: btRow.ready ? Theme.green : btRow.device === btList.failedDevice ? Theme.red : btRow.device.connected ? Theme.yellow : Theme.text
-                                                        opacity: btRow.device.connected || btRow.device === btList.failedDevice ? 1 : 0.6
-                                                        font.family: Theme.font
-                                                        font.pixelSize: Theme.textSize * 0.85
-                                                    }
-                                                    MouseArea {
-                                                        id: btHeaderMouse
-                                                        anchors.fill: parent
-                                                        hoverEnabled: true
-                                                        cursorShape: Qt.PointingHandCursor
-                                                        onClicked: btList.toggle(btRow.device)
-                                                    }
-                                                }
-
-                                                // ── the drop-down: Connect / Disconnect, glides open over 500 ms ──
-                                                Item {
-                                                    id: btDrop
-                                                    y: btHeader.height
-                                                    width: parent.width
-                                                    height: btRow.expanded ? btDropContent.implicitHeight + 10 : 0
-                                                    clip: true
-
-                                                    Behavior on height {
-                                                        NumberAnimation {
-                                                            duration: 500
-                                                            easing.type: Easing.OutCubic
-                                                        }
-                                                    }
-
-                                                    Column {
-                                                        id: btDropContent
-                                                        x: 10
-                                                        width: parent.width - 20
-                                                        spacing: 6
-
-                                                        Rectangle {
-                                                            id: btAction
-                                                            // red "Disconnect" when connected, green "Connect" otherwise
-                                                            readonly property bool disconnecting: btRow.device.connected
-                                                            readonly property color tint: disconnecting ? Theme.red : Theme.green
-                                                            readonly property bool busy: btList.busy(btRow.device)
-
-                                                            width: parent.width
-                                                            height: 26
-                                                            radius: height / 2
-                                                            color: btActionMouse.containsMouse && !busy ? tint : Theme.glass
-                                                            opacity: busy ? 0.5 : 1
-                                                            scale: btActionMouse.pressed && !busy ? 0.85 : 1
-
-                                                            Behavior on color {
-                                                                ColorAnimation {
-                                                                    duration: 120
-                                                                }
-                                                            }
-                                                            Behavior on scale {
-                                                                NumberAnimation {
-                                                                    duration: 120
-                                                                    easing.type: Easing.OutCubic
-                                                                }
-                                                            }
-
-                                                            Text {
-                                                                anchors.centerIn: parent
-                                                                // while it's working, show what it's doing instead
-                                                                text: btAction.busy ? btList.stateText(btRow.device) : btAction.disconnecting ? "Disconnect" : "Connect"
-                                                                color: btActionMouse.containsMouse && !btAction.busy ? Theme.bg : btAction.tint
-                                                                font.family: Theme.font
-                                                                font.pixelSize: Theme.textSize
-                                                                font.weight: 600
-                                                            }
-                                                            MouseArea {
-                                                                id: btActionMouse
-                                                                anchors.fill: parent
-                                                                hoverEnabled: true
-                                                                cursorShape: btAction.busy ? Qt.ArrowCursor : Qt.PointingHandCursor
-                                                                onClicked: btList.connectOrDisconnect(btRow.device)
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // ── Theme and wallpaper ──
-                        // Icon only, like Bluetooth. Left: the color themes (the themes block at
-                        // the top of home.nix); each row shows that theme's own colors, click one
-                        // to switch. The bar fades over, and the theme command does the rest (see
-                        // "Themes" in home.nix). Right: the pictures in that theme's wallpaper
-                        // folder (WallpaperPicker.qml); click one to use it. Picking a theme
-                        // shows its folder right away, with its own remembered wallpaper. The
-                        // popup stays open, so you can try a few.
-                        Widget {
-                            anchors.verticalCenter: parent.verticalCenter
-                            icon: "palette"
-
-                            Row {
-                                spacing: 14
-
-                                Column {
-                                    id: themeList
-                                    spacing: 4
-                                    width: 280
-
-                                    Item {
-                                        width: parent.width
-                                        height: 26
-
-                                        Text {
-                                            anchors.left: parent.left
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: "Theme"
-                                            color: Theme.text
-                                            font.family: Theme.font
-                                            font.pixelSize: Theme.textSize * 1.2
-                                            font.weight: 700
-                                            font.letterSpacing: Theme.letterSpacing
-                                        }
-                                    }
-
-                                    Repeater {
-                                        model: Theme.order
-
-                                        Rectangle {
-                                            id: themeRow
-                                            required property string modelData
-                                            readonly property var info: Theme.themes[modelData]
-                                            readonly property var colors: info.colors
-                                            readonly property bool selected: Theme.current === modelData
-
-                                            width: themeList.width
-                                            height: 44
-                                            radius: Theme.radius
-                                            color: themeMouse.containsMouse || selected ? Theme.pill : "transparent"
-
-                                            Behavior on color {
-                                                ColorAnimation {
-                                                    duration: 120
-                                                }
-                                            }
-
-                                            Item {
-                                                anchors.fill: parent
-                                                scale: themeMouse.pressed ? 0.85 : 1
-
-                                                Behavior on scale {
-                                                    NumberAnimation {
-                                                        duration: 120
-                                                        easing.type: Easing.OutCubic
-                                                    }
-                                                }
-
-                                                // a little preview: the theme's background with its colors on it
-                                                Rectangle {
-                                                    id: themePreview
-                                                    anchors.left: parent.left
-                                                    anchors.leftMargin: 8
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    width: 64
-                                                    height: 28
-                                                    radius: 6
-                                                    color: themeRow.colors.bg
-                                                    border.width: 1
-                                                    border.color: themeRow.colors.overlay
-
-                                                    Row {
-                                                        anchors.centerIn: parent
-                                                        spacing: 3
-
-                                                        Repeater {
-                                                            model: ["red", "yellow", "green", "blue", "magenta"]
-
-                                                            Rectangle {
-                                                                required property string modelData
-                                                                width: 8
-                                                                height: 8
-                                                                radius: 4
-                                                                color: themeRow.colors[modelData]
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                Column {
-                                                    anchors {
-                                                        left: themePreview.right
-                                                        right: themeCheck.left
-                                                        leftMargin: 10
-                                                        rightMargin: 8
-                                                        verticalCenter: parent.verticalCenter
-                                                    }
-
-                                                    Text {
-                                                        width: parent.width
-                                                        text: themeRow.info.name
-                                                        elide: Text.ElideRight
-                                                        color: themeRow.selected ? Theme.accent : Theme.text
-                                                        font.family: Theme.font
-                                                        font.pixelSize: Theme.textSize
-                                                        font.weight: themeRow.selected ? 700 : 500
-                                                        font.letterSpacing: Theme.letterSpacing
-                                                    }
-                                                    Text {
-                                                        width: parent.width
-                                                        text: themeRow.info.variant
-                                                        elide: Text.ElideRight
-                                                        color: Theme.text
-                                                        opacity: 0.6
-                                                        font.family: Theme.font
-                                                        font.pixelSize: Theme.textSize * 0.85
-                                                    }
-                                                }
-                                                Text {
-                                                    id: themeCheck
-                                                    anchors.right: parent.right
-                                                    anchors.rightMargin: 10
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    text: "check"
-                                                    opacity: themeRow.selected ? 1 : 0
-                                                    color: Theme.accent
-                                                    font.family: Theme.iconFont
-                                                    font.pixelSize: Theme.iconSize
-                                                    font.variableAxes: Theme.iconAxes
-
-                                                    Behavior on opacity {
-                                                        NumberAnimation {
-                                                            duration: 120
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            MouseArea {
-                                                id: themeMouse
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: Theme.set(themeRow.modelData)
-                                            }
-                                        }
-                                    }
-                                }
-                                // between the two
-                                Rectangle {
-                                    width: 1
-                                    height: Math.max(themeList.height, picker.height)
-                                    color: Theme.pill
-                                }
-                                WallpaperPicker {
-                                    id: picker
-                                }
-                            }
+                            icon: "settings"
+                            iconColor: Settings.open ? Theme.accent : Theme.text
+                            tip: "Settings"
+                            tipBelow: true
+                            onClicked: Settings.toggle()
                         }
 
                         Widget {
@@ -4996,7 +4705,7 @@ in
                                                     anchors.left: parent.left
                                                     anchors.right: dismiss.left
                                                     anchors.rightMargin: 8
-                                                    text: (card.modelData.appName || "Notification") + (isNaN(card.arrivedAt) ? "" : "  ·  " + Qt.formatDateTime(card.arrivedAt, "h:mm AP"))
+                                                    text: (card.modelData.appName || "Notification") + (isNaN(card.arrivedAt) ? "" : "  ·  " + Settings.time(card.arrivedAt))
                                                     elide: Text.ElideRight
                                                     color: card.isUnread ? Theme.accent : Theme.text
                                                     opacity: card.isUnread ? 1 : 0.6
@@ -6639,6 +6348,2638 @@ in
     }
   '';
 
+  # Everything the Settings window changes (SettingsWindow.qml), kept in
+  # ~/.local/state/quickshell/settings.json. The numbers below are what you get until
+  # you change something (and what "Reset" goes back to). The rest of the shell reads
+  # these: Settings.v.barHeight and so on.
+  xdg.configFile."quickshell/Settings.qml".text = ''
+    pragma Singleton
+
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+
+    Singleton {
+        id: root
+
+        // ── the window ──
+        property bool open: false
+        property string page: "appearance"
+        function show(p) {
+            if (p)
+                page = p;
+            open = true;
+        }
+        function toggle() {
+            // the click on the bar's gear that closed it (click-off) isn't also one
+            // that opens it again
+            if (!open && Date.now() - dismissedAt < 400)
+                return;
+            open = !open;
+        }
+        // closed by clicking outside it (SettingsWindow.qml)
+        property double dismissedAt: 0
+        function dismiss() {
+            dismissedAt = Date.now();
+            open = false;
+        }
+        // "dock" / "workspaces": that dock stays out while its Settings page is open,
+        // so you see what you change
+        property string peek: ""
+
+        // ── the settings ──
+        readonly property var defaults: ({
+                // the bar
+                barHeight: 38,
+                moduleHeight: 26,        // the pills and buttons on it
+                barCurve: true,          // curves under its two ends
+                radius: 8,               // roundness of pills, rows, buttons (and the bar's curves)
+                spacing: 8,              // between the things on the bar
+                textSize: 12.5,
+                iconSize: 16,
+                glassOpacity: 0.8,       // 1 = solid, 0 = clear (bar, popups, docks)
+                popupCurve: 14,          // where a widget's popup melts into the bar
+                popupCorner: 14,         // a popup's bottom corners
+                animScale: 1.0,          // popups, docks: 0.5 = twice as fast
+                // the workspaces dock (left edge)
+                wsDock: true,
+                wsCell: 44,              // a workspace's row
+                wsIconSize: 22,
+                wsMaxIcons: 4,
+                wsPadding: 10,
+                wsCurve: 14,
+                wsCorner: 14,
+                wsHideDelay: 500,
+                // the dock (bottom edge)
+                dock: true,
+                dockIconSize: 36,
+                dockSlotPad: 12,         // room around each icon
+                dockPadding: 8,
+                dockCurve: 14,
+                dockCorner: 14,
+                dockHideDelay: 500,
+                dockStayUp: false,       // never hides
+                dockTray: true,          // the tray icons on its right
+                dockPreviewDelay: 500,   // pointing at an app until its windows show
+                // notifications
+                dnd: false,              // do not disturb: no popups, no sounds (critical ones still come)
+                toastSeconds: 10,
+                toastMax: 4,
+                notifSounds: true,
+                uiSounds: true,          // every other sound the shell makes (Sounds.qml)
+                // the clock
+                clock24: false
+            })
+
+        // the settings themselves: Settings.v.barHeight, ... (writable)
+        readonly property alias v: adapter
+
+        // put some back to how they started; [] = all of them
+        function reset(keys) {
+            for (const k of (keys.length > 0 ? keys : Object.keys(defaults)))
+                adapter[k] = defaults[k];
+        }
+        function isDefault(keys) {
+            return keys.every(k => adapter[k] === defaults[k]);
+        }
+
+        FileView {
+            id: file
+            path: Quickshell.env("HOME") + "/.local/state/quickshell/settings.json"
+            blockLoading: true          // the first frame already has your sizes
+            printErrors: false          // no file yet is fine: the defaults
+            watchChanges: true
+            onFileChanged: reload()
+            // saved a moment after the last change (not on every step of a slider)
+            onAdapterUpdated: saveSoon.restart()
+
+            JsonAdapter {
+                id: adapter
+                property int barHeight: root.defaults.barHeight
+                property int moduleHeight: root.defaults.moduleHeight
+                property bool barCurve: root.defaults.barCurve
+                property int radius: root.defaults.radius
+                property int spacing: root.defaults.spacing
+                property real textSize: root.defaults.textSize
+                property int iconSize: root.defaults.iconSize
+                property real glassOpacity: root.defaults.glassOpacity
+                property int popupCurve: root.defaults.popupCurve
+                property int popupCorner: root.defaults.popupCorner
+                property real animScale: root.defaults.animScale
+                property bool wsDock: root.defaults.wsDock
+                property int wsCell: root.defaults.wsCell
+                property int wsIconSize: root.defaults.wsIconSize
+                property int wsMaxIcons: root.defaults.wsMaxIcons
+                property int wsPadding: root.defaults.wsPadding
+                property int wsCurve: root.defaults.wsCurve
+                property int wsCorner: root.defaults.wsCorner
+                property int wsHideDelay: root.defaults.wsHideDelay
+                property bool dock: root.defaults.dock
+                property int dockIconSize: root.defaults.dockIconSize
+                property int dockSlotPad: root.defaults.dockSlotPad
+                property int dockPadding: root.defaults.dockPadding
+                property int dockCurve: root.defaults.dockCurve
+                property int dockCorner: root.defaults.dockCorner
+                property int dockHideDelay: root.defaults.dockHideDelay
+                property bool dockStayUp: root.defaults.dockStayUp
+                property bool dockTray: root.defaults.dockTray
+                property int dockPreviewDelay: root.defaults.dockPreviewDelay
+                property bool dnd: root.defaults.dnd
+                property int toastSeconds: root.defaults.toastSeconds
+                property int toastMax: root.defaults.toastMax
+                property bool notifSounds: root.defaults.notifSounds
+                property bool uiSounds: root.defaults.uiSounds
+                property bool clock24: root.defaults.clock24
+            }
+        }
+        Timer {
+            id: saveSoon
+            interval: 400
+            onTriggered: file.writeAdapter()
+        }
+
+        // a time of day in the format you picked (12 or 24 hours)
+        function time(d) {
+            return Qt.formatDateTime(d, adapter.clock24 ? "HH:mm" : "h:mm AP");
+        }
+        // the same, with a leading zero on 12-hour times (the bar's clock)
+        function clockTime(d) {
+            return Qt.formatDateTime(d, adapter.clock24 ? "HH:mm" : "hh:mm AP");
+        }
+        // animation times in ms, scaled by animScale
+        function ms(t) {
+            return Math.round(t * adapter.animScale);
+        }
+    }
+  '';
+
+  # ── The Settings window ── (SettingsWindow.qml and its pages, Set*.qml)
+  xdg.configFile."quickshell/SettingsWindow.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+    import Quickshell
+    import Quickshell.Hyprland
+
+    // ── Settings ──
+    // The shell's settings app: a normal window (floating, centered: its window rule in
+    // the Hyprland config), opened from the gear on the bar or Super + I. Pages down the
+    // left; each is its own file (SetAppearance.qml, SetBar.qml, ...), built from the
+    // pieces in SetSection / SetRow / SetSlider / SetSwitch / SetChoice / SetButton.
+    // Changes apply as you make them and are kept (Settings.qml). Esc closes it, and so does
+    // clicking anywhere outside it.
+    FloatingWindow {
+        id: win
+
+        title: "Settings"
+        implicitWidth: 980
+        implicitHeight: 680
+        minimumSize: Qt.size(760, 480)
+        color: Theme.bg
+        onClosed: Settings.open = false
+
+        // Click-off-to-close, like the bar's popups (Widget.qml): Hyprland's focus grab keeps
+        // the keyboard on this window, and a click anywhere outside it ends the grab and
+        // closes it. (Hyprland spends that click on ending the grab: it doesn't reach what
+        // you clicked.)
+        HyprlandFocusGrab {
+            active: true
+            windows: [win]
+            onCleared: Settings.dismiss()
+        }
+
+        readonly property var pages: [
+            {
+                id: "appearance",
+                label: "Appearance",
+                icon: "palette",
+                caption: "Colors, wallpaper, and how see-through and quick things are."
+            },
+            {
+                id: "bar",
+                label: "Bar",
+                icon: "toolbar",
+                caption: "The bar at the top, and the popups that drop out of it."
+            },
+            {
+                id: "docks",
+                label: "Docks",
+                icon: "dock_to_bottom",
+                caption: "The dock on the bottom edge of the screen, and the workspaces dock on the left. The one you're looking at stays out while you're here, so you can see what you change."
+            },
+            {
+                id: "sound",
+                label: "Sound",
+                icon: "volume_up",
+                caption: "Speakers, microphones, and how loud each app is."
+            },
+            {
+                id: "bluetooth",
+                label: "Bluetooth",
+                icon: "bluetooth",
+                caption: "Your devices, and new ones nearby (it looks for them while this page is open)."
+            },
+            {
+                id: "notifications",
+                label: "Notifications",
+                icon: "notifications",
+                caption: "Popups, do not disturb, and the shell's sounds."
+            },
+            {
+                id: "general",
+                label: "Clock & weather",
+                icon: "schedule",
+                caption: "How times and the weather read."
+            },
+            {
+                id: "about",
+                label: "About",
+                icon: "info",
+                caption: "This computer, and the shell."
+            }
+        ]
+        // ("dock" and "workspaces" are the two halves of Docks)
+        readonly property string pageId: Settings.page === "dock" || Settings.page === "workspaces" ? "docks" : Settings.page
+        readonly property var page: pages.find(p => p.id === pageId) ?? pages[0]
+        onPageChanged: flick.contentY = 0
+
+        Item {
+            anchors.fill: parent
+            focus: true
+            Keys.onEscapePressed: Settings.open = false
+
+            // ── the pages ──
+            Rectangle {
+                id: side
+                width: 232
+                height: parent.height
+                color: Theme.c.surface
+
+                Column {
+                    x: 12
+                    y: 18
+                    width: parent.width - 24
+                    spacing: 2
+
+                    Text {
+                        leftPadding: 10
+                        bottomPadding: 14
+                        text: "Settings"
+                        color: Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: 20
+                        font.weight: 800
+                        font.letterSpacing: Theme.letterSpacing
+                    }
+
+                    Repeater {
+                        model: win.pages
+
+                        Rectangle {
+                            id: tab
+                            required property var modelData
+                            readonly property bool selected: win.page.id === modelData.id
+
+                            width: parent.width
+                            height: 38
+                            radius: 10
+                            color: selected ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18) : tabMouse.containsMouse ? Theme.pill : "transparent"
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 120
+                                }
+                            }
+
+                            Row {
+                                x: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 12
+                                scale: tabMouse.pressed ? 0.94 : 1
+
+                                Behavior on scale {
+                                    NumberAnimation {
+                                        duration: 120
+                                    }
+                                }
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: tab.modelData.icon
+                                    color: tab.selected ? Theme.accent : Theme.text
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: 19
+                                    font.variableAxes: ({
+                                            "FILL": tab.selected ? 1 : 0,
+                                            "wght": 500,
+                                            "opsz": 24,
+                                            "GRAD": 0
+                                        })
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: tab.modelData.label
+                                    color: tab.selected ? Theme.accent : Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: 13
+                                    font.weight: tab.selected ? 700 : 500
+                                    font.letterSpacing: Theme.letterSpacing
+                                }
+                            }
+                            MouseArea {
+                                id: tabMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: Settings.page = tab.modelData.id
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── the page that's open ──
+            Item {
+                anchors {
+                    left: side.right
+                    right: parent.right
+                    top: parent.top
+                    bottom: parent.bottom
+                }
+
+                Column {
+                    id: header
+                    x: 32
+                    y: 24
+                    width: parent.width - 64
+                    spacing: 4
+
+                    Text {
+                        text: win.page.label
+                        color: Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: 24
+                        font.weight: 800
+                        font.letterSpacing: Theme.letterSpacing
+                    }
+                    Text {
+                        width: parent.width
+                        wrapMode: Text.Wrap
+                        text: win.page.caption
+                        color: Theme.text
+                        opacity: 0.6
+                        font.family: Theme.font
+                        font.pixelSize: 13
+                    }
+                }
+
+                Flickable {
+                    id: flick
+                    anchors {
+                        top: header.bottom
+                        topMargin: 18
+                        left: parent.left
+                        right: parent.right
+                        bottom: parent.bottom
+                    }
+                    contentWidth: width
+                    contentHeight: loader.height + 40
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ThinScrollBar {}
+
+                    Loader {
+                        id: loader
+                        x: 32
+                        width: flick.width - 64
+                        sourceComponent: ({
+                                appearance: appearancePage,
+                                bar: barPage,
+                                docks: docksPage,
+                                sound: soundPage,
+                                bluetooth: bluetoothPage,
+                                notifications: notificationsPage,
+                                general: generalPage,
+                                about: aboutPage
+                            })[win.page.id]
+                    }
+                }
+            }
+        }
+
+        Component {
+            id: appearancePage
+            SetAppearance {}
+        }
+        Component {
+            id: barPage
+            SetBar {}
+        }
+        Component {
+            id: docksPage
+            SetDocks {}
+        }
+        Component {
+            id: soundPage
+            SetSound {}
+        }
+        Component {
+            id: bluetoothPage
+            SetBluetooth {}
+        }
+        Component {
+            id: notificationsPage
+            SetNotifications {}
+        }
+        Component {
+            id: generalPage
+            SetGeneral {}
+        }
+        Component {
+            id: aboutPage
+            SetAbout {}
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetSection.qml".text = ''
+    import QtQuick
+
+    // A block on a Settings page: a title (with buttons on its right, `actions`), a line
+    // about it, and a card with its rows (SetRow) in it.
+    Column {
+        id: root
+
+        property string title: ""
+        property string caption: ""
+        default property alias rows: card.data
+        property alias actions: actionsRow.data
+
+        width: parent ? parent.width : 600
+        spacing: 8
+
+        Item {
+            width: parent.width
+            height: Math.max(titleText.implicitHeight, actionsRow.implicitHeight)
+            visible: root.title !== ""
+
+            Text {
+                id: titleText
+                anchors.left: parent.left
+                anchors.leftMargin: 4
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.title
+                color: Theme.text
+                font.family: Theme.font
+                font.pixelSize: 15
+                font.weight: 700
+                font.letterSpacing: Theme.letterSpacing
+            }
+            Row {
+                id: actionsRow
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 6
+            }
+        }
+        Text {
+            visible: root.caption !== ""
+            width: parent.width
+            leftPadding: 4
+            rightPadding: 4
+            wrapMode: Text.Wrap
+            text: root.caption
+            color: Theme.text
+            opacity: 0.6
+            font.family: Theme.font
+            font.pixelSize: 12
+        }
+        Rectangle {
+            width: parent.width
+            height: card.implicitHeight
+            radius: 12
+            color: Qt.rgba(Theme.pillSolid.r, Theme.pillSolid.g, Theme.pillSolid.b, 0.45)
+            border.width: 1
+            border.color: Qt.rgba(Theme.pillSolid.r, Theme.pillSolid.g, Theme.pillSolid.b, 0.9)
+            visible: card.children.length > 0
+
+            Column {
+                id: card
+                width: parent.width
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetRow.qml".text = ''
+    import QtQuick
+
+    // One setting: its name and a line about it on the left, the control on the right.
+    // stacked: true puts the control under the text, full width (lists, chips, pictures).
+    Item {
+        id: row
+
+        property string label: ""
+        property string description: ""
+        property bool stacked: false
+        default property alias control: slot.data
+
+        width: parent ? parent.width : 600
+        implicitHeight: row.stacked ? texts.implicitHeight + slot.height + 36 : Math.max(texts.implicitHeight, slot.height) + 26
+        opacity: enabled ? 1 : 0.4
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 150
+            }
+        }
+
+        // the line between rows
+        Rectangle {
+            visible: row.y > 0
+            x: 16
+            width: parent.width - 32
+            height: 1
+            color: Theme.pill
+        }
+
+        Column {
+            id: texts
+            x: 16
+            y: row.stacked ? 14 : (row.height - height) / 2
+            width: row.stacked ? row.width - 32 : row.width - slot.width - 56
+            spacing: 3
+
+            Text {
+                width: parent.width
+                visible: text !== ""
+                text: row.label
+                elide: Text.ElideRight
+                color: Theme.text
+                font.family: Theme.font
+                font.pixelSize: 13
+                font.weight: 600
+                font.letterSpacing: Theme.letterSpacing
+            }
+            Text {
+                width: parent.width
+                visible: text !== ""
+                text: row.description
+                wrapMode: Text.Wrap
+                color: Theme.text
+                opacity: 0.55
+                font.family: Theme.font
+                font.pixelSize: 12
+            }
+        }
+        Item {
+            id: slot
+            x: row.stacked ? 16 : row.width - width - 16
+            y: row.stacked ? texts.y + texts.height + 10 : (row.height - height) / 2
+            width: row.stacked ? row.width - 32 : childrenRect.width
+            height: childrenRect.height
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetSwitch.qml".text = ''
+    import QtQuick
+
+    // An on / off switch. It doesn't flip itself: `toggled` says what was asked for, and
+    // `checked` follows the setting.
+    Item {
+        id: sw
+
+        property bool checked: false
+        signal toggled(bool on)
+
+        implicitWidth: 44
+        implicitHeight: 24
+
+        Rectangle {
+            anchors.fill: parent
+            radius: height / 2
+            color: sw.checked ? Theme.accent : swMouse.containsMouse ? Theme.pillSolid : Theme.pill
+            border.width: 1
+            border.color: sw.checked ? Theme.accent : Theme.pillSolid
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: 150
+                }
+            }
+
+            Rectangle {
+                x: sw.checked ? parent.width - width - 3 : 3
+                y: 3
+                width: parent.height - 6
+                height: width
+                radius: width / 2
+                color: sw.checked ? Theme.bg : Theme.text
+                scale: swMouse.pressed ? 0.85 : 1
+
+                Behavior on x {
+                    NumberAnimation {
+                        duration: 180
+                        easing.type: Easing.OutCubic
+                    }
+                }
+                Behavior on scale {
+                    NumberAnimation {
+                        duration: 120
+                    }
+                }
+            }
+        }
+        MouseArea {
+            id: swMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: sw.toggled(!sw.checked)
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetSlider.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+
+    // A slider with its value written beside it.
+    //   value        the setting (the slider follows it)
+    //   moved(v)     while you drag; with live: false only when you let go (for things
+    //                that take a moment to apply, like making colors from the wallpaper)
+    //   factor, decimals, suffix   how the number reads (0.8 → "80%": factor 100, suffix "%")
+    Row {
+        id: root
+
+        property real from: 0
+        property real to: 100
+        property real stepSize: 1
+        property real value: 0
+        property real factor: 1
+        property int decimals: 0
+        property string suffix: ""
+        property bool live: true
+        property color tint: Theme.accent
+        property int sliderWidth: 220
+        readonly property bool pressed: slider.pressed
+        readonly property real shown: slider.value
+
+        signal moved(real value)
+
+        spacing: 10
+
+        HSlider {
+            id: slider
+            anchors.verticalCenter: parent.verticalCenter
+            width: root.sliderWidth
+            from: root.from
+            to: root.to
+            stepSize: root.stepSize
+            snapMode: Slider.SnapAlways
+            value: root.value
+            tint: root.tint
+            onMoved: if (root.live)
+                root.moved(value)
+            onPressedChanged: if (!pressed && !root.live && value !== root.value)
+                root.moved(value)
+        }
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            width: 58
+            horizontalAlignment: Text.AlignRight
+            text: (slider.value * root.factor).toFixed(root.decimals) + root.suffix
+            color: Theme.text
+            font.family: Theme.font
+            font.pixelSize: 13
+            font.weight: 600
+            font.features: {
+                "tnum": 1
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetChoice.qml".text = ''
+    import QtQuick
+
+    // One of a few: a row of chips (Chip.qml), the picked one filled in.
+    //   options: [{ id, label }]   current: the picked id   picked(id): one was clicked
+    Flow {
+        id: root
+
+        property var options: []
+        property var current
+        property color tint: Theme.accent
+        signal picked(var id)
+
+        spacing: 6
+
+        Repeater {
+            model: root.options
+
+            Chip {
+                required property var modelData
+                label: modelData.label
+                tint: root.tint
+                selected: root.current === modelData.id
+                onClicked: root.picked(modelData.id)
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetButton.qml".text = ''
+    import QtQuick
+
+    // A rounded button with an icon and/or a label. accent: filled with the accent color.
+    Rectangle {
+        id: btn
+
+        property string text: ""
+        property string icon: ""
+        property bool accent: false
+        property color tint: Theme.accent
+        signal clicked
+
+        implicitWidth: content.implicitWidth + (text !== "" ? 26 : 14)
+        implicitHeight: 30
+        radius: height / 2
+        color: accent ? (btnMouse.containsMouse ? Qt.lighter(tint, 1.1) : tint) : btnMouse.containsMouse ? Theme.pillSolid : Theme.pill
+        opacity: enabled ? 1 : 0.4
+        scale: btnMouse.pressed ? 0.92 : 1
+
+        Behavior on color {
+            ColorAnimation {
+                duration: 120
+            }
+        }
+        Behavior on scale {
+            NumberAnimation {
+                duration: 120
+                easing.type: Easing.OutCubic
+            }
+        }
+
+        Row {
+            id: content
+            anchors.centerIn: parent
+            spacing: 6
+
+            Text {
+                visible: btn.icon !== ""
+                anchors.verticalCenter: parent.verticalCenter
+                text: btn.icon
+                color: btn.accent ? Theme.bg : Theme.text
+                font.family: Theme.iconFont
+                font.pixelSize: 16
+                font.variableAxes: Theme.iconAxes
+            }
+            Text {
+                visible: btn.text !== ""
+                anchors.verticalCenter: parent.verticalCenter
+                text: btn.text
+                color: btn.accent ? Theme.bg : Theme.text
+                font.family: Theme.font
+                font.pixelSize: 13
+                font.weight: 700
+            }
+        }
+        MouseArea {
+            id: btnMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            enabled: btn.enabled
+            cursorShape: Qt.PointingHandCursor
+            onClicked: btn.clicked()
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetAppearance.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Widgets
+
+    // Settings → Appearance: the themes (and the wallpaper one), the wallpaper, glass and speed
+    Column {
+        id: page
+        spacing: 26
+
+        readonly property bool wallTheme: Theme.current === "matugen"
+        readonly property var schemes: [
+            {
+                id: "scheme-tonal-spot",
+                label: "Tonal spot"
+            },
+            {
+                id: "scheme-vibrant",
+                label: "Vibrant"
+            },
+            {
+                id: "scheme-expressive",
+                label: "Expressive"
+            },
+            {
+                id: "scheme-content",
+                label: "Content"
+            },
+            {
+                id: "scheme-fidelity",
+                label: "Fidelity"
+            },
+            {
+                id: "scheme-rainbow",
+                label: "Rainbow"
+            },
+            {
+                id: "scheme-fruit-salad",
+                label: "Fruit salad"
+            },
+            {
+                id: "scheme-neutral",
+                label: "Neutral"
+            },
+            {
+                id: "scheme-monochrome",
+                label: "Monochrome"
+            }
+        ]
+        readonly property var schemeNotes: ({
+                "scheme-tonal-spot": "Calm: the wallpaper's color, toned down. Material You's default.",
+                "scheme-vibrant": "The wallpaper's color, turned up.",
+                "scheme-expressive": "Playful: shifts the colors away from the wallpaper's.",
+                "scheme-content": "Stays close to the wallpaper's actual colors.",
+                "scheme-fidelity": "The closest to the wallpaper's color, as bright as it is.",
+                "scheme-rainbow": "Colorful accents, gray backgrounds.",
+                "scheme-fruit-salad": "Bold, mixed colors.",
+                "scheme-neutral": "Nearly gray, with a hint of the wallpaper.",
+                "scheme-monochrome": "Black, white and grays."
+            })
+
+        // ── the themes ──
+        SetSection {
+            id: themesSection
+            title: "Theme"
+            caption: "Colors for the whole desktop: the shell, your terminal, GTK and Qt apps, the cursor, the login and lock screens. \"From wallpaper\" makes its colors from the wallpaper you pick (matugen)."
+
+            Item {
+                width: parent.width
+                height: grid.height + 32
+
+                Grid {
+                    id: grid
+                    x: 16
+                    y: 16
+                    readonly property int cols: Math.max(2, Math.floor((parent.width - 32 + 12) / 200))
+                    readonly property real cardW: (parent.width - 32 - (cols - 1) * 12) / cols
+                    columns: cols
+                    spacing: 12
+
+                    Repeater {
+                        model: Theme.order.concat(["matugen"])
+
+                        Item {
+                            id: card
+                            required property string modelData
+                            readonly property var info: Theme.info(modelData)
+                            readonly property var colors: info.colors
+                            readonly property bool selected: Theme.current === modelData
+                            readonly property bool isWall: modelData === "matugen"
+
+                            width: grid.cardW
+                            height: preview.height + 46
+
+                            // a little desktop in the theme's colors: its bar, a window, its colors
+                            ClippingRectangle {
+                                id: preview
+                                width: parent.width
+                                height: Math.round(width * 0.5)
+                                radius: 10
+                                color: card.colors.bg
+                                scale: cardMouse.pressed ? 0.96 : cardMouse.containsMouse ? 1.02 : 1
+
+                                Behavior on scale {
+                                    NumberAnimation {
+                                        duration: 140
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+
+                                // the wallpaper theme: the wallpaper itself, under its colors
+                                Image {
+                                    visible: card.isWall
+                                    anchors.fill: parent
+                                    source: card.isWall && Theme.wallpaper !== "" ? "file://" + Theme.wallpaper : ""
+                                    sourceSize: Qt.size(400, 200)
+                                    fillMode: Image.PreserveAspectCrop
+                                    asynchronous: true
+                                    opacity: 0.85
+                                }
+                                // the bar
+                                Rectangle {
+                                    width: parent.width
+                                    height: 12
+                                    color: card.colors.bg
+                                    opacity: card.isWall ? 0.85 : 1
+                                    Row {
+                                        x: 6
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 3
+                                        Repeater {
+                                            model: 3
+                                            Rectangle {
+                                                width: 14
+                                                height: 6
+                                                radius: 3
+                                                color: card.colors.overlay
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 6
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 18
+                                        height: 6
+                                        radius: 3
+                                        color: card.colors.accent
+                                    }
+                                }
+                                // a window
+                                Rectangle {
+                                    x: 10
+                                    y: 20
+                                    width: parent.width * 0.55
+                                    height: parent.height - 30
+                                    radius: 6
+                                    color: card.colors.surface
+                                    border.width: 1
+                                    border.color: card.colors.accent
+                                    Column {
+                                        x: 8
+                                        y: 8
+                                        spacing: 5
+                                        Rectangle {
+                                            width: 40
+                                            height: 5
+                                            radius: 2.5
+                                            color: card.colors.fg
+                                        }
+                                        Rectangle {
+                                            width: 60
+                                            height: 5
+                                            radius: 2.5
+                                            color: card.colors.subtle
+                                            opacity: 0.7
+                                        }
+                                        Rectangle {
+                                            width: 30
+                                            height: 5
+                                            radius: 2.5
+                                            color: card.colors.subtle
+                                            opacity: 0.7
+                                        }
+                                    }
+                                }
+                                // its colors
+                                Grid {
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 10
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: 10
+                                    columns: 3
+                                    spacing: 4
+                                    Repeater {
+                                        model: ["red", "yellow", "green", "cyan", "blue", "magenta"]
+                                        Rectangle {
+                                            required property string modelData
+                                            width: 10
+                                            height: 10
+                                            radius: 5
+                                            color: card.colors[modelData]
+                                        }
+                                    }
+                                }
+                                // its outline, over everything in it (accent: the one that's on)
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: parent.radius
+                                    color: "transparent"
+                                    border.width: card.selected ? 2 : 1
+                                    border.color: card.selected ? Theme.accent : Theme.pill
+                                }
+                                // making the colors (matugen takes a moment)
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: Qt.rgba(0, 0, 0, 0.35)
+                                    visible: card.selected && Theme.busy
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "progress_activity"
+                                        color: "white"
+                                        font.family: Theme.iconFont
+                                        font.pixelSize: 26
+                                        font.variableAxes: Theme.iconAxes
+                                        RotationAnimation on rotation {
+                                            running: parent.visible
+                                            from: 0
+                                            to: 360
+                                            duration: 900
+                                            loops: Animation.Infinite
+                                        }
+                                    }
+                                }
+                            }
+                            Row {
+                                y: preview.height + 8
+                                width: parent.width
+                                spacing: 6
+                                Column {
+                                    width: parent.width - check.width - 6
+                                    Text {
+                                        width: parent.width
+                                        elide: Text.ElideRight
+                                        text: card.info.name
+                                        color: card.selected ? Theme.accent : Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: 13
+                                        font.weight: card.selected ? 700 : 600
+                                        font.letterSpacing: Theme.letterSpacing
+                                    }
+                                    Text {
+                                        width: parent.width
+                                        elide: Text.ElideRight
+                                        text: card.info.variant
+                                        color: Theme.text
+                                        opacity: 0.55
+                                        font.family: Theme.font
+                                        font.pixelSize: 12
+                                    }
+                                }
+                                Text {
+                                    id: check
+                                    text: "check_circle"
+                                    visible: card.selected
+                                    color: Theme.accent
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: 18
+                                    font.variableAxes: ({
+                                            "FILL": 1,
+                                            "wght": 600,
+                                            "opsz": 20,
+                                            "GRAD": 0
+                                        })
+                                }
+                            }
+                            MouseArea {
+                                id: cardMouse
+                                anchors.fill: preview
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: Theme.set(card.modelData)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── how the wallpaper theme makes its colors ──
+        SetSection {
+            visible: page.wallTheme
+            title: "From wallpaper"
+            caption: Theme.busy ? "Making the colors..." : "matugen picks out the wallpaper's main colors and builds a Material You palette around one of them. Pick a different wallpaper below and the colors follow."
+
+            SetRow {
+                label: "Built around"
+                description: Theme.matugenSources.length > 1 ? "The wallpaper's main colors, the one there's most of first." : "The wallpaper's main color (it only has the one)."
+                Row {
+                    spacing: 8
+                    Repeater {
+                        model: Theme.matugenSources
+                        Rectangle {
+                            id: swatch
+                            required property string modelData
+                            required property int index
+                            readonly property bool picked: Math.min(Theme.matugenIndex, Theme.matugenSources.length - 1) === index
+                            width: 30
+                            height: 30
+                            radius: 15
+                            color: modelData
+                            border.width: picked ? 3 : 1
+                            border.color: picked ? Theme.text : Theme.pill
+                            scale: swatchMouse.pressed ? 0.85 : swatchMouse.containsMouse ? 1.1 : 1
+                            Behavior on scale {
+                                NumberAnimation {
+                                    duration: 120
+                                }
+                            }
+                            MouseArea {
+                                id: swatchMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: if (!swatch.picked)
+                                    Theme.setMatugen("index", swatch.index)
+                            }
+                        }
+                    }
+                }
+            }
+            SetRow {
+                stacked: true
+                label: "Style"
+                description: page.schemeNotes[Theme.matugenScheme] || ""
+                SetChoice {
+                    width: parent.width
+                    options: page.schemes
+                    current: Theme.matugenScheme
+                    onPicked: s => Theme.setMatugen("scheme", s)
+                }
+            }
+            SetRow {
+                label: "Contrast"
+                description: "Between text and what it's on. 0 is Material You's own."
+                SetSlider {
+                    from: -1
+                    to: 1
+                    stepSize: 0.1
+                    decimals: 1
+                    live: false
+                    value: Theme.matugenContrast
+                    onMoved: v => Theme.setMatugen("contrast", v.toFixed(1))
+                }
+            }
+        }
+
+        // ── the wallpaper ──
+        SetSection {
+            title: "Wallpaper"
+            actions: [
+                SetButton {
+                    visible: picker.count > 1
+                    icon: "shuffle"
+                    text: "Random"
+                    onClicked: picker.shuffle()
+                },
+                SetButton {
+                    icon: "folder_open"
+                    text: "Open folder"
+                    onClicked: picker.openFolder()
+                }
+            ]
+            caption: page.wallTheme ? "Any of your wallpapers, from any theme's folder. The colors are made from the one you pick." : "The pictures in this theme's folder, ~/Pictures/Wallpapers/" + Theme.current + "/. Each theme remembers its own."
+
+            SetRow {
+                stacked: true
+                visible: page.wallTheme
+                // the wallpaper theme can use any theme's folder
+                SetChoice {
+                    id: folders
+                    width: parent.width
+                    property string folder: "matugen"
+                    options: ["matugen"].concat(Theme.order).map(id => ({
+                                id: id,
+                                label: id === "matugen" ? "Its own folder" : Theme.info(id).name
+                            }))
+                    current: folder
+                    onPicked: f => folder = f
+                }
+            }
+            Item {
+                width: parent.width
+                height: picker.height + 30
+
+                WallpaperPicker {
+                    id: picker
+                    x: 16
+                    y: page.wallTheme ? 2 : 16
+                    showHeader: false
+                    folder: page.wallTheme ? folders.folder : Theme.current
+                    columns: Math.max(2, Math.floor((page.width - 32 + 6) / 126))
+                    maxRows: 3.5
+                }
+            }
+        }
+
+        // ── glass and speed ──
+        SetSection {
+            title: "Glass and motion"
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(["glassOpacity", "animScale"])
+                onClicked: Settings.reset(["glassOpacity", "animScale"])
+            }
+
+            SetRow {
+                label: "Solid"
+                description: "How solid the bar, its popups, the docks and the notifications are; what's behind shows through blurred."
+                SetSlider {
+                    from: 0.3
+                    to: 1
+                    stepSize: 0.05
+                    factor: 100
+                    value: Settings.v.glassOpacity
+                    suffix: "%"
+                    onMoved: v => Settings.v.glassOpacity = v
+                }
+            }
+            SetRow {
+                label: "Animations"
+                description: "How long popups and the docks take to open and close. Lower is quicker."
+                SetSlider {
+                    from: 0.25
+                    to: 2
+                    stepSize: 0.05
+                    decimals: 2
+                    value: Settings.v.animScale
+                    suffix: "×"
+                    onMoved: v => Settings.v.animScale = v
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetBar.qml".text = ''
+    import QtQuick
+
+    // Settings → Bar
+    Column {
+        id: page
+        spacing: 26
+
+        readonly property var sizeKeys: ["barHeight", "moduleHeight", "textSize", "iconSize", "spacing"]
+        readonly property var shapeKeys: ["radius", "barCurve", "popupCurve", "popupCorner"]
+
+        SetSection {
+            title: "Size"
+            caption: "Text and icon sizes are for the bar's popups too."
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(page.sizeKeys)
+                onClicked: Settings.reset(page.sizeKeys)
+            }
+
+            SetRow {
+                label: "Height"
+                description: "How tall the bar is. Windows keep out of this much of the screen."
+                SetSlider {
+                    from: 24
+                    to: 64
+                    value: Settings.v.barHeight
+                    suffix: " px"
+                    onMoved: v => {
+                        Settings.v.barHeight = v;
+                        // the buttons have to fit in it
+                        if (Settings.v.moduleHeight > v - 4)
+                            Settings.v.moduleHeight = v - 4;
+                    }
+                }
+            }
+            SetRow {
+                label: "Buttons"
+                description: "The pills and buttons on the bar."
+                SetSlider {
+                    from: 16
+                    to: Settings.v.barHeight - 4
+                    value: Settings.v.moduleHeight
+                    suffix: " px"
+                    onMoved: v => Settings.v.moduleHeight = v
+                }
+            }
+            SetRow {
+                label: "Text"
+                SetSlider {
+                    from: 9
+                    to: 18
+                    stepSize: 0.5
+                    decimals: 1
+                    value: Settings.v.textSize
+                    suffix: " px"
+                    onMoved: v => Settings.v.textSize = v
+                }
+            }
+            SetRow {
+                label: "Icons"
+                SetSlider {
+                    from: 10
+                    to: 28
+                    value: Settings.v.iconSize
+                    suffix: " px"
+                    onMoved: v => Settings.v.iconSize = v
+                }
+            }
+            SetRow {
+                label: "Spacing"
+                description: "Between the things on the bar."
+                SetSlider {
+                    from: 0
+                    to: 24
+                    value: Settings.v.spacing
+                    suffix: " px"
+                    onMoved: v => Settings.v.spacing = v
+                }
+            }
+        }
+
+        SetSection {
+            title: "Shape"
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(page.shapeKeys)
+                onClicked: Settings.reset(page.shapeKeys)
+            }
+
+            SetRow {
+                label: "Roundness"
+                description: "Of the pills, buttons and rows everywhere in the shell, and the curves under the bar's ends."
+                SetSlider {
+                    from: 0
+                    to: 20
+                    value: Settings.v.radius
+                    suffix: " px"
+                    onMoved: v => Settings.v.radius = v
+                }
+            }
+            SetRow {
+                label: "Curved ends"
+                description: "The bar curves down into the screen's corners at both ends. Off: a straight bar."
+                SetSwitch {
+                    checked: Settings.v.barCurve
+                    onToggled: on => Settings.v.barCurve = on
+                }
+            }
+            SetRow {
+                label: "Popup curves"
+                description: "Where a widget's popup melts into the bar."
+                SetSlider {
+                    from: 0
+                    to: 32
+                    value: Settings.v.popupCurve
+                    suffix: " px"
+                    onMoved: v => Settings.v.popupCurve = v
+                }
+            }
+            SetRow {
+                label: "Popup corners"
+                description: "The bottom corners of a widget's popup."
+                SetSlider {
+                    from: 0
+                    to: 32
+                    value: Settings.v.popupCorner
+                    suffix: " px"
+                    onMoved: v => Settings.v.popupCorner = v
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetWorkspaces.qml".text = ''
+    import QtQuick
+
+    // Settings → Workspaces dock
+    Column {
+        id: page
+        spacing: 26
+
+        // keep it out on the screen while this page is open (WorkspaceDock.qml)
+        Component.onCompleted: Settings.peek = "workspaces"
+        Component.onDestruction: if (Settings.peek === "workspaces")
+            Settings.peek = ""
+
+        readonly property var keys: ["wsCell", "wsIconSize", "wsMaxIcons", "wsPadding", "wsCurve", "wsCorner", "wsHideDelay"]
+
+        SetSection {
+            SetRow {
+                label: "Workspaces dock"
+                description: "Push the mouse against the left edge of the screen and your workspaces slide out. Off: no dock there (Super + Shift + Up / Down still switch)."
+                SetSwitch {
+                    checked: Settings.v.wsDock
+                    onToggled: on => Settings.v.wsDock = on
+                }
+            }
+        }
+
+        SetSection {
+            title: "Size and shape"
+            enabled: Settings.v.wsDock
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(page.keys)
+                onClicked: Settings.reset(page.keys)
+            }
+
+            SetRow {
+                label: "Rows"
+                description: "How tall each workspace is (and its number's square)."
+                SetSlider {
+                    from: 28
+                    to: 72
+                    value: Settings.v.wsCell
+                    suffix: " px"
+                    onMoved: v => Settings.v.wsCell = v
+                }
+            }
+            SetRow {
+                label: "App icons"
+                SetSlider {
+                    from: 12
+                    to: 40
+                    value: Settings.v.wsIconSize
+                    suffix: " px"
+                    onMoved: v => Settings.v.wsIconSize = v
+                }
+            }
+            SetRow {
+                label: "Apps per workspace"
+                description: "Icons shown beside a workspace; past that it says \"+N\"."
+                SetSlider {
+                    from: 1
+                    to: 8
+                    value: Settings.v.wsMaxIcons
+                    onMoved: v => Settings.v.wsMaxIcons = v
+                }
+            }
+            SetRow {
+                label: "Padding"
+                SetSlider {
+                    from: 0
+                    to: 24
+                    value: Settings.v.wsPadding
+                    suffix: " px"
+                    onMoved: v => Settings.v.wsPadding = v
+                }
+            }
+            SetRow {
+                label: "Curves"
+                description: "Where it melts into the edge of the screen."
+                SetSlider {
+                    from: 0
+                    to: 32
+                    value: Settings.v.wsCurve
+                    suffix: " px"
+                    onMoved: v => Settings.v.wsCurve = v
+                }
+            }
+            SetRow {
+                label: "Corners"
+                SetSlider {
+                    from: 0
+                    to: 32
+                    value: Settings.v.wsCorner
+                    suffix: " px"
+                    onMoved: v => Settings.v.wsCorner = v
+                }
+            }
+            SetRow {
+                label: "Hides after"
+                description: "Once the mouse leaves it."
+                SetSlider {
+                    from: 0
+                    to: 2000
+                    stepSize: 50
+                    factor: 0.001
+                    decimals: 2
+                    value: Settings.v.wsHideDelay
+                    suffix: " s"
+                    onMoved: v => Settings.v.wsHideDelay = v
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetDock.qml".text = ''
+    import QtQuick
+
+    // Settings → Dock
+    Column {
+        id: page
+        spacing: 26
+
+        // keep it up on the screen while this page is open (Dock.qml)
+        Component.onCompleted: Settings.peek = "dock"
+        Component.onDestruction: if (Settings.peek === "dock")
+            Settings.peek = ""
+
+        readonly property var sizeKeys: ["dockIconSize", "dockSlotPad", "dockPadding", "dockCurve", "dockCorner"]
+        readonly property var timeKeys: ["dockHideDelay", "dockPreviewDelay"]
+
+        SetSection {
+            SetRow {
+                label: "Dock"
+                description: "Push the mouse against the bottom edge of the screen and it comes up."
+                SetSwitch {
+                    checked: Settings.v.dock
+                    onToggled: on => Settings.v.dock = on
+                }
+            }
+            SetRow {
+                enabled: Settings.v.dock
+                label: "Always up"
+                description: "Never hides. It sits over your windows (they don't make room for it)."
+                SetSwitch {
+                    checked: Settings.v.dockStayUp
+                    onToggled: on => Settings.v.dockStayUp = on
+                }
+            }
+            SetRow {
+                enabled: Settings.v.dock
+                label: "Tray"
+                description: "The icons apps put up (Discord, Steam...), on the dock's right."
+                SetSwitch {
+                    checked: Settings.v.dockTray
+                    onToggled: on => Settings.v.dockTray = on
+                }
+            }
+        }
+
+        SetSection {
+            title: "Size and shape"
+            enabled: Settings.v.dock
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(page.sizeKeys)
+                onClicked: Settings.reset(page.sizeKeys)
+            }
+
+            SetRow {
+                label: "Icons"
+                SetSlider {
+                    from: 20
+                    to: 72
+                    value: Settings.v.dockIconSize
+                    suffix: " px"
+                    onMoved: v => Settings.v.dockIconSize = v
+                }
+            }
+            SetRow {
+                label: "Room around icons"
+                SetSlider {
+                    from: 2
+                    to: 28
+                    value: Settings.v.dockSlotPad
+                    suffix: " px"
+                    onMoved: v => Settings.v.dockSlotPad = v
+                }
+            }
+            SetRow {
+                label: "Padding"
+                SetSlider {
+                    from: 0
+                    to: 24
+                    value: Settings.v.dockPadding
+                    suffix: " px"
+                    onMoved: v => Settings.v.dockPadding = v
+                }
+            }
+            SetRow {
+                label: "Curves"
+                description: "Where it melts into the bottom of the screen."
+                SetSlider {
+                    from: 0
+                    to: 32
+                    value: Settings.v.dockCurve
+                    suffix: " px"
+                    onMoved: v => Settings.v.dockCurve = v
+                }
+            }
+            SetRow {
+                label: "Corners"
+                SetSlider {
+                    from: 0
+                    to: 32
+                    value: Settings.v.dockCorner
+                    suffix: " px"
+                    onMoved: v => Settings.v.dockCorner = v
+                }
+            }
+        }
+
+        SetSection {
+            title: "Timing"
+            enabled: Settings.v.dock
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(page.timeKeys)
+                onClicked: Settings.reset(page.timeKeys)
+            }
+
+            SetRow {
+                enabled: !Settings.v.dockStayUp
+                label: "Hides after"
+                description: "Once the mouse leaves it."
+                SetSlider {
+                    from: 0
+                    to: 2000
+                    stepSize: 50
+                    factor: 0.001
+                    decimals: 2
+                    value: Settings.v.dockHideDelay
+                    suffix: " s"
+                    onMoved: v => Settings.v.dockHideDelay = v
+                }
+            }
+            SetRow {
+                label: "Window previews after"
+                description: "How long you point at an open app before its windows show."
+                SetSlider {
+                    from: 100
+                    to: 2000
+                    stepSize: 50
+                    factor: 0.001
+                    decimals: 2
+                    value: Settings.v.dockPreviewDelay
+                    suffix: " s"
+                    onMoved: v => Settings.v.dockPreviewDelay = v
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetDocks.qml".text = ''
+    import QtQuick
+
+    // Settings → Docks: the dock (bottom edge) and the workspaces dock (left edge), one at a
+    // time (SetDock.qml, SetWorkspaces.qml). The one you're looking at stays out on the
+    // screen while you're here.
+    Column {
+        id: page
+        spacing: 22
+
+        // which one: `quickshell ipc call settings show workspaces` opens straight to that one
+        property string which: Settings.page === "workspaces" ? "workspaces" : "dock"
+
+        SetChoice {
+            width: parent.width
+            options: [
+                {
+                    id: "dock",
+                    label: "Dock (bottom)"
+                },
+                {
+                    id: "workspaces",
+                    label: "Workspaces dock (left)"
+                }
+            ]
+            current: page.which
+            onPicked: w => page.which = w
+        }
+        Loader {
+            width: parent.width
+            sourceComponent: page.which === "workspaces" ? workspacesPart : dockPart
+        }
+        Component {
+            id: dockPart
+            SetDock {}
+        }
+        Component {
+            id: workspacesPart
+            SetWorkspaces {}
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetSound.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Services.Pipewire
+
+    // Settings → Sound: a small pavucontrol. Speakers and microphones (pick the default,
+    // how loud, mute), and every app playing or recording (how loud, mute, and for one
+    // that plays, which output it goes to).
+    Column {
+        id: page
+        spacing: 26
+
+        readonly property var nodes: Pipewire.nodes.values.filter(n => n.audio)
+        readonly property var outputs: nodes.filter(n => n.isSink && !n.isStream)
+        readonly property var inputs: nodes.filter(n => !n.isSink && !n.isStream)
+        readonly property var playing: nodes.filter(n => n.isStream && !n.isSink)
+        readonly property var recording: nodes.filter(n => n.isStream && n.isSink)
+
+        // their volumes and mutes only come in for nodes something is tracking
+        PwObjectTracker {
+            objects: page.nodes
+        }
+
+        // Send an app to another output. WirePlumber moves a stream when its "target.object"
+        // is set in PipeWire's default metadata (the same thing pavucontrol's choice does,
+        // through pipewire-pulse).
+        function route(stream, sink) {
+            Quickshell.execDetached(["${pkgs.pipewire}/bin/pw-metadata", "-n", "default", String(stream.id), "target.object", sink.name]);
+        }
+
+        component Empty: Text {
+            width: parent ? parent.width : 400
+            padding: 16
+            color: Theme.text
+            opacity: 0.55
+            font.family: Theme.font
+            font.pixelSize: 13
+        }
+
+        SetSection {
+            title: "Output"
+            caption: "Click one to make it the default: where sound goes."
+            Repeater {
+                model: page.outputs
+                SetAudioRow {
+                    required property var modelData
+                    node: modelData
+                    isDefault: Pipewire.defaultAudioSink === modelData
+                    onMakeDefault: Pipewire.preferredDefaultAudioSink = modelData
+                }
+            }
+            Empty {
+                visible: page.outputs.length === 0
+                text: Pipewire.ready ? "No speakers or headphones found." : "Waiting for PipeWire..."
+            }
+        }
+
+        SetSection {
+            title: "Input"
+            caption: "Click one to make it the default microphone."
+            Repeater {
+                model: page.inputs
+                SetAudioRow {
+                    required property var modelData
+                    node: modelData
+                    isDefault: Pipewire.defaultAudioSource === modelData
+                    onMakeDefault: Pipewire.preferredDefaultAudioSource = modelData
+                }
+            }
+            Empty {
+                visible: page.inputs.length === 0
+                text: "No microphones found."
+            }
+        }
+
+        SetSection {
+            title: "Apps playing"
+            Repeater {
+                model: page.playing
+                SetAudioRow {
+                    required property var modelData
+                    node: modelData
+                    app: true
+                    outputs: page.outputs
+                    onRoute: sink => page.route(modelData, sink)
+                }
+            }
+            Empty {
+                visible: page.playing.length === 0
+                text: "Nothing's playing."
+            }
+        }
+
+        SetSection {
+            title: "Apps recording"
+            visible: page.recording.length > 0
+            Repeater {
+                model: page.recording
+                SetAudioRow {
+                    required property var modelData
+                    node: modelData
+                    app: true
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetAudioRow.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Services.Pipewire
+
+    // One row on Settings → Sound: a speaker / microphone, or an app playing or recording.
+    //   device: click the row to make it the default; `isDefault` shows the dot
+    //   app: its icon and what it's playing; for one that plays, the outputs it can go to
+    Item {
+        id: row
+
+        property var node: null
+        property bool app: false
+        property bool isDefault: false
+        property var outputs: []          // an app that plays: where it can go
+        signal makeDefault
+        signal route(var sink)
+
+        readonly property var audio: node ? node.audio : null
+        readonly property var props: node ? node.properties : ({})
+        readonly property string title: !node ? "" : app ? (props["application.name"] || node.description || node.name) : (node.description || node.nickname || node.name)
+        readonly property string subtitle: !node ? "" : app ? (props["media.name"] || "") : isDefault ? "Default" : ""
+
+        // an app's links: which output it's on now
+        PwNodeLinkTracker {
+            id: links
+            node: row.app ? row.node : null
+        }
+        readonly property var currentOutput: {
+            const groups = links.linkGroups;
+            for (let i = 0; i < groups.length; i++)
+                if (groups[i].source === row.node)
+                    return groups[i].target;
+            return null;
+        }
+
+        width: parent ? parent.width : 500
+        implicitHeight: col.implicitHeight + 24
+
+        Rectangle {
+            visible: row.y > 0
+            x: 16
+            width: parent.width - 32
+            height: 1
+            color: Theme.pill
+        }
+
+        Column {
+            id: col
+            x: 16
+            y: 12
+            width: parent.width - 32
+            spacing: 8
+
+            // ── the name ──
+            Item {
+                width: parent.width
+                height: 30
+
+                // a device: the default's dot; an app: its icon
+                Rectangle {
+                    id: radio
+                    visible: !row.app
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 18
+                    height: 18
+                    radius: 9
+                    color: "transparent"
+                    border.width: 2
+                    border.color: row.isDefault ? Theme.accent : Theme.pillIcon
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 8
+                        height: 8
+                        radius: 4
+                        color: Theme.accent
+                        visible: row.isDefault
+                    }
+                }
+                AppIcon {
+                    id: appIcon
+                    visible: row.app
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 24
+                    height: 24
+                    icon: row.props["application.icon-name"] || (row.props["application.process.binary"] || "").toLowerCase()
+                    name: row.title
+                }
+                Column {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 34
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    Text {
+                        width: parent.width
+                        elide: Text.ElideRight
+                        text: row.title
+                        color: row.isDefault ? Theme.accent : Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: 13
+                        font.weight: row.isDefault ? 700 : 600
+                        font.letterSpacing: Theme.letterSpacing
+                    }
+                    Text {
+                        width: parent.width
+                        visible: text !== ""
+                        elide: Text.ElideRight
+                        text: row.subtitle
+                        color: Theme.text
+                        opacity: 0.55
+                        font.family: Theme.font
+                        font.pixelSize: 12
+                    }
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: !row.app && !row.isDefault
+                    hoverEnabled: true
+                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: row.makeDefault()
+                }
+            }
+
+            // ── how loud ──
+            Row {
+                width: parent.width
+                spacing: 8
+                visible: !!row.audio
+
+                IconButton {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 28
+                    height: 28
+                    // speakers and apps playing: a speaker; microphones and apps recording: a mic
+                    readonly property bool plays: row.app ? !row.node.isSink : row.node.isSink
+                    icon: !row.audio ? "" : row.audio.muted ? (plays ? "volume_off" : "mic_off") : (plays ? "volume_up" : "mic")
+                    iconColor: row.audio && row.audio.muted ? Theme.red : Theme.text
+                    tip: row.audio && row.audio.muted ? "Unmute" : "Mute"
+                    onClicked: row.audio.muted = !row.audio.muted
+                }
+                HSlider {
+                    id: vol
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - 28 - 52 - 16
+                    from: 0
+                    to: 1
+                    stepSize: 0.01
+                    value: row.audio ? row.audio.volume : 0
+                    tint: row.audio && row.audio.muted ? Theme.pillIcon : Theme.accent
+                    onMoved: {
+                        row.audio.volume = value;
+                        if (row.audio.muted && value > 0)
+                            row.audio.muted = false;
+                    }
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 52
+                    horizontalAlignment: Text.AlignRight
+                    text: Math.round(vol.value * 100) + "%"
+                    color: Theme.text
+                    opacity: row.audio && row.audio.muted ? 0.5 : 1
+                    font.family: Theme.font
+                    font.pixelSize: 13
+                    font.weight: 600
+                }
+            }
+
+            // ── an app: where it plays ──
+            Flow {
+                width: parent.width
+                spacing: 6
+                visible: row.app && row.outputs.length > 1
+
+                Repeater {
+                    model: row.app ? row.outputs : []
+                    Chip {
+                        required property var modelData
+                        label: modelData.description || modelData.nickname || modelData.name
+                        selected: row.currentOutput === modelData
+                        onClicked: if (!selected)
+                            row.route(modelData)
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetBluetooth.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Bluetooth
+    import Quickshell.Services.Pipewire
+
+    // Settings → Bluetooth (it was the Bluetooth widget on the bar). Your devices and new
+    // ones nearby; click one for Connect / Disconnect and Forget.
+    Column {
+        id: bt
+        spacing: 26
+
+        readonly property var adapter: Bluetooth.defaultAdapter
+        readonly property bool powered: !!adapter && adapter.enabled
+
+        // ── When is a device really connected? ──
+        // BlueZ (and so Quickshell) flips a device to "Connected" as soon as the
+        // Bluetooth link is up. For headphones and speakers the audio part (A2DP)
+        // takes a few more seconds; that's the gap you saw with the AirPods.
+        // WirePlumber only creates the device's audio node once audio is ready,
+        // and names it after the MAC address with _ for : (from WirePlumber's
+        // monitor-utils.lua: "bluez_output.C0_1E_7C_D0_1C_84.1", or
+        // "bluez_input..." for a mic). So an audio device counts as connected
+        // once a node with its address exists.
+        // Mice, keyboards, phones etc. have no node; for them BlueZ's
+        // "Connected" is used as-is.
+        readonly property var btNodeNames: Pipewire.nodes.values.filter(n => n.name.startsWith("bluez_")).map(n => n.name)
+        function isAudio(device) {
+            return device.icon.startsWith("audio");
+        }
+        function hasNode(device) {
+            const key = device.address.replace(/:/g, "_");
+            return btNodeNames.some(n => n.includes(key));
+        }
+        // Safety net: if an audio device is linked but never gets a node (say
+        // it only connected for something other than audio), call it connected
+        // after 15 s anyway instead of saying "Connecting..." forever.
+        property var linkedSince: ({})  // address -> time BlueZ said Connected
+        property double now: Date.now()
+        function ready(device) {
+            if (device.state !== BluetoothDeviceState.Connected)
+                return false;
+            if (!isAudio(device) || hasNode(device))
+                return true;
+            const t = linkedSince[device.address];
+            return t !== undefined && now - t >= 15000;
+        }
+        Timer {
+            // only ticks while an audio device is linked but has no node yet
+            running: Bluetooth.devices.values.some(d => d.connected && bt.isAudio(d) && !bt.hasNode(d))
+            interval: 1000
+            repeat: true
+            triggeredOnStart: true
+            onTriggered: {
+                bt.now = Date.now();
+                const next = {};
+                for (const d of Bluetooth.devices.values)
+                    if (d.connected)
+                        next[d.address] = bt.linkedSince[d.address] ?? bt.now;
+                bt.linkedSince = next; // reassign so bindings notice
+            }
+        }
+
+        // Devices that have a name (or that you've paired): connected first, then
+        // paired, then A to Z. Nameless ones are usually random nearby gadgets.
+        readonly property var all: Bluetooth.devices.values.filter(d => d.paired || d.deviceName !== "").sort((a, b) => (b.connected - a.connected) || (b.paired - a.paired) || a.name.localeCompare(b.name))
+        readonly property var mine: all.filter(d => d.paired)
+        readonly property var nearby: all.filter(d => !d.paired)
+
+        // The open drop-down is remembered here, not in the rows: the lists re-sort when a
+        // device connects, and rows can be rebuilt.
+        property var active: null       // the device whose drop-down is open
+        property var pairingDevice: null // a new device we're pairing, to connect once paired
+        property var failedDevice: null  // shows "Pairing failed" for a few seconds
+
+        function toggle(device) {
+            active = active === device ? null : device;
+        }
+        // Status shown next to each device.
+        function stateText(device) {
+            if (device.state === BluetoothDeviceState.Connected)
+                return ready(device) ? "Connected" : "Connecting...";
+            if (device.state === BluetoothDeviceState.Connecting)
+                return "Connecting...";
+            if (device.state === BluetoothDeviceState.Disconnecting)
+                return "Disconnecting...";
+            if (device.pairing)
+                return "Pairing...";
+            if (device === failedDevice)
+                return "Pairing failed";
+            return device.paired ? "Not connected" : "New";
+        }
+        function busy(device) {
+            return device.pairing || device.state === BluetoothDeviceState.Connecting || device.state === BluetoothDeviceState.Disconnecting;
+        }
+        function connectOrDisconnect(device) {
+            if (busy(device))
+                return;
+            if (device.connected) {
+                device.disconnect();
+            } else if (!device.paired) {
+                // never paired: pair first; the Connections below connects afterwards
+                device.trusted = true;      // lets it reconnect by itself next time
+                failedDevice = null;
+                pairingDevice = device;
+                device.pair();
+            } else {
+                device.connect();
+            }
+        }
+        // Material Symbols icon for the kind of device (BlueZ gives freedesktop icon names).
+        function glyph(device) {
+            const i = device.icon;
+            if (i.startsWith("audio-head"))
+                return "headphones";
+            if (i.startsWith("audio"))
+                return "speaker";
+            if (i === "input-mouse")
+                return "mouse";
+            if (i === "input-keyboard")
+                return "keyboard";
+            if (i === "input-gaming")
+                return "sports_esports";
+            if (i === "phone")
+                return "smartphone";
+            if (i === "computer")
+                return "computer";
+            return "bluetooth";
+        }
+
+        Connections {
+            target: bt.pairingDevice
+            function onPairedChanged() {
+                const device = bt.pairingDevice;
+                bt.pairingDevice = null;
+                pairCheck.stop();
+                if (device.paired && !device.connected)
+                    device.connect();
+            }
+            // The pairing attempt ended. If it isn't paired a moment later
+            // (BlueZ can report "paired" just after), it failed.
+            function onPairingChanged() {
+                if (!bt.pairingDevice.pairing && !bt.pairingDevice.paired)
+                    pairCheck.restart();
+            }
+        }
+        Timer {
+            id: pairCheck
+            interval: 1500
+            onTriggered: {
+                const device = bt.pairingDevice;
+                if (!device || device.paired)
+                    return;
+                bt.pairingDevice = null;
+                bt.failedDevice = device;
+                failedReset.restart();
+            }
+        }
+        // "Pairing failed" goes back to "New" after 4 s
+        Timer {
+            id: failedReset
+            interval: 4000
+            onTriggered: bt.failedDevice = null
+        }
+
+        // Look for nearby devices while this page is open (and Bluetooth is on).
+        Binding {
+            when: bt.powered
+            target: bt.adapter
+            property: "discovering"
+            value: true
+        }
+        Component.onDestruction: if (bt.powered)
+            bt.adapter.discovering = false
+
+        // ── on / off ──
+        SetSection {
+            SetRow {
+                label: "Bluetooth"
+                description: !bt.adapter ? "No Bluetooth adapter found." : bt.powered ? (bt.adapter.name || "On") : "Off"
+                enabled: !!bt.adapter
+                SetSwitch {
+                    checked: bt.powered
+                    onToggled: on => bt.adapter.enabled = on
+                }
+            }
+            SetRow {
+                enabled: bt.powered
+                label: "Visible to other devices"
+                description: "So a phone or another computer can find this one and pair with it."
+                SetSwitch {
+                    checked: !!bt.adapter && bt.adapter.discoverable
+                    onToggled: on => bt.adapter.discoverable = on
+                }
+            }
+        }
+
+        // ── the lists ──
+        component DeviceList: SetSection {
+            id: list
+            property var devices: []
+            property var page
+            visible: page.powered && devices.length > 0
+
+            Repeater {
+                model: ScriptModel {
+                    values: list.devices
+                }
+
+                Item {
+                    id: btRow
+                    required property var modelData
+                    readonly property var device: modelData
+                    readonly property var page: list.page
+                    readonly property bool expanded: page.active === device
+                    readonly property bool ready: page.ready(device)  // really connected
+
+                    width: parent ? parent.width : 500
+                    height: btHeader.height + btDrop.height
+                    clip: true
+                    // a device that shows up fades in instead of popping in
+                    NumberAnimation on opacity {
+                        from: 0
+                        to: 1
+                        duration: 200
+                    }
+
+                    Rectangle {
+                        visible: btRow.y > 0
+                        x: 16
+                        width: parent.width - 32
+                        height: 1
+                        color: Theme.pill
+                    }
+
+                    // the row itself: icon, name, status
+                    Item {
+                        id: btHeader
+                        width: parent.width
+                        height: 52
+
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: 4
+                            radius: 10
+                            color: btHeaderMouse.containsMouse || btRow.expanded ? Theme.pill : "transparent"
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 120
+                                }
+                            }
+                        }
+                        Text {
+                            id: btGlyph
+                            x: 18
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: btRow.page.glyph(btRow.device)
+                            color: btRow.ready ? Theme.accent : Theme.text
+                            font.family: Theme.iconFont
+                            font.pixelSize: 20
+                            font.variableAxes: Theme.iconAxes
+                        }
+                        Column {
+                            anchors {
+                                left: btGlyph.right
+                                right: parent.right
+                                leftMargin: 14
+                                rightMargin: 18
+                                verticalCenter: parent.verticalCenter
+                            }
+                            Text {
+                                width: parent.width
+                                text: btRow.device.name
+                                elide: Text.ElideRight
+                                color: btRow.ready ? Theme.accent : Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: 13
+                                font.weight: btRow.ready ? 700 : 600
+                                font.letterSpacing: Theme.letterSpacing
+                            }
+                            // status (and battery, when the device reports it)
+                            Text {
+                                width: parent.width
+                                elide: Text.ElideRight
+                                text: btRow.page.stateText(btRow.device) + (btRow.device.batteryAvailable ? "  ·  battery " + Math.round(btRow.device.battery * 100) + "%" : "")
+                                color: btRow.ready ? Theme.green : btRow.device === btRow.page.failedDevice ? Theme.red : btRow.device.connected ? Theme.yellow : Theme.text
+                                opacity: btRow.device.connected || btRow.device === btRow.page.failedDevice ? 1 : 0.55
+                                font.family: Theme.font
+                                font.pixelSize: 12
+                            }
+                        }
+                        MouseArea {
+                            id: btHeaderMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: btRow.page.toggle(btRow.device)
+                        }
+                    }
+
+                    // the drop-down: Connect / Disconnect, Forget; glides open
+                    Item {
+                        id: btDrop
+                        y: btHeader.height
+                        width: parent.width
+                        height: btRow.expanded ? btButtons.height + 14 : 0
+                        clip: true
+
+                        Behavior on height {
+                            NumberAnimation {
+                                duration: 300
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+
+                        Row {
+                            id: btButtons
+                            x: 52
+                            spacing: 8
+                            readonly property bool busy: btRow.page.busy(btRow.device)
+
+                            SetButton {
+                                accent: true
+                                tint: btRow.device.connected ? Theme.red : Theme.green
+                                enabled: !btButtons.busy
+                                icon: btRow.device.connected ? "link_off" : "link"
+                                // while it's working, show what it's doing instead
+                                text: btButtons.busy ? btRow.page.stateText(btRow.device) : btRow.device.connected ? "Disconnect" : btRow.device.paired ? "Connect" : "Pair and connect"
+                                onClicked: btRow.page.connectOrDisconnect(btRow.device)
+                            }
+                            SetButton {
+                                visible: btRow.device.paired
+                                icon: "delete"
+                                text: "Forget"
+                                onClicked: {
+                                    btRow.page.active = null;
+                                    btRow.device.forget();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        DeviceList {
+            title: "My devices"
+            page: bt
+            devices: bt.mine
+        }
+        DeviceList {
+            title: "Nearby"
+            caption: bt.adapter && bt.adapter.discovering ? "Looking for devices... Put the one you want in pairing mode." : ""
+            page: bt
+            devices: bt.nearby
+        }
+        Text {
+            visible: bt.powered && bt.all.length === 0
+            width: parent.width
+            leftPadding: 4
+            text: bt.adapter && bt.adapter.discovering ? "Looking for devices..." : "No devices found."
+            color: Theme.text
+            opacity: 0.55
+            font.family: Theme.font
+            font.pixelSize: 13
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetNotifications.qml".text = ''
+    import QtQuick
+
+    // Settings → Notifications
+    Column {
+        id: page
+        spacing: 26
+
+        SetSection {
+            SetRow {
+                label: "Do not disturb"
+                description: "No popups and no sounds. Notifications still go to the notification center, and critical ones (a battery about to run out...) still come through. Your timers and alarms still ring."
+                SetSwitch {
+                    checked: Settings.v.dnd
+                    onToggled: on => Settings.v.dnd = on
+                }
+            }
+        }
+
+        SetSection {
+            title: "Popups"
+            enabled: !Settings.v.dnd
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(["toastSeconds", "toastMax"])
+                onClicked: Settings.reset(["toastSeconds", "toastMax"])
+            }
+
+            SetRow {
+                label: "Stay up for"
+                description: "Pointing at one keeps it up while you read."
+                SetSlider {
+                    from: 2
+                    to: 30
+                    value: Settings.v.toastSeconds
+                    suffix: " s"
+                    onMoved: v => Settings.v.toastSeconds = v
+                }
+            }
+            SetRow {
+                label: "At once"
+                description: "The most popups on screen together; older ones make room."
+                SetSlider {
+                    from: 1
+                    to: 8
+                    value: Settings.v.toastMax
+                    onMoved: v => Settings.v.toastMax = v
+                }
+            }
+        }
+
+        SetSection {
+            title: "Sounds"
+            caption: "From KDE's Ocean sound theme."
+
+            SetRow {
+                label: "Sound effects"
+                description: "Every sound the shell makes: notifications, devices plugged in, the battery, logging in and out, timers."
+                SetSwitch {
+                    checked: Settings.v.uiSounds
+                    onToggled: on => Settings.v.uiSounds = on
+                }
+            }
+            SetRow {
+                enabled: Settings.v.uiSounds
+                label: "Notification sounds"
+                description: "The sound with each new notification."
+                Row {
+                    spacing: 10
+                    SetButton {
+                        anchors.verticalCenter: parent.verticalCenter
+                        icon: "play_arrow"
+                        text: "Try it"
+                        onClicked: Sounds.play("message-new-instant")
+                    }
+                    SetSwitch {
+                        anchors.verticalCenter: parent.verticalCenter
+                        checked: Settings.v.notifSounds
+                        onToggled: on => Settings.v.notifSounds = on
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetGeneral.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // Settings → Clock & weather
+    Column {
+        id: page
+        spacing: 26
+
+        SystemClock {
+            id: now
+            precision: SystemClock.Minutes
+        }
+
+        SetSection {
+            title: "Clock"
+
+            SetRow {
+                label: "24-hour time"
+                description: "Now: " + Settings.time(now.date) + ". The bar's clock, notifications, and your events' times."
+                SetSwitch {
+                    checked: Settings.v.clock24
+                    onToggled: on => Settings.v.clock24 = on
+                }
+            }
+        }
+
+        SetSection {
+            title: "Weather"
+
+            SetRow {
+                label: "Units"
+                description: WeatherData.fahrenheit ? "Fahrenheit, mph, inches, miles." : "Celsius, km/h, millimeters, kilometers."
+                SetChoice {
+                    width: 92
+                    options: [
+                        {
+                            id: false,
+                            label: "°C"
+                        },
+                        {
+                            id: true,
+                            label: "°F"
+                        }
+                    ]
+                    current: WeatherData.fahrenheit
+                    onPicked: f => WeatherData.setFahrenheit(f)
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetAbout.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+
+    // Settings → About: this computer, and buttons for the shell and Hyprland
+    Column {
+        id: page
+        spacing: 26
+
+        // key=value lines about the system, read once when the page opens
+        property var info: ({})
+        Process {
+            running: true
+            command: ["${aboutScript}"]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const o = {};
+                    for (const line of text.split("\n")) {
+                        const i = line.indexOf("=");
+                        if (i > 0)
+                            o[line.slice(0, i)] = line.slice(i + 1).trim();
+                    }
+                    page.info = o;
+                }
+            }
+        }
+        function uptime(s) {
+            const m = Math.floor(s / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
+            if (d > 0)
+                return d + (d === 1 ? " day, " : " days, ") + (h % 24) + " h";
+            if (h > 0)
+                return h + " h " + (m % 60) + " min";
+            return m + " min";
+        }
+
+        component Fact: SetRow {
+            id: fact
+            property string value: ""
+            visible: value !== ""
+            Text {
+                text: fact.value
+                color: Theme.text
+                opacity: 0.8
+                horizontalAlignment: Text.AlignRight
+                font.family: Theme.font
+                font.pixelSize: 13
+                font.weight: 600
+            }
+        }
+
+        SetSection {
+            title: "This computer"
+            Fact {
+                label: "Name"
+                value: page.info.host || ""
+            }
+            Fact {
+                label: "System"
+                value: page.info.os || ""
+            }
+            Fact {
+                label: "Kernel"
+                value: page.info.kernel || ""
+            }
+            Fact {
+                label: "Processor"
+                value: page.info.cpu || ""
+            }
+            Fact {
+                label: "Graphics"
+                value: page.info.gpu || ""
+            }
+            Fact {
+                label: "Memory"
+                value: page.info.mem ? (Number(page.info.mem) / 1048576).toFixed(1) + " GB" : ""
+            }
+            Fact {
+                label: "Up for"
+                value: page.info.uptime ? page.uptime(Number(page.info.uptime)) : ""
+            }
+        }
+
+        SetSection {
+            title: "The desktop"
+            Fact {
+                label: "Hyprland"
+                value: page.info.hyprland || ""
+            }
+            Fact {
+                label: "Theme"
+                value: Theme.info(Theme.current) ? Theme.info(Theme.current).name + " " + Theme.info(Theme.current).variant : Theme.current
+            }
+            SetRow {
+                label: "Window settings"
+                description: "Gaps, borders, animations, input... are Hyprland's own: HyprMod has them all, with a live preview."
+                SetButton {
+                    icon: "open_in_new"
+                    text: "Open HyprMod"
+                    onClicked: Quickshell.execDetached(["hyprmod"])
+                }
+            }
+            SetRow {
+                label: "Restart the shell"
+                description: "The bar, docks and notifications start over (this window closes). Your settings are kept."
+                SetButton {
+                    icon: "restart_alt"
+                    text: "Restart"
+                    onClicked: Quickshell.execDetached(["systemctl", "--user", "restart", "quickshell"])
+                }
+            }
+            SetRow {
+                label: "Settings file"
+                description: "~/.local/state/quickshell/settings.json. Delete it to start over from the defaults."
+                SetButton {
+                    icon: "restart_alt"
+                    text: "Reset everything"
+                    onClicked: Settings.reset([])
+                }
+            }
+        }
+    }
+  '';
+
   xdg.configFile."quickshell/Theme.qml".text = ''
     pragma Singleton
 
@@ -6661,7 +9002,111 @@ in
         readonly property string wallpaperDir: Quickshell.env("HOME") + "/Pictures/Wallpapers"
 
         property string current: defaultTheme
-        readonly property var c: (themes[current] || themes[defaultTheme]).colors
+        readonly property var c: current === "matugen" ? matugenColors : (themes[current] || themes[defaultTheme]).colors
+
+        // ── the wallpaper theme ("matugen", matugenTheme in home.nix) ──
+        // Not in `themes`: its colors are made from your wallpaper by the theme command,
+        // into ~/.local/state/theme/matugen/. Until it's been made once: the default's.
+        readonly property string matugenDir: Quickshell.env("HOME") + "/.local/state/theme/matugen"
+        property var matugenColors: themes[defaultTheme].colors
+        readonly property var matugenInfo: ({
+                name: "From wallpaper",
+                variant: "Matugen",
+                colors: matugenColors
+            })
+        // the picture's main colors, most to least of it (pick one: setMatugen("index", i))
+        property var matugenSources: []
+        // its settings: { scheme, index, contrast } (the theme command keeps them)
+        property var matugenOpts: ({})
+        readonly property string matugenScheme: matugenOpts.scheme || "scheme-tonal-spot"
+        readonly property int matugenIndex: matugenOpts.index ?? 0
+        readonly property real matugenContrast: matugenOpts.contrast ?? 0
+        FileView {
+            id: matColorsFile
+            path: theme.matugenDir + "/qs-colors.json"
+            blockLoading: true
+            watchChanges: true
+            printErrors: false
+            onFileChanged: reload()
+            onLoaded: {
+                try {
+                    theme.matugenColors = JSON.parse(text());
+                } catch (e) {}
+            }
+        }
+        FileView {
+            id: matSourcesFile
+            path: theme.matugenDir + "/sources"
+            watchChanges: true
+            printErrors: false
+            onFileChanged: reload()
+            onLoaded: theme.matugenSources = text().split("\n").filter(l => /^#[0-9a-fA-F]{6}/.test(l)).map(l => l.slice(0, 7))
+        }
+        FileView {
+            id: matOptsFile
+            path: Quickshell.env("HOME") + "/.local/state/theme/matugen.json"
+            watchChanges: true
+            printErrors: false
+            onFileChanged: reload()
+            onLoaded: {
+                try {
+                    theme.matugenOpts = JSON.parse(text());
+                } catch (e) {}
+            }
+        }
+        // the wallpaper that's on (the theme command writes its path here)
+        property string wallpaper: ""
+        FileView {
+            path: Quickshell.env("HOME") + "/.local/state/theme/wallpaper.path"
+            watchChanges: true
+            printErrors: false
+            onFileChanged: reload()
+            onLoaded: theme.wallpaper = text().trim()
+        }
+        // a theme's { name, variant, colors }, the wallpaper theme too
+        function info(id) {
+            return id === "matugen" ? matugenInfo : themes[id];
+        }
+        // change how the wallpaper theme makes its colors: "scheme", "index" or "contrast"
+        function setMatugen(key, value) {
+            const o = Object.assign({}, matugenOpts);
+            o[key] = value;
+            matugenOpts = o;          // shown right away; the command writes the file
+            run([themeCommand, "--matugen", key, String(value)]);
+        }
+
+        // The theme command, one at a time: the others wait their turn. One waiting that
+        // does the same thing as a newer one (another contrast while you drag, another
+        // theme) is dropped for it. `busy` while it works (matugen takes a moment).
+        readonly property bool busy: runner.running || queue.length > 0
+        property var queue: []
+        function run(args) {
+            const kind = a => a[1] === "--matugen" ? a.slice(1, 3).join(" ") : a[1] === "--wallpaper" ? "--wallpaper" : "switch";
+            queue = queue.filter(a => kind(a) !== kind(args)).concat([args]);
+            next();
+        }
+        function next() {
+            if (runner.running || queue.length === 0)
+                return;
+            runner.command = queue[0];
+            queue = queue.slice(1);
+            runner.running = true;
+        }
+        Process {
+            id: runner
+            stderr: StdioCollector {
+                onStreamFinished: if (text.trim() !== "")
+                    console.warn("theme:", text.trim())
+            }
+            onExited: {
+                // the first time the wallpaper theme is made its files are new, and a
+                // file that wasn't there may not be watched yet: read them again
+                matColorsFile.reload();
+                matSourcesFile.reload();
+                matOptsFile.reload();
+                theme.next();
+            }
+        }
         property int fade: 350
         // no fading while starting up (the saved theme is loaded right away instead)
         property bool ready: false
@@ -6669,10 +9114,10 @@ in
 
         // Switch to another theme: the bar right away, everything else through `theme`.
         function set(id) {
-            if (!themes[id] || id === current)
+            if ((!themes[id] && id !== "matugen") || id === current)
                 return;
             current = id;
-            Quickshell.execDetached([themeCommand, id]);
+            run([themeCommand, id]);
         }
 
         FileView {
@@ -6684,7 +9129,7 @@ in
             onFileChanged: reload()
             onLoaded: {
                 const id = text().trim();
-                if (theme.themes[id])
+                if (theme.themes[id] || id === "matugen")
                     theme.current = id;
             }
         }
@@ -6726,23 +9171,24 @@ in
         // with a little of what's behind showing through.
         // The bar and the widgets that drop out of it all use this one color, so an
         // open widget and the bar read as one piece.
-        property real glassOpacity: 0.8
+        // (Settings → Bar: this and the sizes below; Settings.qml has where they start)
+        readonly property real glassOpacity: Settings.v.glassOpacity
         readonly property color glass: Qt.rgba(bg.r, bg.g, bg.b, glassOpacity)
 
-        property int barHeight: 38
+        readonly property int barHeight: Settings.v.barHeight
         // the bar curves inward under both ends (Theme.radius big), like it wraps
         // around the top corners of the screen; false = a plain straight bar
-        property bool barCurve: true
-        property int moduleHeight: 26
-        property int spacing: 8
-        property int radius: 8
+        readonly property bool barCurve: Settings.v.barCurve
+        readonly property int moduleHeight: Settings.v.moduleHeight
+        readonly property int spacing: Settings.v.spacing
+        readonly property int radius: Settings.v.radius
 
         property string font: "SFMono Nerd Font"
-        property real textSize: 12.5
+        readonly property real textSize: Settings.v.textSize
         property real letterSpacing: -0.5
 
         property string iconFont: "Material Symbols Rounded"
-        property int iconSize: 16
+        readonly property int iconSize: Settings.v.iconSize
         property var iconAxes: ({
                 "FILL": 0,
                 "wght": 700,
@@ -6794,10 +9240,10 @@ in
         property int popupWidth: 0     // 0 = fit the content's width
         property int popupHeight: 0    // 0 = fit the content's height
         property int padding: 12       // space between the popup's edge and your content
-        property int curve: 14         // size of the two curves where the popup melts into the bar
-        property int cornerRadius: 14  // roundness of the popup's two bottom corners
-        property int duration: 320       // slide-down (open) time in ms, for an average-size popup
-        property int closeDuration: 260  // slide-up (close) time in ms; closing a bit faster feels snappier
+        property int curve: Settings.v.popupCurve   // size of the two curves where the popup melts into the bar
+        property int cornerRadius: Settings.v.popupCorner  // roundness of the popup's two bottom corners
+        property int duration: Settings.ms(320)       // slide-down (open) time in ms, for an average-size popup
+        property int closeDuration: Settings.ms(260)  // slide-up (close) time in ms; closing a bit faster feels snappier
         // The slides' speed curves: cubic béziers [x1, y1, x2, y2], like CSS's
         // cubic-bezier(). Opening is a soft ease-out: quick out of the bar, then a long
         // gentle settle. Closing is a light ease-in-out, so it's pulled back in smoothly
@@ -7294,7 +9740,7 @@ in
             if (hm === "")
                 return "All day";
             const t = hm.split(":").map(Number);
-            return Qt.formatTime(new Date(2000, 0, 1, t[0], t[1]), Qt.locale().timeFormat(Locale.ShortFormat));
+            return Settings.time(new Date(2000, 0, 1, t[0], t[1]));
         }
         // what you type for a timer's length -> ms, or 0 if it isn't one.
         // "5" = 5 minutes, "1:30" = 1 min 30 s, "1:00:00" = an hour, "1h 20m", "90s", "2.5"
@@ -8070,7 +10516,7 @@ in
             readonly property var tm: Planner.barTimer
             icon: tm ? "timer" : ev ? "event" : "schedule"
             iconColor: tm || ev ? Theme.accent : Theme.red
-            text: Qt.formatDateTime(root.now, "hh:mm AP") + (tm ? "  ·  " + Planner.fmtLeft(Planner.left(tm)) + (Planner.barTimerPaused ? " paused" : "") : ev ? "  ·  " + short(ev.title) + (ev.time !== "" ? " " + Planner.fmtTime(ev.time) : "") : "")
+            text: Settings.clockTime(root.now) + (tm ? "  ·  " + Planner.fmtLeft(Planner.left(tm)) + (Planner.barTimerPaused ? " paused" : "") : ev ? "  ·  " + short(ev.title) + (ev.time !== "" ? " " + Planner.fmtTime(ev.time) : "") : "")
         }
 
         Column {
@@ -8103,7 +10549,7 @@ in
             // ── time and date ──
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: Qt.formatDateTime(root.now, "hh:mm AP")
+                text: Settings.clockTime(root.now)
                 color: Theme.text
                 font.family: Theme.font
                 font.pixelSize: Theme.textSize * 2.4
@@ -9514,7 +11960,7 @@ in
     import Quickshell.Io
     import Quickshell.Widgets
 
-    // ── Wallpaper picker ── (the right half of the bar's theme popup, shell.qml)
+    // ── Wallpaper picker ── (Settings → Appearance, SetAppearance.qml)
     // Shows the pictures in ~/Pictures/Wallpapers/<theme>/ (the theme that's on). Click
     // one to make it the wallpaper. It's remembered for that theme: switch themes and
     // back and it's still the one. A theme you haven't picked one for uses the first
@@ -9526,7 +11972,13 @@ in
     Column {
         id: root
 
-        readonly property string dir: Theme.wallpaperDir + "/" + Theme.current
+        // which folder: the theme's own (Settings → Appearance lets the wallpaper theme
+        // look in the others' too)
+        property string folder: Theme.current
+        readonly property string dir: Theme.wallpaperDir + "/" + folder
+        property int columns: 3
+        property real maxRows: 3.5         // past this many rows it scrolls
+        property bool showHeader: true
         // the wallpaper now: the theme command writes its path here whenever it changes
         readonly property string current: picked !== "" ? picked : wallpaperFile.text().trim()
         // what you just clicked, shown right away until the command catches up
@@ -9535,10 +11987,25 @@ in
         function pick(path) {
             picked = path;
             pickedReset.restart();
-            Quickshell.execDetached([Theme.themeCommand, "--wallpaper", path]);
+            Theme.run([Theme.themeCommand, "--wallpaper", path]);
+        }
+        readonly property int count: shownDir === dir ? pictures.count : 0
+        // The folder is made first if it isn't there: FolderListModel shows the folder
+        // Quickshell runs in (your home folder) when it's given one that doesn't exist.
+        property string shownDir: ""
+        onDirChanged: mkdir.running = true
+        Process {
+            id: mkdir
+            running: true
+            command: ["mkdir", "-p", root.dir]
+            onExited: root.shownDir = root.dir
+        }
+        // the folder, in your file manager (made first if it isn't there yet)
+        function openFolder() {
+            Quickshell.execDetached(["sh", "-c", "mkdir -p \"$1\" && exec xdg-open \"$1\"", "sh", root.dir]);
         }
         function shuffle() {
-            if (pictures.count < 2)
+            if (root.count < 2)
                 return;
             let i;
             do
@@ -9549,7 +12016,7 @@ in
 
         Column {
             id: card
-            width: 3 * 120 + 2 * 6
+            width: root.columns * 120 + (root.columns - 1) * 6
             spacing: 8
 
             FileView {
@@ -9568,7 +12035,7 @@ in
 
             FolderListModel {
                 id: pictures
-                folder: "file://" + root.dir
+                folder: root.shownDir !== "" ? "file://" + root.shownDir : "file:///var/empty"
                 nameFilters: ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.bmp"]
                 caseSensitive: false
                 showDirs: false
@@ -9577,6 +12044,7 @@ in
 
             // ── title, and buttons ──
             Item {
+                visible: root.showHeader
                 width: parent.width
                 height: 26
                 Row {
@@ -9594,7 +12062,7 @@ in
                     }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: Theme.themes[Theme.current] ? Theme.themes[Theme.current].name : Theme.current
+                        text: Theme.info(root.folder) ? Theme.info(root.folder).name : root.folder
                         color: Theme.accent
                         font.family: Theme.font
                         font.pixelSize: Theme.textSize * 0.9
@@ -9605,7 +12073,7 @@ in
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     IconButton {
-                        visible: pictures.count > 1
+                        visible: root.count > 1
                         icon: "shuffle"            // a random other one
                         onClicked: root.shuffle()
                     }
@@ -9619,9 +12087,9 @@ in
             // ── the pictures ──
             GridView {
                 id: grid
-                visible: pictures.count > 0
+                visible: root.count > 0
                 width: parent.width + 6           // the last column's gap hangs off the edge
-                height: Math.min(Math.ceil(pictures.count / 3), 3.5) * cellHeight
+                height: Math.min(Math.ceil(root.count / root.columns), root.maxRows) * cellHeight
                 cellWidth: 126
                 cellHeight: 78
                 clip: true
@@ -9717,10 +12185,10 @@ in
 
             // ── nothing in the folder yet ──
             Text {
-                visible: pictures.count === 0
+                visible: root.count === 0 && root.shownDir === root.dir
                 width: parent.width
                 wrapMode: Text.Wrap
-                text: "No pictures in ~/Pictures/Wallpapers/" + Theme.current + "/ yet. Put some there (the folder button opens it) and they show up here."
+                text: "No pictures in ~/Pictures/Wallpapers/" + root.folder + "/ yet. Put some there (the folder button opens it) and they show up here."
                 color: Theme.text
                 opacity: 0.6
                 font.family: Theme.font
@@ -9935,6 +12403,21 @@ in
         function showsList(app) {
             return app.windows.length > 0;
         }
+        // a window's Hyprland address (hex, no "0x"), "" if Hyprland hasn't said yet
+        function addressOf(t) {
+            for (const h of Hyprland.toplevels.values)
+                if (h.wayland === t)
+                    return h.address;
+            return "";
+        }
+        // go to workspace `id` (made if it's not there), then open the app: its window
+        // opens on the workspace you're on, which is that one
+        function launchOn(key, id) {
+            if (!entryFor(key))
+                return;
+            Hyprland.dispatch('hl.dsp.focus({ workspace = "' + id + '" })');
+            launch(key);
+        }
         // back to the workspace you're on, focused
         function restore(t) {
             let h = null;
@@ -10060,10 +12543,12 @@ in
     //     click         open it; if it's open, go to its window (again: the next one)
     //     middle click  a new window
     //     right click   pin / unpin, new window, close
-    //     drag it       left or right to rearrange (an unpinned one gets pinned there)
+    //     drag it       left or right to rearrange (an unpinned one gets pinned there);
+    //                   onto a workspace in the workspaces dock (left edge) to open it there
     //     point at it   with a window open: after half a second the dock grows previews
     //                   of its windows above the icons (click one to go to it, or bring a
-    //                   minimized one back; x to close it; past two rows they scroll);
+    //                   minimized one back; x to close it; drag one onto a workspace in
+    //                   the workspaces dock to send it there; past two rows they scroll);
     //                   it shrinks back when the mouse leaves
     //   Tray (right): the icons apps put up.
     //     click = the app's action, middle click = its second action,
@@ -10083,13 +12568,16 @@ in
         // room for the dock to grow into (window previews or a menu above the icons)
         implicitHeight: 520
 
-        readonly property int iconSize: 36
-        readonly property int cell: 48           // an icon's slot
+        // (sizes: Settings → Dock)
+        readonly property int iconSize: Settings.v.dockIconSize
+        readonly property int cell: iconSize + Settings.v.dockSlotPad   // an icon's slot
 
         // ── showing and hiding ──
         property bool shown: false
-        // the mouse is on the dock or the bottom edge
-        readonly property bool held: edgeHover.hovered || panelHover.hovered
+        // a window card or an app icon being dragged out of the dock (WindowDrag.qml)
+        readonly property bool draggingOut: WindowDrag.active && WindowDrag.internal
+        // the mouse is on the dock or the bottom edge (or dragging something out of it)
+        readonly property bool held: edgeHover.hovered || panelHover.hovered || dock.draggingOut
         onHeldChanged: {
             if (held) {
                 hideDelay.stop();
@@ -10100,7 +12588,7 @@ in
         }
         Timer {
             id: hideDelay
-            interval: 500
+            interval: Settings.v.dockHideDelay
             onTriggered: {
                 dock.shown = false;
                 dock.closeExtras();
@@ -10138,6 +12626,12 @@ in
         property var menuApp: null      // the app whose menu is open
         property var trayItem: null     // the tray icon whose menu is open
         property var trayStack: []      // the menu, and submenus opened inside it
+        // a point in an item -> the whole desktop's coordinates (the dock's window sits
+        // at the bottom of its screen, the screen's full width)
+        function toDesktop(item, x, y) {
+            const p = item.mapToItem(dock.contentItem, x, y);
+            return Qt.point(dock.screen.x + p.x, dock.screen.y + dock.screen.height - dock.height + p.y);
+        }
         function closeExtras() {
             extra = "";
             listApp = null;
@@ -10175,7 +12669,7 @@ in
         // The window list goes a moment after the mouse leaves both the icon and the
         // list. (Menus stay until you pick something, click their icon again, or the
         // dock hides.)
-        readonly property bool listHeld: extra === "list" && (listHover.hovered || (listMouse !== null && listMouse.containsMouse))
+        readonly property bool listHeld: extra === "list" && (listHover.hovered || (listMouse !== null && listMouse.containsMouse) || dock.draggingOut)
         onListHeldChanged: if (!listHeld && extra === "list")
             listClose.restart()
         else
@@ -10219,7 +12713,10 @@ in
         // ── the dock ──
         DockPanel {
             id: panel
-            open: dock.shown
+            open: dock.shown || Settings.v.dockStayUp || Settings.peek === "dock"     // (Settings → Dock)
+            padding: Settings.v.dockPadding
+            curve: Settings.v.dockCurve
+            cornerRadius: Settings.v.dockCorner
             anchorX: dock.width / 2
             baseY: dock.height
             HoverHandler {
@@ -10321,10 +12818,43 @@ in
                                     HoverHandler {
                                         id: cardHover
                                     }
+                                    // click: go to it. Drag it onto a workspace in the workspaces
+                                    // dock (the left edge) to send it there (WindowDrag.qml).
                                     MouseArea {
+                                        id: cardMouse
                                         anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
+                                        cursorShape: pressed && moved ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+                                        preventStealing: true          // a drag, not scrolling the list
+                                        property point pressAt
+                                        property bool moved: false
+                                        onPressed: mouse => {
+                                            pressAt = Qt.point(mouse.x, mouse.y);
+                                            moved = false;
+                                        }
+                                        onPositionChanged: mouse => {
+                                            if (!pressed)
+                                                return;
+                                            if (!moved) {
+                                                if (Math.abs(mouse.x - pressAt.x) + Math.abs(mouse.y - pressAt.y) < 10)
+                                                    return;
+                                                moved = true;
+                                                WindowDrag.beginInternal({
+                                                    "kind": "window",
+                                                    "toplevel": card.modelData
+                                                });
+                                            }
+                                            const g = dock.toDesktop(cardMouse, mouse.x, mouse.y);
+                                            WindowDrag.moveTo(g.x, g.y);
+                                        }
+                                        onReleased: if (moved) {
+                                            if (WindowDrag.endInternal())
+                                                dock.closeExtras();
+                                        }
+                                        onCanceled: if (moved)
+                                            WindowDrag.endInternal()
                                         onClicked: {
+                                            if (moved)
+                                                return;      // that was a drag
                                             DockData.show(card.modelData);
                                             dock.closeExtras();
                                         }
@@ -10792,10 +13322,28 @@ in
                                         }
                                         dock.dragDx = dx;
                                         dock.updateDrag(app.modelData.pinned);
+                                        // also out of the dock: onto a workspace in the workspaces
+                                        // dock (the left edge) opens it there (WindowDrag.qml)
+                                        if (!WindowDrag.internal)
+                                            WindowDrag.beginInternal({
+                                                "kind": "app",
+                                                "key": app.modelData.key
+                                            });
+                                        const g = dock.toDesktop(appMouse, mouse.x, mouse.y);
+                                        WindowDrag.moveTo(g.x, g.y);
                                     }
-                                    onReleased: if (moved)
-                                        dock.dropDrag()
-                                    onCanceled: dock.endDrag()
+                                    onReleased: if (moved) {
+                                        // dropped on a workspace: opened there, the dock's order stays
+                                        if (WindowDrag.internal && WindowDrag.endInternal())
+                                            dock.endDrag();
+                                        else
+                                            dock.dropDrag();
+                                    }
+                                    onCanceled: {
+                                        if (WindowDrag.internal)
+                                            WindowDrag.endInternal();
+                                        dock.endDrag();
+                                    }
                                     onClicked: mouse => {
                                         if (moved)
                                             return;      // that was a drag, not a click
@@ -10813,7 +13361,7 @@ in
                                 // a window open: point at it for half a second for the previews
                                 // (pointing at another open app while they're up switches to it)
                                 Timer {
-                                    interval: 500
+                                    interval: Settings.v.dockPreviewDelay
                                     running: appMouse.containsMouse && !appMouse.pressed && dock.dragFrom < 0 && DockData.showsList(app.modelData) && (dock.extra === "" || (dock.extra === "list" && dock.listApp && dock.listApp.key !== app.modelData.key))
                                     onTriggered: dock.openList(app.modelData, appMouse)
                                 }
@@ -10860,7 +13408,7 @@ in
 
                     // ── the tray ──
                     Item {
-                        visible: SystemTray.items.values.length > 0
+                        visible: Settings.v.dockTray && SystemTray.items.values.length > 0
                         anchors.verticalCenter: parent.verticalCenter
                         width: 9
                         height: dock.cell - 16
@@ -10872,15 +13420,15 @@ in
                         }
                     }
                     Repeater {
-                        model: SystemTray.items
+                        model: Settings.v.dockTray ? SystemTray.items : []
 
                         Rectangle {
                             id: trayBtn
                             required property var modelData
                             readonly property bool menuOpen: dock.extra === "tray" && dock.trayItem === modelData
                             anchors.verticalCenter: parent.verticalCenter
-                            width: 34
-                            height: 34
+                            width: dock.cell - 14
+                            height: dock.cell - 14
                             radius: Theme.radius
                             color: menuOpen ? Theme.pill : trayMouse.containsMouse ? Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, 0.6) : "transparent"
                             scale: trayMouse.pressed ? 0.85 : 1
@@ -10892,9 +13440,9 @@ in
                             }
                             Image {
                                 anchors.centerIn: parent
-                                width: 18
-                                height: 18
-                                sourceSize: Qt.size(36, 36)
+                                width: Math.round(dock.iconSize / 2)
+                                height: Math.round(dock.iconSize / 2)
+                                sourceSize: Qt.size(2 * width, 2 * height)
                                 source: trayBtn.modelData.icon
                             }
                             MouseArea {
@@ -10949,8 +13497,8 @@ in
         property int padding: 8
         property int curve: 14          // the curves into the edge (Widget.qml: curve)
         property int cornerRadius: 14   // the two top corners (Widget.qml: cornerRadius)
-        property int duration: 320
-        property int closeDuration: 260
+        property int duration: Settings.ms(320)
+        property int closeDuration: Settings.ms(260)
         property var openCurve: [0.3, 0.6, 0.35, 1]
         property var closeCurve: [0.45, 0, 0.55, 1]
 
@@ -11128,8 +13676,8 @@ in
         property int padding: 10
         property int curve: 14          // the curves into the edge (Widget.qml: curve)
         property int cornerRadius: 14   // the two right corners (Widget.qml: cornerRadius)
-        property int duration: 320
-        property int closeDuration: 260
+        property int duration: Settings.ms(320)
+        property int closeDuration: Settings.ms(260)
         property var openCurve: [0.3, 0.6, 0.35, 1]
         property var closeCurve: [0.45, 0, 0.55, 1]
 
@@ -11365,8 +13913,15 @@ in
     // where it is. Push the window against the left edge and the workspaces dock comes
     // out (WorkspaceDock.qml); the workspace under the mouse lights up (Workspaces.qml);
     // let go there and the window goes to that workspace, and you go with it.
-    // (Only Super + drag: a drag an app starts itself, by its own title bar, doesn't go
-    // through Hyprland's binds.)
+    //
+    // The drags it follows:
+    //   - Super + drag (the binds in the Hyprland config)
+    //   - dragging a window by the app's own title bar (Firefox, GTK apps...): the
+    //     Hyprland config notices the window moving with the mouse and says so the same way
+    //   - from the bottom dock (Dock.qml): a window's preview card (the window goes there,
+    //     and you with it), or an app's icon (you go there and it opens there). Those
+    //     start in Quickshell, so the dock passes the mouse along itself (beginInternal,
+    //     moveTo, endInternal) instead of this asking Hyprland.
     Singleton {
         id: drag
 
@@ -11379,6 +13934,47 @@ in
         // (WorkspaceDock.qml sets them)
         property var target: null
         property var targetScreen: null
+
+        // a drag from the bottom dock: { kind: "window", toplevel } or { kind: "app", key }
+        property bool internal: false
+        property var payload: null
+        function beginInternal(p) {
+            drag.payload = p;
+            drag.internal = true;
+            drag.x = -100000;
+            drag.y = -100000;
+            drag.target = null;
+            drag.targetScreen = null;
+            drag.active = true;
+        }
+        // where the mouse is, on the whole desktop
+        function moveTo(gx, gy) {
+            drag.x = gx;
+            drag.y = gy;
+        }
+        // let go: true if it was dropped on a workspace (and acted on)
+        function endInternal() {
+            const ws = drag.target;
+            const p = drag.payload;
+            drag.active = false;
+            drag.internal = false;
+            drag.payload = null;
+            drag.target = null;
+            drag.targetScreen = null;
+            if (!ws || !p)
+                return false;
+            console.info("windowdrag: dock", p.kind, "onto", ws.name);
+            if (p.kind === "window") {
+                const a = DockData.addressOf(p.toplevel);
+                if (a === "")
+                    return false;
+                // the window goes there, and you go with it
+                Hyprland.dispatch('hl.dsp.window.move({ workspace = "' + ws.id + '", window = "address:0x' + a + '" })');
+            } else {
+                DockData.launchOn(p.key, ws.id);
+            }
+            return true;
+        }
 
         // Each drag has a name (the time and a count, from the bind). The two messages
         // are two separate commands, so a quick drag's "finish" can get here before its
@@ -11443,7 +14039,7 @@ in
         Timer {
             interval: 33
             repeat: true
-            running: drag.active
+            running: drag.active && !drag.internal     // the dock passes its own mouse along
             onTriggered: if (!cursor.running)
                 cursor.running = true
         }
@@ -11522,7 +14118,7 @@ in
         }
         Timer {
             id: hideDelay
-            interval: 500
+            interval: Settings.v.wsHideDelay
             onTriggered: side.shown = false
         }
 
@@ -11550,7 +14146,10 @@ in
 
         SidePanel {
             id: panel
-            open: side.shown
+            open: side.shown || Settings.peek === "workspaces"
+            padding: Settings.v.wsPadding      // (Settings → Workspaces dock)
+            curve: Settings.v.wsCurve
+            cornerRadius: Settings.v.wsCorner
             baseX: 0
             anchorY: side.height / 2
             HoverHandler {
@@ -11868,7 +14467,7 @@ in
         id: sounds
 
         readonly property string dir: "${uiSounds}"
-        property bool enabled: true
+        readonly property bool enabled: Settings.v.uiSounds    // (Settings → Notifications)
 
         function path(name) {
             return dir + "/" + name + ".oga";
@@ -13656,11 +16255,11 @@ in
         required property var screen
         property real maxHeight: 100000
 
-        property int cell: 44           // a workspace's row height, and its number's square
+        property int cell: Settings.v.wsCell           // a workspace's row height, and its number's square
         property int gap: 4
         property int slideTime: 300
-        property int iconSize: 22       // the app icons
-        property int maxIcons: 4
+        property int iconSize: Settings.v.wsIconSize       // the app icons
+        property int maxIcons: Settings.v.wsMaxIcons
 
         // room for the icons, if any workspace has an app open
         readonly property bool anyApps: root.list.some(w => w.toplevels.values.length > 0)
@@ -14897,6 +17496,10 @@ in
       hl.layer_rule({ name = "dock-blur", match = { namespace = "dock" }, blur = true, ignore_alpha = 0.1, xray = false })
       hl.layer_rule({ name = "workspace-dock-blur", match = { namespace = "workspace-dock" }, blur = true, ignore_alpha = 0.1, xray = false })
       hl.layer_rule({ name = "notification-blur", match = { namespace = "notification-popups" }, blur = true, ignore_alpha = 0.1, xray = false })
+      -- The shell's Settings window (SettingsWindow.qml): a normal app window, but floating,
+      -- centered, at its size. Quickshell's windows are all "org.quickshell"; this one is
+      -- the one called "Settings".
+      hl.window_rule({ name = "shell-settings", match = { class = "^org\\.quickshell$", title = "^Settings$" }, float = true, size = "980 680", center = true })
 
 
       -- Consolidated decoration/blur block (previously split across 3 hl.config calls
@@ -15037,6 +17640,8 @@ in
 
       -- log out with the fade to black (falls back to a plain log out if the bar isn't running)
       hl.bind("SUPER + SHIFT + E", hl.dsp.exec_cmd("quickshell ipc call session logout || uwsm stop"))
+      -- Super + I: the shell's Settings window (Quickshell's SettingsWindow.qml), open / closed
+      hl.bind("SUPER + I", hl.dsp.exec_cmd("quickshell ipc call settings toggle"))
 
 
       -- Captures the entire screen and copies it directly to your clipboard
@@ -15075,7 +17680,8 @@ in
 
       -- Delete or replace the bottom section with ONLY this line:
 
-      -- Super + left drag: move a window. Let go of it on a workspace in the workspaces
+      -- Super + left drag (or dragging a window by the app's own title bar, number 3
+      -- below): move a window. Let go of it on a workspace in the workspaces
       -- dock (push it against the left edge to bring the dock out) and it goes to that
       -- workspace, and so do you. Two binds tell Quickshell (WindowDrag.qml in home.nix)
       -- what happened; it does the rest:
@@ -15143,9 +17749,63 @@ in
           hl.exec_cmd("quickshell ipc call windowdrag start " .. dragging.name)
       end, { mouse = true })
 
+      -- 3. a drag by the app's own title bar (Firefox, GTK apps...): the app asks
+      -- Hyprland to move the window, and nothing announces that, to binds or anything
+      -- else. So while the left button is down (any left press, whatever is held:
+      -- non-consuming, so the click still goes to the app), this looks 25 times a second
+      -- at the focused window, and if it moves along with the mouse, that's a drag: it
+      -- says "started" like number 1. Number 2 says "ended" on release, as for any drag.
+      -- Looking is cheap (it's inside Hyprland; nothing is started), and it stops when
+      -- you let go, when it finds a drag, or after 10 s. A window that moves for another
+      -- reason while you hold the button (resized from its left or top edge, say) counts
+      -- too, but nothing happens unless you let go over the workspaces dock.
+      local watchFor = nil     -- the focused window and where it was: { address, x, y, floating }
+      local watchTicks = 0
+      local watch
+      watch = hl.timer(function()
+          watchTicks = watchTicks + 1
+          if dragging or watchTicks > 250 then
+              watch:set_enabled(false)
+              watchFor = nil
+              return
+          end
+          local w = hl.get_active_window()
+          if not w then
+              return
+          end
+          if not watchFor or watchFor.address ~= w.address then
+              watchFor = { address = w.address, x = w.at.x, y = w.at.y, floating = w.floating }
+              return
+          end
+          if math.abs(w.at.x - watchFor.x) + math.abs(w.at.y - watchFor.y) > 12 then
+              watch:set_enabled(false)
+              dragCount = dragCount + 1
+              dragging = {
+                  name = string.format("%d-%d", os.time(), dragCount),
+                  address = w.address,
+                  floating = watchFor.floating and "true" or "false",
+                  at = string.format("at=%d,%d", math.floor(watchFor.x), math.floor(watchFor.y)),
+              }
+              watchFor = nil
+              hl.exec_cmd("quickshell ipc call windowdrag start " .. dragging.name)
+          end
+      end, { timeout = 40, type = "repeat" })
+      watch:set_enabled(false)
+
+      hl.bind("mouse:272", function()
+          if dragging then
+              return       -- a Super + drag: number 1 has it
+          end
+          watchFor = nil
+          watchTicks = 0
+          watch:set_enabled(true)
+      end, { ignore_mods = true, non_consuming = true })
+
       -- 2. it ended: any left-button release, whatever is held (does nothing when
       -- there's no drag)
       hl.bind("mouse:272", function()
+          watch:set_enabled(false)
+          watchFor = nil
           if dragging then
               hl.exec_cmd(string.format("quickshell ipc call windowdrag finish %s %s %s %s",
                   dragging.name, dragging.address, dragging.floating, dragging.at))
@@ -15574,7 +18234,7 @@ in
       t.gtk.package
       t.icons.package
       t.cursor.package
-    ]) (lib.attrValues themes.themes)
+    ]) (lib.attrValues themes.themes ++ [ matugenTheme ])
   );
   # ── Locking when the computer sleeps ──
   # hypridle watches for suspend (and `loginctl lock-session`) and starts the lock
@@ -15633,6 +18293,10 @@ in
   };
   xdg.configFile."gtk-4.0/settings.ini" = {
     source = lib.mkForce (config.lib.file.mkOutOfStoreSymlink "${themeState}/current/gtk-4.0.ini");
+    force = true;
+  };
+  xdg.configFile."gtk-3.0/gtk.css" = {
+    source = lib.mkForce (config.lib.file.mkOutOfStoreSymlink "${themeState}/current/gtk-3.0.css");
     force = true;
   };
   xdg.configFile."gtk-4.0/gtk.css" = {

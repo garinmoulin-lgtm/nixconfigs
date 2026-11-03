@@ -373,7 +373,8 @@ in
           readonly property string wallpaper: saved.wallpaper || ""
           readonly property string stamp: saved.stamp || ""
 
-          readonly property var c: themes[saved.theme] || themes[defaultTheme]
+          // (the wallpaper theme, "matugen", isn't in the list: its colors come along)
+          readonly property var c: saved.colors || themes[saved.theme] || themes[defaultTheme]
           readonly property color bg: c.bg
           readonly property color inner: c.inner
           readonly property color pill: c.pill
