@@ -12535,7 +12535,7 @@ in
     // against that edge. It grows up out of the edge the way the bar's widgets drop out
     // of the bar (DockPanel.qml: same curves, corners and animation), and sinks back
     // half a second after the mouse leaves it. It doesn't take any space from your
-    // windows: it sits over them while it's up. (Hidden under fullscreen windows.)
+    // windows: it sits over them while it's up, fullscreen ones too.
     //
     //   Apps (left): your pins (the dock button in the top bar), then the other open
     //   apps. A dot under an app means it has a window open (a longer one for several);
@@ -12562,7 +12562,11 @@ in
             right: true
         }
         exclusionMode: ExclusionMode.Ignore
-        WlrLayershell.layer: WlrLayer.Top
+        // Overlay, not Top: Hyprland draws a fullscreen window over the Top layer and
+        // doesn't send it the mouse (InputManager.cpp: a Top layer surface isn't
+        // focusable under an exclusive fullscreen window), so in fullscreen the edge
+        // wouldn't notice the mouse and the dock couldn't come up. Overlay stays above.
+        WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.namespace: "dock"
         color: "transparent"
         // room for the dock to grow into (window previews or a menu above the icons)
@@ -14077,7 +14081,8 @@ in
             bottom: true
         }
         exclusionMode: ExclusionMode.Ignore
-        WlrLayershell.layer: WlrLayer.Top
+        // Overlay, so it comes out over fullscreen windows too (see Dock.qml)
+        WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.namespace: "workspace-dock"   // its blur rule in the Hyprland config
         color: "transparent"
         // room for the panel to grow into: as wide as it gets (its rows with the app icons,
