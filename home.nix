@@ -1651,6 +1651,20 @@ in
                     session.logout();
                 }
             }
+            // the bar's popups on / off from a key or a script:
+            // quickshell ipc call popups toggle   (or on / off)
+            IpcHandler {
+                target: "popups"
+                function toggle(): void {
+                    Settings.v.popups = !Settings.v.popups;
+                }
+                function on(): void {
+                    Settings.v.popups = true;
+                }
+                function off(): void {
+                    Settings.v.popups = false;
+                }
+            }
             // so the Super + drag bind can say when a window drag starts and ends
             // (WindowDrag.qml): quickshell ipc call windowdrag start / finish ...
             IpcHandler {
@@ -6877,6 +6891,7 @@ in
                 borderPills: false,      // the pills on the bar get it too
                 uiFont: "",              // "" = SFMono Nerd Font
                 iconFill: false,         // filled icons
+                popups: true,            // the bar's widgets open their popups (off: clicks do nothing)
                 scrollSpeed: 2.0         // the mouse wheel in the shell's lists and pages (FastWheel.qml); 1 = Qt's own
             })
 
@@ -7059,6 +7074,7 @@ in
                 property string uiFont: root.defaults.uiFont
                 property bool iconFill: root.defaults.iconFill
                 property real scrollSpeed: root.defaults.scrollSpeed
+                property bool popups: root.defaults.popups
             }
         }
         Timer {
@@ -8659,7 +8675,7 @@ in
         readonly property var sizeKeys: ["barHeight", "moduleHeight", "textSize", "iconSize", "spacing"]
         readonly property var shapeKeys: ["radius", "barCurve", "popupCurve", "popupCorner"]
 
-        readonly property var styleKeys: ["barStyle", "popupAnim", "barMargin", "floatRadius", "shading"]
+        readonly property var styleKeys: ["barStyle", "popups", "popupAnim", "barMargin", "floatRadius", "shading"]
 
         // ── the bar's widgets: on or off, and where their settings are ──
         // (on = in Settings.v.barLeft / barRight; Edit desktop drags them around)
@@ -8959,11 +8975,22 @@ in
             }
             SetRow {
                 label: "Popups"
-                description: "How they open"
-                SetChoice {
-                    options: Settings.anims
-                    current: Settings.v.popupAnim
-                    onPicked: a => Settings.v.popupAnim = a
+                description: Settings.v.popups ? "Click a widget to open it · how it opens" : "Off · clicking a widget does nothing"
+                Row {
+                    spacing: 12
+                    SetChoice {
+                        anchors.verticalCenter: parent.verticalCenter
+                        enabled: Settings.v.popups
+                        opacity: enabled ? 1 : 0.4
+                        options: Settings.anims
+                        current: Settings.v.popupAnim
+                        onPicked: a => Settings.v.popupAnim = a
+                    }
+                    SetSwitch {
+                        anchors.verticalCenter: parent.verticalCenter
+                        checked: Settings.v.popups
+                        onToggled: on => Settings.v.popups = on
+                    }
                 }
             }
             SetRow {
@@ -14961,9 +14988,16 @@ in
                             anchors.verticalCenter: parent.verticalCenter
                             text: "Popups"
                         }
+                        SetSwitch {
+                            anchors.verticalCenter: parent.verticalCenter
+                            checked: Settings.v.popups
+                            onToggled: on => Settings.v.popups = on
+                        }
                         SetChoice {
                             anchors.verticalCenter: parent.verticalCenter
-                            width: Math.min(fitWidth, tools.width - 60)
+                            width: Math.min(fitWidth, tools.width - 110)
+                            enabled: Settings.v.popups
+                            opacity: enabled ? 1 : 0.4
                             options: Settings.anims
                             current: Settings.v.popupAnim
                             onPicked: a => Settings.v.popupAnim = a
@@ -15885,6 +15919,9 @@ in
         }
 
         function openPopup() {
+            // popups switched off (Settings → Bar → Popups, or Edit desktop's Bar ▾)
+            if (!Settings.v.popups)
+                return;
             // one popup at a time: close whichever widget is open now (any monitor's bar)
             if (Ui.openWidget && Ui.openWidget !== root)
                 Ui.openWidget.closePopup()
@@ -15964,7 +16001,7 @@ in
             anchors.centerIn: parent
             sourceComponent: root.button
 
-            scale: mouse.containsMouse ? 0.85 : 1
+            scale: mouse.containsMouse && Settings.v.popups ? 0.85 : 1
             Behavior on scale {
                 NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
             }
@@ -15974,8 +16011,16 @@ in
             id: mouse
             anchors.fill: parent
             hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
+            cursorShape: Settings.v.popups ? Qt.PointingHandCursor : Qt.ArrowCursor
             onClicked: root.open ? root.closePopup() : root.openPopup()
+        }
+        // switched off while one's open: it goes
+        Connections {
+            target: Settings.v
+            function onPopupsChanged() {
+                if (!Settings.v.popups)
+                    root.closePopup();
+            }
         }
 
         // The default button: a Material Symbols icon, like IconButton.
