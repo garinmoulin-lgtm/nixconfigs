@@ -2474,6 +2474,8 @@ in
                     for (const id of Settings.v.barRight)
                         if (mods[id])
                             mods[id].parent = barRight;
+                    barLeft.forceLayout();
+                    barRight.forceLayout();
                 }
                 Component.onCompleted: layoutBar()
                 Connections {
@@ -2649,9 +2651,14 @@ in
                     // widget drawer or Settings → Bar → Widgets. bar.layoutBar() puts each
                     // one into the left or right row, in the order of Settings.v.barLeft /
                     // barRight.
+                    // (It stays "visible", just off the window and see-through: a widget
+                    // that went in or out of a hidden parent didn't always get drawn again
+                    // until something in it changed, like the media widget's title.)
                     Item {
                         id: barPool
-                        visible: false
+                        x: -100000
+                        opacity: 0
+                        enabled: false
 
                         // ── Workspaces: this screen's, a dot each (off by default: the
                         // workspaces dock on the left edge does this too) ──
