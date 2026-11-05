@@ -2320,6 +2320,20 @@ in
   # one, devices that want confirmation (phones, PCs) fail with "Authentication Failed".
   # blueman provides one (the applet runs from home.nix) and pops up the confirm dialog.
   services.blueman.enable = true;
+  # rfkill (the kernel's radio switches) for whoever's sitting at the computer, so
+  # the shell's Bluetooth page can clear a soft block ("Unblock" in Settings →
+  # Bluetooth) without sudo. systemd's own uaccess rules don't cover /dev/rfkill.
+  # The file is named 70-…: the "uaccess" tag only works on rules read before
+  # systemd's 73-seat-late.rules, and services.udev.extraRules lands in 99-local.rules.
+  services.udev.packages = [
+    (pkgs.writeTextFile {
+      name = "rfkill-uaccess";
+      destination = "/etc/udev/rules.d/70-rfkill-uaccess.rules";
+      text = ''
+        SUBSYSTEM=="misc", KERNEL=="rfkill", TAG+="uaccess"
+      '';
+    })
+  ];
 
   # Virtualization
   # Use this. It does use a daemon.

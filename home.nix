@@ -2365,10 +2365,11 @@ in
                 screen: modelData
             }
         }
-        // Edit desktop's bar at the top of each screen (EditBanner.qml)
+        // Edit desktop: the docks' cards (DockEditor.qml). Its own buttons (Add Panel,
+        // Done) are on the bar's toolbar (BarEditor.qml).
         Variants {
             model: Panels.editMode ? Quickshell.screens : []
-            EditBanner {
+            DockEditor {
                 required property var modelData
                 screen: modelData
             }
@@ -2437,11 +2438,109 @@ in
                     Region {
                         item: bar.openWidget ? bar.openWidget.popupItem : null
                     }
+                    Region {
+                        item: bar.menuOpen ? barMenu : null
+                    }
+                    Region {
+                        item: barEdit.active ? barEdit.toolbar : null
+                    }
+                    Region {
+                        item: barEdit.active && barEdit.drawerOpen ? barEdit.drawer : null
+                    }
+                    Region {
+                        item: barEdit.ghostItem
+                    }
+                }
+
+                // ── the widgets' order (Settings.v.barLeft / barRight) ──
+                // Each widget is tagged objectName "mod:<id>". Re-parenting puts them in
+                // the rows in list order (a Row lays its children out in that order);
+                // the rest wait in barPool.
+                function layoutBar() {
+                    if (Ui.openWidget && Ui.openWidget.barContent === bar.contentItem)
+                        Ui.openWidget.closePopup();
+                    const mods = {};
+                    for (const row of [barLeft, barRight, barPool]) {
+                        const kids = row.children;
+                        for (let i = 0; i < kids.length; i++)
+                            if (kids[i].objectName.startsWith("mod:"))
+                                mods[kids[i].objectName.slice(4)] = kids[i];
+                    }
+                    for (const id in mods)
+                        mods[id].parent = barPool;
+                    for (const id of Settings.v.barLeft)
+                        if (mods[id])
+                            mods[id].parent = barLeft;
+                    for (const id of Settings.v.barRight)
+                        if (mods[id])
+                            mods[id].parent = barRight;
+                }
+                Component.onCompleted: layoutBar()
+                Connections {
+                    target: Settings.v
+                    function onBarLeftChanged() {
+                        bar.layoutBar();
+                    }
+                    function onBarRightChanged() {
+                        bar.layoutBar();
+                    }
+                }
+
+                // ── Edit desktop: drag the bar's widgets, add and remove them (BarEditor.qml) ──
+                BarEditor {
+                    id: barEdit
+                    anchors.fill: parent
+                    z: 150
+                    body: barBody
+                    leftRow: barLeft
+                    rightRow: barRight
+                }
+
+                // ── right-click the bar (anywhere but a button): Edit desktop, Settings ──
+                property bool menuOpen: false
+                function showMenu(x) {
+                    if (Ui.openWidget)
+                        Ui.openWidget.closePopup();
+                    barMenu.x = Math.max(8, Math.min(width - barMenu.width - 8, x - barMenu.width / 2));
+                    menuOpen = true;
+                }
+                HyprlandFocusGrab {
+                    active: bar.menuOpen
+                    windows: [bar]
+                    onCleared: bar.menuOpen = false
+                }
+                MenuCard {
+                    id: barMenu
+                    visible: bar.menuOpen
+                    z: 200
+                    y: Theme.barBottom + 6
+                    model: [
+                        { act: "edit", icon: Panels.editMode ? "check" : "edit", label: Panels.editMode ? "Done editing" : "Edit desktop" },
+                        { act: "panel", icon: "add_box", label: "Add Panel" },
+                        { sep: true },
+                        { act: "bar", icon: "toolbar", label: "Bar settings" },
+                        { act: "settings", icon: "settings", label: "Settings" }
+                    ]
+                    onPicked: act => {
+                        bar.menuOpen = false;
+                        if (act === "edit")
+                            Panels.editMode = !Panels.editMode;
+                        else if (act === "panel") {
+                            Panels.add();
+                            Panels.editMode = true;
+                        } else if (act === "bar")
+                            Settings.show("bar");
+                        else
+                            Settings.open = true;
+                    }
                 }
                 // Typing goes to an open popup (search boxes, the calendar's add row...):
                 // the bar takes the keyboard when you click in it while a popup is open.
                 // Otherwise it never does, so it can't take focus from your windows.
-                WlrLayershell.keyboardFocus: bar.openWidget ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+                // (and while its right-click menu is open: Hyprland's focus grab, which
+                // closes the menu when you click elsewhere, needs a surface that can
+                // take the keyboard, like an open popup's)
+                WlrLayershell.keyboardFocus: bar.openWidget || bar.menuOpen ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
                 // ── the inward curves under both ends of the bar ──
                 // So the bar looks like it wraps around the top corners of the screen.
@@ -2469,6 +2568,13 @@ in
                     width: parent.width - 2 * Theme.barMargin
                     height: Theme.barHeight
 
+                    // under everything in the bar, so the buttons keep their own clicks
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.RightButton
+                        onClicked: m => bar.showMenu(barBody.x + m.x)
+                    }
+
                     // (the shading, neumorphic or flat, is its own setting: Glass.qml)
                     Glass {
                         visible: Theme.barStyle === "smooth"
@@ -2485,6 +2591,7 @@ in
                         model: Theme.barStyle === "pill" ? barLeft.children : []
                         Glass {
                             required property var modelData
+                            z: -1       // always under the widgets
                             visible: modelData.visible && modelData.width > 0
                             x: barLeft.x + modelData.x - Theme.pillPad
                             y: (barBody.height - height) / 2
@@ -2498,6 +2605,7 @@ in
                         model: Theme.barStyle === "pill" ? barRight.children : []
                         Glass {
                             required property var modelData
+                            z: -1       // always under the widgets
                             visible: modelData.visible && modelData.width > 0
                             x: barRight.x + modelData.x - Theme.pillPad
                             y: (barBody.height - height) / 2
@@ -2536,6 +2644,220 @@ in
                         cmd: "bluetoothctl show | grep -q 'Powered: yes' && echo on || echo off"
                     }
                     */
+                    // ── Widgets that aren't on the bar wait here (hidden), and so do the
+                    // extra ones (Workspaces, Bluetooth, Theme): add them in Edit desktop's
+                    // widget drawer or Settings → Bar → Widgets. bar.layoutBar() puts each
+                    // one into the left or right row, in the order of Settings.v.barLeft /
+                    // barRight.
+                    Item {
+                        id: barPool
+                        visible: false
+
+                        // ── Workspaces: this screen's, a dot each (off by default: the
+                        // workspaces dock on the left edge does this too) ──
+                        // Click one to go there; scroll over them for the next / previous.
+                        Row {
+                            id: wsMod
+                            objectName: "mod:workspaces"
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 4
+                            readonly property var monitor: Hyprland.monitorFor(bar.screen)
+                            readonly property var list: !monitor ? [] : Hyprland.workspaces.values.filter(w => w.id > 0 && w.monitor === monitor)
+                            function go(id) {
+                                Hyprland.dispatch('hl.dsp.focus({ workspace = "' + id + '" })');
+                            }
+                            WheelHandler {
+                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                onWheel: e => {
+                                    const l = wsMod.list;
+                                    const i = l.findIndex(w => w.active);
+                                    const j = i + (e.angleDelta.y < 0 ? 1 : -1);
+                                    if (j >= 0 && j < l.length)
+                                        wsMod.go(l[j].id);
+                                }
+                            }
+                            Repeater {
+                                model: wsMod.list
+                                Rectangle {
+                                    id: wsDot
+                                    required property var modelData
+                                    readonly property bool on: modelData.active
+                                    readonly property bool busy: modelData.toplevels.values.length > 0
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    height: Theme.moduleHeight - 6
+                                    width: on ? height * 1.9 : height
+                                    radius: height / 2
+                                    color: on ? Theme.accent : wsDotMouse.containsMouse || busy ? Theme.pill : "transparent"
+                                    border.width: on || busy ? 0 : 1
+                                    border.color: Theme.pill
+                                    Behavior on width {
+                                        NumberAnimation {
+                                            duration: Settings.ms(220)
+                                            easing.type: Easing.OutCubic
+                                        }
+                                    }
+                                    Behavior on color {
+                                        ColorAnimation {
+                                            duration: Settings.ms(160)
+                                        }
+                                    }
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: wsDot.modelData.name
+                                        color: wsDot.on ? Theme.bg : Theme.text
+                                        opacity: wsDot.on || wsDot.busy ? 1 : 0.6
+                                        font.family: Theme.font
+                                        font.pixelSize: Math.round(Theme.textSize * 0.85)
+                                        font.weight: 700
+                                    }
+                                    MouseArea {
+                                        id: wsDotMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: wsMod.go(wsDot.modelData.id)
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── Bluetooth: Settings → Bluetooth in a popup (off by default) ──
+                        // It only exists while the popup's open, so it only scans then.
+                        Widget {
+                            id: btMod
+                            objectName: "mod:bluetooth"
+                            anchors.verticalCenter: parent.verticalCenter
+                            readonly property var adapter: Bluetooth.defaultAdapter
+                            icon: !adapter || !adapter.enabled ? "bluetooth_disabled" : Bluetooth.devices.values.some(d => d.connected) ? "bluetooth_connected" : "bluetooth"
+                            Loader {
+                                active: btMod.open || btMod.popupShown
+                                sourceComponent: Flickable {
+                                    width: 380
+                                    height: Math.min(contentHeight, 520)
+                                    contentHeight: btPage.height
+                                    clip: true
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    SetBluetooth {
+                                        id: btPage
+                                        width: 380
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── Theme: the color themes, and the wallpapers next to them (off by
+                        // default; the same as Settings → Appearance) ──
+                        Widget {
+                            objectName: "mod:theme"
+                            anchors.verticalCenter: parent.verticalCenter
+                            icon: "palette"
+
+                            Row {
+                                spacing: 14
+                                Column {
+                                    id: themeList
+                                    spacing: 4
+                                    width: 250
+                                    Text {
+                                        height: 26
+                                        verticalAlignment: Text.AlignVCenter
+                                        text: "Theme"
+                                        color: Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: Math.round(Theme.textSize * 1.2)
+                                        font.weight: 700
+                                    }
+                                    Repeater {
+                                        model: Theme.order.concat(["matugen"])
+                                        Rectangle {
+                                            id: themeRow
+                                            required property string modelData
+                                            readonly property var info: Theme.info(modelData)
+                                            readonly property bool selected: Theme.current === modelData
+                                            width: themeList.width
+                                            height: 40
+                                            radius: Math.min(Theme.radius, height / 2)
+                                            color: themeMouse.containsMouse || selected ? Theme.pill : "transparent"
+                                            Rectangle {
+                                                id: themePreview
+                                                x: 8
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: 56
+                                                height: 24
+                                                radius: 6
+                                                color: themeRow.info.colors.bg
+                                                border.width: 1
+                                                border.color: themeRow.info.colors.overlay
+                                                Row {
+                                                    anchors.centerIn: parent
+                                                    spacing: 3
+                                                    Repeater {
+                                                        model: ["red", "yellow", "green", "blue", "magenta"]
+                                                        Rectangle {
+                                                            required property string modelData
+                                                            width: 7
+                                                            height: 7
+                                                            radius: 4
+                                                            color: themeRow.info.colors[modelData]
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Column {
+                                                x: themePreview.x + themePreview.width + 10
+                                                width: parent.width - x - 34
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                Text {
+                                                    width: parent.width
+                                                    text: themeRow.info.name
+                                                    elide: Text.ElideRight
+                                                    color: themeRow.selected ? Theme.accent : Theme.text
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Theme.textSize
+                                                    font.weight: themeRow.selected ? 700 : 500
+                                                }
+                                                Text {
+                                                    width: parent.width
+                                                    text: themeRow.info.variant
+                                                    elide: Text.ElideRight
+                                                    color: Theme.text
+                                                    opacity: 0.6
+                                                    font.family: Theme.font
+                                                    font.pixelSize: Math.round(Theme.textSize * 0.85)
+                                                }
+                                            }
+                                            Text {
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: 10
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                visible: themeRow.selected
+                                                text: "check"
+                                                color: Theme.accent
+                                                font.family: Theme.iconFont
+                                                font.pixelSize: Theme.iconSize
+                                                font.variableAxes: Theme.iconAxes
+                                            }
+                                            MouseArea {
+                                                id: themeMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: Theme.set(themeRow.modelData)
+                                            }
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    width: 1
+                                    height: Math.max(themeList.height, themePicker.height)
+                                    color: Theme.pill
+                                }
+                                WallpaperPicker {
+                                    id: themePicker
+                                }
+                            }
+                        }
+                    }
                     Row {
                         id: barLeft
                         anchors.left: parent.left
@@ -2552,7 +2874,7 @@ in
                         Widget {
                             id: dispWidget
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: Settings.v.showDisplay     // (Settings → Bar → Widgets)
+                            objectName: "mod:display"     // (Edit desktop: drag it, or off the bar)
                             icon: {
                                 if (Display.filter === "invert")
                                     return "invert_colors";
@@ -2781,6 +3103,7 @@ in
                         // ── Settings ── (SettingsWindow.qml): themes and wallpaper, Bluetooth,
                         // sound, the bar's and docks' sizes... Also Super + I.
                         IconButton {
+                            objectName: "mod:settings"
                             anchors.verticalCenter: parent.verticalCenter
                             icon: "settings"
                             iconColor: Settings.open ? Theme.accent : Theme.text
@@ -2791,7 +3114,7 @@ in
 
                         Widget {
                             padding: 16
-                            visible: Settings.v.showMusic     // (Settings → Bar → Widgets)
+                            objectName: "mod:music"     // (Edit desktop: drag it, or off the bar)
                             button: Item {
                                 width: Theme.moduleHeight
                                 height: width
@@ -4460,15 +4783,21 @@ in
                             }
                         }
 
+                        // ── Media controls: ⏮ ⏯ ⏭ and what's playing (one widget) ──
+                        Row {
+                            objectName: "mod:media"
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: Theme.spacing
+                            visible: media.player != undefined || Panels.editMode
                         Rectangle {
                             id: media
+                            anchors.verticalCenter: parent.verticalCenter
                             property var player: Mpris.players.values.find(p => p.isPlaying) ?? Mpris.players.values[0]
 
                             width: mediaButtons.width + 12
                             height: Theme.moduleHeight
                             radius: Math.min(Theme.radius, height / 2)
                             color: Theme.barStyle === "pill" ? "transparent" : Theme.pill
-                            visible: media.player != undefined && Settings.v.showMedia
 
                             NeuShadow {
                                 z: -1
@@ -4509,7 +4838,6 @@ in
                         // the Pill style the text doesn't touch its pill's edge)
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: Settings.v.showMedia
                             leftPadding: 4
                             rightPadding: 4
                             spacing: -1
@@ -4535,6 +4863,7 @@ in
                                 lineHeight: 0.92
                             }
                         }
+                        }
                     }
                     Row {
                         id: barRight
@@ -4547,18 +4876,18 @@ in
                         // (DockControl.qml; the open apps and the tray are on the dock now)
                         DockControl {
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: Settings.v.showDockPins     // (Settings → Bar → Widgets)
+                            objectName: "mod:dockpins"     // (Edit desktop: drag it, or off the bar)
                         }
 
                         Weather {
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: Settings.v.showWeather     // (Settings → Bar → Widgets)
+                            objectName: "mod:weather"     // (Edit desktop: drag it, or off the bar)
                         }
 
                         // ── Notification center ──
                         Widget {
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: Settings.v.showNotifications     // (Settings → Bar → Widgets)
+                            objectName: "mod:notifications"     // (Edit desktop: drag it, or off the bar)
                             button: Pill {
                                 icon: notifs.unreadCount > 0 ? "notifications_unread" : "notifications"
                                 iconColor: Theme.yellow
@@ -4746,7 +5075,7 @@ in
 
                         Widget {
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: Settings.v.showVolume     // (Settings → Bar → Widgets)
+                            objectName: "mod:volume"     // (Edit desktop: drag it, or off the bar)
                             button: Pill {
                                 // Volume and mute straight from PipeWire. These are bindings, so the
                                 // pill redraws the moment PipeWire reports a change (keyboard keys,
@@ -5021,7 +5350,8 @@ in
                             id: battery
                             anchors.verticalCenter: parent.verticalCenter
                             // hidden on machines without a laptop battery (this desktop)
-                            visible: battery.present && Settings.v.showBattery
+                            objectName: "mod:battery"
+                            visible: battery.present || Panels.editMode
 
                             // UPower's combined battery. percentage is 0..1 (Quickshell converts UPower's 0-100).
                             readonly property var device: UPower.displayDevice
@@ -5086,7 +5416,7 @@ in
                         Widget {
                             id: netWidget
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: Settings.v.showNetwork     // (Settings → Bar → Widgets)
+                            objectName: "mod:network"     // (Edit desktop: drag it, or off the bar)
                             // What the pill shows, straight from NetworkManager (it changes the moment
                             // you connect or disconnect, no polling): the Wi-Fi network when Wi-Fi is
                             // connected, else wired, else offline. Wi-Fi wins when both are up (it
@@ -5471,16 +5801,19 @@ in
                             }
                         }
                         // ── Clock: calendar, events, timers, stopwatch (Clock.qml) ──
+                        Row {
+                            objectName: "mod:clock"     // (the clock, and its timer's button)
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: Theme.spacing
                         Clock {
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: Settings.v.showClock     // (Settings → Bar → Widgets)
                             now: clock.date
                         }
                         // the timer's pause / play, beside the clock while one is going or
                         // paused (the one the clock shows: Planner.barTimer)
                         IconButton {
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: Planner.barTimer !== null && Settings.v.showClock
+                            visible: Planner.barTimer !== null
                             color: Theme.barStyle === "pill" ? "transparent" : Theme.pill
                             icon: Planner.barTimerPaused ? "play_arrow" : "pause"
                             iconColor: Theme.accent
@@ -5496,6 +5829,7 @@ in
                                     Planner.pauseTimer(t.id);
                             }
                         }
+                        }
                         // ── System monitor ──
                         // Bar: the CPU package temperature. Popup: a graph of the last minute, every
                         // component's usage in text, and a list: click a component to graph just that
@@ -5503,7 +5837,7 @@ in
                         Widget {
                             id: sysmon
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: Settings.v.showSysmon     // (Settings → Bar → Widgets)
+                            objectName: "mod:sysmon"     // (Edit desktop: drag it, or off the bar)
 
                             // what the graph shows: "all", or one component's key
                             property string selected: "all"
@@ -6062,7 +6396,7 @@ in
                         Widget {
                             icon: "power_settings_new"
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: Settings.v.showPower     // (Settings → Bar → Widgets)
+                            objectName: "mod:power"     // (Edit desktop: drag it, or off the bar)
 
                             Column {
                                 spacing: 2
@@ -6470,8 +6804,88 @@ in
                 musicDir: "",
                 // system monitor: graph span (s), what the bar shows (temp, cpu, mem, gpu)
                 sysmonHistory: 60,
-                sysmonBar: "temp"
+                sysmonBar: "temp",
+                // the bar's widgets, in order (Edit desktop, or Settings → Bar → Widgets).
+                // Not on it: in the widget drawer.
+                barLeft: ["display", "settings", "music", "media"],
+                barRight: ["dockpins", "weather", "notifications", "volume", "battery", "network", "clock", "sysmon", "power"],
+                barLayout: 1,            // (the old on / off switches were read into the lists)
+                // show / hide animations: "slide", "fade", "pop", "none"
+                popupAnim: "slide",      // the bar's popups
+                dockAnim: "slide",
+                wsAnim: "slide",
+                panelAnim: "slide"       // your panels' auto-hide
             })
+
+        // the show / hide animations, for the choices in Settings and Edit desktop
+        readonly property var anims: [
+            { id: "slide", label: "Slide" },
+            { id: "fade", label: "Fade" },
+            { id: "pop", label: "Pop" },
+            { id: "none", label: "None" }
+        ]
+
+        // ── the bar's widgets ──
+        // id, name, icon, and the side it goes to when added without dragging
+        readonly property var barMods: [
+            { id: "display", label: "Display", icon: "brightness_6", side: "left" },
+            { id: "settings", label: "Settings", icon: "settings", side: "left" },
+            { id: "workspaces", label: "Workspaces", icon: "view_week", side: "left" },
+            { id: "music", label: "Music player", icon: "album", side: "left" },
+            { id: "media", label: "Media controls", icon: "skip_next", side: "left" },
+            { id: "dockpins", label: "Dock pins", icon: "push_pin", side: "right" },
+            { id: "weather", label: "Weather", icon: "partly_cloudy_day", side: "right" },
+            { id: "notifications", label: "Notifications", icon: "notifications", side: "right" },
+            { id: "theme", label: "Theme", icon: "palette", side: "right" },
+            { id: "bluetooth", label: "Bluetooth", icon: "bluetooth", side: "right" },
+            { id: "volume", label: "Volume", icon: "volume_up", side: "right" },
+            { id: "battery", label: "Battery", icon: "battery_full", side: "right" },
+            { id: "network", label: "Network", icon: "wifi", side: "right" },
+            { id: "clock", label: "Clock", icon: "schedule", side: "right" },
+            { id: "sysmon", label: "System monitor", icon: "monitoring", side: "right" },
+            { id: "power", label: "Power", icon: "power_settings_new", side: "right" }
+        ]
+        function barMod(id) {
+            return barMods.find(m => m.id === id);
+        }
+        function onBar(id) {
+            return adapter.barLeft.includes(id) || adapter.barRight.includes(id);
+        }
+        // put a widget at `index` of a side ("left" / "right"), moving it if it's on already
+        function placeMod(id, side, index) {
+            let l = adapter.barLeft.filter(x => x !== id);
+            let r = adapter.barRight.filter(x => x !== id);
+            const row = side === "left" ? l : r;
+            row.splice(Math.max(0, Math.min(row.length, index)), 0, id);
+            adapter.barLeft = l;
+            adapter.barRight = r;
+        }
+        function removeMod(id) {
+            adapter.barLeft = adapter.barLeft.filter(x => x !== id);
+            adapter.barRight = adapter.barRight.filter(x => x !== id);
+        }
+        // on: to the end of its usual side (the left's end, the right's start)
+        function setOnBar(id, on) {
+            if (!on)
+                return removeMod(id);
+            if (onBar(id))
+                return;
+            const m = barMod(id);
+            if (m && m.side === "left")
+                placeMod(id, "left", adapter.barLeft.length);
+            else
+                placeMod(id, "right", 0);
+        }
+        // the old switches (showDisplay: false...) into the lists, once
+        function migrate() {
+            if (adapter.barLayout >= 1)
+                return;
+            const old = { display: "showDisplay", music: "showMusic", media: "showMedia", dockpins: "showDockPins", weather: "showWeather", notifications: "showNotifications", volume: "showVolume", battery: "showBattery", network: "showNetwork", clock: "showClock", sysmon: "showSysmon", power: "showPower" };
+            const keep = id => !old[id] || adapter[old[id]] !== false;
+            adapter.barLeft = adapter.barLeft.filter(keep);
+            adapter.barRight = adapter.barRight.filter(keep);
+            adapter.barLayout = 1;
+        }
 
         // the settings themselves: Settings.v.barHeight, ... (writable)
         readonly property alias v: adapter
@@ -6482,7 +6896,7 @@ in
                 adapter[k] = defaults[k];
         }
         function isDefault(keys) {
-            return keys.every(k => adapter[k] === defaults[k]);
+            return keys.every(k => JSON.stringify(adapter[k]) === JSON.stringify(defaults[k]));
         }
 
         FileView {
@@ -6494,6 +6908,7 @@ in
             onFileChanged: reload()
             // saved a moment after the last change (not on every step of a slider)
             onAdapterUpdated: saveSoon.restart()
+            onLoaded: Qt.callLater(root.migrate)
 
             JsonAdapter {
                 id: adapter
@@ -6564,6 +6979,13 @@ in
                 property string musicDir: root.defaults.musicDir
                 property int sysmonHistory: root.defaults.sysmonHistory
                 property string sysmonBar: root.defaults.sysmonBar
+                property var barLeft: root.defaults.barLeft
+                property var barRight: root.defaults.barRight
+                property int barLayout: 0
+                property string popupAnim: root.defaults.popupAnim
+                property string dockAnim: root.defaults.dockAnim
+                property string wsAnim: root.defaults.wsAnim
+                property string panelAnim: root.defaults.panelAnim
             }
         }
         Timer {
@@ -7957,50 +8379,271 @@ in
         readonly property var sizeKeys: ["barHeight", "moduleHeight", "textSize", "iconSize", "spacing"]
         readonly property var shapeKeys: ["radius", "barCurve", "popupCurve", "popupCorner"]
 
-        readonly property var styleKeys: ["barStyle", "barMargin", "floatRadius", "shading"]
+        readonly property var styleKeys: ["barStyle", "popupAnim", "barMargin", "floatRadius", "shading"]
 
         // ── the bar's widgets: on or off, and where their settings are ──
-        readonly property var widgetList: [
-            { key: "showDisplay", label: "Display", icon: "brightness_6", page: "display" },
-            { key: "showMusic", label: "Music player", icon: "album", page: "media" },
-            { key: "showMedia", label: "Media controls", icon: "skip_next", page: "media" },
-            { key: "showDockPins", label: "Dock pins", icon: "push_pin", page: "docks" },
-            { key: "showWeather", label: "Weather", icon: "partly_cloudy_day", page: "general" },
-            { key: "showNotifications", label: "Notifications", icon: "notifications", page: "notifications" },
-            { key: "showVolume", label: "Volume", icon: "volume_up", page: "sound" },
-            { key: "showBattery", label: "Battery", icon: "battery_full", page: "power" },
-            { key: "showNetwork", label: "Network", icon: "wifi", page: "network" },
-            { key: "showClock", label: "Clock", icon: "schedule", page: "general" },
-            { key: "showSysmon", label: "System monitor", icon: "monitoring", page: "sysmon" },
-            { key: "showPower", label: "Power menu", icon: "power_settings_new", page: "power" }
-        ]
+        // (on = in Settings.v.barLeft / barRight; Edit desktop drags them around)
+        readonly property var pages: ({
+                display: "display", settings: "appearance", workspaces: "docks", music: "media", media: "media",
+                dockpins: "docks", weather: "general", notifications: "notifications", theme: "appearance",
+                bluetooth: "bluetooth", volume: "sound", battery: "power", network: "network", clock: "general",
+                sysmon: "sysmon", power: "power"
+            })
         SetSection {
             title: "Widgets"
-            caption: "Settings is always there (gear)"
-            actions: SetButton {
-                icon: "restart_alt"
-                text: "Show all"
-                enabled: !Settings.isDefault(page.widgetList.map(w => w.key))
-                onClicked: Settings.reset(page.widgetList.map(w => w.key))
+            caption: "Drag to reorder, between sides, or off · click one for its settings"
+            actions: Row {
+                spacing: 6
+                SetButton {
+                    icon: "edit"
+                    text: "Edit desktop"
+                    onClicked: {
+                        Panels.editMode = true;
+                        Settings.open = false;
+                    }
+                }
+                SetButton {
+                    icon: "restart_alt"
+                    text: "Default"
+                    enabled: !Settings.isDefault(["barLeft", "barRight"])
+                    onClicked: Settings.reset(["barLeft", "barRight"])
+                }
             }
-            Repeater {
-                model: page.widgetList
-                SetRow {
-                    id: wrow
-                    required property var modelData
-                    label: modelData.label
-                    Row {
-                        spacing: 10
-                        SetButton {
-                            anchors.verticalCenter: parent.verticalCenter
-                            icon: "tune"
-                            text: "Settings"
-                            onClicked: Settings.page = wrow.modelData.page
+
+            // the bar's two sides and what's off it, as rows of chips (BarEditor.qml does
+            // the same on the bar itself)
+            Item {
+                id: board
+                width: parent.width
+                height: zones.height
+
+                property string dragId: ""
+                property point dragAt: Qt.point(0, 0)
+                readonly property var spot: dragId !== "" ? spotAt(dragAt) : null
+
+                // which row, and where in it, a chip dropped at p would go (p: board's)
+                function spotAt(p) {
+                    for (let i = 0; i < zones.children.length; i++) {
+                        const z = zones.children[i];
+                        if (z.zid === undefined)
+                            continue;
+                        const q = z.mapFromItem(board, p.x, p.y);
+                        if (q.y < 0 || q.y >= z.height)
+                            continue;
+                        const chips = z.chips().filter(c => c.cid !== dragId);
+                        let n = 0;
+                        for (const c of chips) {
+                            const r = c.mapToItem(z, 0, 0);
+                            const sameLine = q.y >= r.y - 3 && q.y < r.y + c.height + 3;
+                            if (q.y >= r.y + c.height + 3 || (sameLine && q.x > r.x + c.width / 2))
+                                n++;
                         }
-                        SetSwitch {
+                        let mx, my;
+                        if (chips.length === 0) {
+                            const f = z.flowPos();
+                            mx = f.x;
+                            my = f.y;
+                        } else if (n < chips.length) {
+                            const r = chips[n].mapToItem(board, 0, 0);
+                            mx = r.x - 4;
+                            my = r.y;
+                        } else {
+                            const last = chips[chips.length - 1];
+                            const r = last.mapToItem(board, 0, 0);
+                            mx = r.x + last.width + 2;
+                            my = r.y;
+                        }
+                        return { zone: z.zid, index: n, x: mx, y: my };
+                    }
+                    return null;
+                }
+                function drop() {
+                    const s = spot, id = dragId;
+                    dragId = "";
+                    if (!s)
+                        return;
+                    if (s.zone === "off")
+                        Settings.removeMod(id);
+                    else
+                        Settings.placeMod(id, s.zone, s.index);
+                }
+
+                Column {
+                    id: zones
+                    width: parent.width
+                    Repeater {
+                        model: [
+                            { id: "left", label: "Left" },
+                            { id: "right", label: "Right" },
+                            { id: "off", label: "Off" }
+                        ]
+                        Item {
+                            id: zone
+                            required property var modelData
+                            required property int index
+                            readonly property string zid: modelData.id
+                            readonly property var ids: zid === "left" ? Settings.v.barLeft : zid === "right" ? Settings.v.barRight : Settings.barMods.map(m => m.id).filter(id => !Settings.onBar(id))
+                            readonly property bool here: !!board.spot && board.spot.zone === zid
+                            function chips() {
+                                const out = [];
+                                for (let i = 0; i < flow.children.length; i++)
+                                    if (flow.children[i].cid !== undefined)
+                                        out.push(flow.children[i]);
+                                return out;
+                            }
+                            function flowPos() {
+                                return flow.mapToItem(board, 0, 0);
+                            }
+                            width: zones.width
+                            height: Math.max(52, flow.height + 20)
+
+                            Rectangle {
+                                visible: zone.index > 0
+                                x: 12
+                                width: parent.width - 24
+                                height: 1
+                                color: Theme.pill
+                            }
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: 4
+                                radius: 10
+                                visible: board.dragId !== ""
+                                color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, zone.here ? 0.14 : 0.04)
+                                border.width: 1
+                                border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, zone.here ? 0.7 : 0.2)
+                            }
+                            Text {
+                                x: 16
+                                y: 18
+                                text: zone.modelData.label
+                                color: Theme.text
+                                opacity: zone.zid === "off" ? 0.5 : 0.8
+                                font.family: Theme.font
+                                font.pixelSize: 13
+                                font.weight: 700
+                            }
+                            Text {
+                                visible: zone.ids.length === 0
+                                x: flow.x
+                                y: 18
+                                text: zone.zid === "off" ? "Everything's on the bar" : "Nothing · drag one here"
+                                color: Theme.text
+                                opacity: 0.4
+                                font.family: Theme.font
+                                font.pixelSize: 12
+                            }
+                            Flow {
+                                id: flow
+                                x: 78
+                                y: 10
+                                width: parent.width - x - 12
+                                spacing: 6
+                                Repeater {
+                                    model: zone.ids
+                                    Rectangle {
+                                        id: chip
+                                        required property string modelData
+                                        readonly property string cid: modelData
+                                        readonly property var m: Settings.barMod(modelData)
+                                        visible: !!m
+                                        width: chipRow.width + 22
+                                        height: 32
+                                        radius: 16
+                                        opacity: board.dragId === modelData ? 0.3 : zone.zid === "off" ? 0.7 : 1
+                                        color: chipMouse.containsMouse ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.2) : Theme.pill
+                                        Row {
+                                            id: chipRow
+                                            anchors.centerIn: parent
+                                            spacing: 6
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: chip.m ? chip.m.icon : ""
+                                                color: Theme.accent
+                                                font.family: Theme.iconFont
+                                                font.pixelSize: 16
+                                                font.variableAxes: Theme.iconAxes
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: chip.m ? chip.m.label : ""
+                                                color: Theme.text
+                                                font.family: Theme.font
+                                                font.pixelSize: 12
+                                                font.weight: 600
+                                            }
+                                        }
+                                        MouseArea {
+                                            id: chipMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            preventStealing: true      // not the page's scrolling
+                                            cursorShape: board.dragId !== "" ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                                            property point pressAt
+                                            onPressed: m => pressAt = Qt.point(m.x, m.y)
+                                            onPositionChanged: m => {
+                                                if (!pressed)
+                                                    return;
+                                                if (board.dragId === "" && Math.abs(m.x - pressAt.x) + Math.abs(m.y - pressAt.y) > 5)
+                                                    board.dragId = chip.modelData;
+                                                if (board.dragId !== "")
+                                                    board.dragAt = mapToItem(board, m.x, m.y);
+                                            }
+                                            onReleased: {
+                                                if (board.dragId !== "")
+                                                    board.drop();
+                                                else
+                                                    Settings.page = page.pages[chip.modelData] || "bar";
+                                            }
+                                            onCanceled: board.dragId = ""
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // where it'll land
+                Rectangle {
+                    visible: !!board.spot
+                    x: board.spot ? board.spot.x - 1 : 0
+                    y: board.spot ? board.spot.y : 0
+                    width: 3
+                    height: 32
+                    radius: 1.5
+                    color: Theme.accent
+                }
+                // the chip, under the mouse
+                Rectangle {
+                    readonly property var m: board.dragId !== "" ? Settings.barMod(board.dragId) : null
+                    visible: !!m
+                    z: 10
+                    x: board.dragAt.x - width / 2
+                    y: board.dragAt.y - height / 2
+                    width: ghostRow.width + 22
+                    height: 32
+                    radius: 16
+                    color: Theme.accent
+                    Row {
+                        id: ghostRow
+                        anchors.centerIn: parent
+                        spacing: 6
+                        Text {
                             anchors.verticalCenter: parent.verticalCenter
-                            checked: Settings.v[wrow.modelData.key]
-                            onToggled: on => Settings.v[wrow.modelData.key] = on
+                            text: parent.parent.m ? parent.parent.m.icon : ""
+                            color: Theme.bg
+                            font.family: Theme.iconFont
+                            font.pixelSize: 16
+                            font.variableAxes: Theme.iconAxes
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: parent.parent.m ? parent.parent.m.label : ""
+                            color: Theme.bg
+                            font.family: Theme.font
+                            font.pixelSize: 12
+                            font.weight: 700
                         }
                     }
                 }
@@ -8032,6 +8675,15 @@ in
                     ]
                     current: Settings.v.barStyle
                     onPicked: s => Settings.v.barStyle = s
+                }
+            }
+            SetRow {
+                label: "Popups"
+                description: "How they open"
+                SetChoice {
+                    options: Settings.anims
+                    current: Settings.v.popupAnim
+                    onPicked: a => Settings.v.popupAnim = a
                 }
             }
             SetRow {
@@ -8240,6 +8892,15 @@ in
                 }
             }
             SetRow {
+                label: "Animation"
+                description: "Showing and hiding"
+                SetChoice {
+                    options: Settings.anims
+                    current: Settings.v.wsAnim
+                    onPicked: a => Settings.v.wsAnim = a
+                }
+            }
+            SetRow {
                 label: "Shading"
                 description: Settings.v.shading === "neumorphic" ? "Raised · bar, docks, pills, panels" : "No shadows"
                 SetChoice {
@@ -8414,6 +9075,15 @@ in
                     ]
                     current: Settings.v.dockStyle
                     onPicked: s => Settings.v.dockStyle = s
+                }
+            }
+            SetRow {
+                label: "Animation"
+                description: "Showing and hiding"
+                SetChoice {
+                    options: Settings.anims
+                    current: Settings.v.dockAnim
+                    onPicked: a => Settings.v.dockAnim = a
                 }
             }
             SetRow {
@@ -8933,6 +9603,7 @@ in
     import QtQuick
     import Quickshell
     import Quickshell.Bluetooth
+    import Quickshell.Io
     import Quickshell.Services.Pipewire
 
     // Settings → Bluetooth (it was the Bluetooth widget on the bar). Your devices and new
@@ -8943,6 +9614,52 @@ in
 
         readonly property var adapter: Bluetooth.defaultAdapter
         readonly property bool powered: !!adapter && adapter.enabled
+
+        // ── rfkill ──
+        // The kernel's radio switch. While Bluetooth is blocked there, BlueZ can't power
+        // the adapter on (Quickshell: "blocked by rfkill"), so nothing can scan. A soft
+        // block is a setting (it's remembered across boots): Unblock clears it. A hard
+        // block is a switch outside the system (a key, the BIOS): only that clears it.
+        // (Unblocking needs /dev/rfkill: the udev rule in configuration.nix gives it to
+        // whoever's at the computer.)
+        readonly property bool blocked: !!adapter && adapter.state === BluetoothAdapterState.Blocked
+        property bool hardBlocked: false
+        property string rfError: ""
+        function unblock() {
+            rfError = "";
+            rfUnblock.running = true;
+        }
+        onBlockedChanged: rfList.running = true
+        Component.onCompleted: rfList.running = true
+        Process {
+            id: rfList
+            command: ["${pkgs.util-linux}/bin/rfkill", "-n", "-r", "-o", "TYPE,HARD"]
+            environment: ({ LC_ALL: "C" })      // "blocked", not a translation
+            stdout: StdioCollector {
+                onStreamFinished: bt.hardBlocked = text.split("\n").some(l => /^bluetooth\s+blocked/.test(l.trim()))
+            }
+        }
+        Process {
+            id: rfUnblock
+            command: ["${pkgs.util-linux}/bin/rfkill", "unblock", "bluetooth"]
+            stderr: StdioCollector {
+                id: rfErr
+            }
+            onExited: code => {
+                rfList.running = true;
+                if (code !== 0)
+                    bt.rfError = rfErr.text.trim() || "rfkill failed";
+                else
+                    powerOn.restart();
+            }
+        }
+        // BlueZ notices the unblock a moment later; then turn it on
+        Timer {
+            id: powerOn
+            interval: 700
+            onTriggered: if (bt.adapter && !bt.blocked)
+                bt.adapter.enabled = true
+        }
 
         // ── When is a device really connected? ──
         // BlueZ (and so Quickshell) flips a device to "Connected" as soon as the
@@ -9108,11 +9825,28 @@ in
         SetSection {
             SetRow {
                 label: "Bluetooth"
-                description: !bt.adapter ? "No Bluetooth adapter found." : bt.powered ? (bt.adapter.name || "On") : "Off"
+                description: !bt.adapter ? "No Bluetooth adapter found." : bt.powered ? (bt.adapter.name || "On") : bt.blocked ? "Blocked (rfkill)" : "Off"
                 enabled: !!bt.adapter
                 SetSwitch {
                     checked: bt.powered
-                    onToggled: on => bt.adapter.enabled = on
+                    onToggled: on => {
+                        if (on && bt.blocked)
+                            bt.unblock();
+                        else
+                            bt.adapter.enabled = on;
+                    }
+                }
+            }
+            SetRow {
+                visible: bt.blocked
+                label: bt.hardBlocked ? "Switched off outside the system" : "Blocked by rfkill"
+                description: bt.rfError !== "" ? bt.rfError : bt.hardBlocked ? "A key or the BIOS · turn it on there" : "Can't scan or connect"
+                SetButton {
+                    visible: !bt.hardBlocked
+                    icon: "lock_open"
+                    text: "Unblock"
+                    accent: true
+                    onClicked: bt.unblock()
                 }
             }
             SetRow {
@@ -9973,14 +10707,18 @@ in
             interval: Settings.v.dockHideDelay
             onTriggered: frame.peeked = false
         }
-        // how far it's slid out of sight (0 = in place)
-        property real slide: hidden ? size + gap + 4 : 0
-        Behavior on slide {
+        // 1 = showing, 0 = hidden; how it goes (Settings.v.panelAnim): slides off the
+        // edge, fades, pops (fades and shrinks a little), or just goes
+        readonly property string anim: Settings.v.panelAnim
+        property real shownAmount: hidden ? 0 : 1
+        Behavior on shownAmount {
             NumberAnimation {
-                duration: Settings.ms(260)
+                duration: frame.anim === "none" ? 0 : Settings.ms(260)
                 easing.type: Easing.OutCubic
             }
         }
+        // how far it's slid out of sight (0 = in place)
+        readonly property real slide: anim === "slide" ? (1 - shownAmount) * (size + gap + 4) : 0
 
         // see-through room on the inner side: the shadow, and in Edit Mode its toolbar
         readonly property int room: editing ? (editorLoader.item ? (vertical ? editorLoader.item.width : editorLoader.item.height) + 30 : 160) : style === "smooth" ? 0 : 24
@@ -10030,12 +10768,8 @@ in
 
         Item {
             id: body
-            opacity: Panels.moving && Panels.moving.id === frame.panelId ? 0.4 : 1
-            Behavior on opacity {
-                NumberAnimation {
-                    duration: 120
-                }
-            }
+            opacity: (Panels.moving && Panels.moving.id === frame.panelId ? 0.4 : 1) * (frame.anim === "slide" ? 1 : frame.shownAmount)
+            scale: frame.anim === "pop" ? 0.9 + 0.1 * frame.shownAmount : 1
             x: !frame.vertical ? frame.along : frame.edge === "left" ? frame.gap - frame.slide : frame.width - frame.size - frame.gap + frame.slide
             y: frame.vertical ? frame.along : frame.edge === "top" ? frame.gap - frame.slide : frame.height - frame.size - frame.gap + frame.slide
             width: frame.vertical ? frame.size : frame.bodyLength
@@ -11650,6 +12384,16 @@ in
                         onPicked: s => page.set({ visibility: s })
                     }
                 }
+                SetRow {
+                    enabled: !!page.p && page.p.visibility === "autohide"
+                    label: "Hiding"
+                    description: "Every auto-hide panel"
+                    SetChoice {
+                        options: Settings.anims
+                        current: Settings.v.panelAnim
+                        onPicked: a => Settings.v.panelAnim = a
+                    }
+                }
             }
 
             SetSection {
@@ -11879,7 +12623,8 @@ in
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Bottom
         WlrLayershell.namespace: "desktop"
-        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+        // while the menu's open it can take the keyboard: the focus grab below needs that
+        WlrLayershell.keyboardFocus: open ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
         color: "transparent"
 
         property bool open: false
@@ -11916,154 +12661,97 @@ in
             onCleared: desk.open = false
         }
 
-        Rectangle {
+        MenuCard {
             id: menu
             visible: desk.open
             width: 230
-            height: items.height + 12
-            radius: 12
-            color: Theme.c.overlay
-            border.width: 1
-            border.color: Theme.pillSolid
-
-            Column {
-                id: items
-                x: 6
-                y: 6
-                width: parent.width - 12
-
-                Repeater {
-                    model: [
-                        { act: "edit", icon: Panels.editMode ? "check" : "edit", label: Panels.editMode ? "Done editing" : "Edit desktop" },
-                        { act: "panel", icon: "add_box", label: "Add Panel" },
-                        { sep: true },
-                        { act: "wallpaper", icon: "wallpaper", label: "Wallpaper and theme" },
-                        { act: "settings", icon: "settings", label: "Settings" }
-                    ]
-                    Item {
-                        id: entry
-                        required property var modelData
-                        width: items.width
-                        height: modelData.sep ? 9 : 32
-                        Rectangle {
-                            visible: !!entry.modelData.sep
-                            anchors.centerIn: parent
-                            width: parent.width - 16
-                            height: 1
-                            color: Theme.pill
-                        }
-                        Rectangle {
-                            visible: !entry.modelData.sep
-                            anchors.fill: parent
-                            radius: 8
-                            color: entryMouse.containsMouse ? Theme.pill : "transparent"
-                            Row {
-                                x: 10
-                                anchors.verticalCenter: parent.verticalCenter
-                                spacing: 10
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: entry.modelData.icon || ""
-                                    color: Theme.accent
-                                    font.family: Theme.iconFont
-                                    font.pixelSize: 17
-                                    font.variableAxes: Theme.iconAxes
-                                }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: entry.modelData.label || ""
-                                    color: Theme.text
-                                    font.family: Theme.font
-                                    font.pixelSize: 12
-                                    font.weight: 600
-                                }
-                            }
-                            MouseArea {
-                                id: entryMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    desk.open = false;
-                                    desk.run(entry.modelData.act);
-                                }
-                            }
-                        }
-                    }
-                }
+            model: [
+                { act: "edit", icon: Panels.editMode ? "check" : "edit", label: Panels.editMode ? "Done editing" : "Edit desktop" },
+                { act: "panel", icon: "add_box", label: "Add Panel" },
+                { sep: true },
+                { act: "wallpaper", icon: "wallpaper", label: "Wallpaper and theme" },
+                { act: "settings", icon: "settings", label: "Settings" }
+            ]
+            onPicked: act => {
+                desk.open = false;
+                desk.run(act);
             }
         }
     }
   '';
 
-  xdg.configFile."quickshell/EditBanner.qml".text = ''
+  xdg.configFile."quickshell/MenuCard.qml".text = ''
     import QtQuick
-    import Quickshell
-    import Quickshell.Wayland
 
-    // Edit Mode's bar at the top of each screen, like KDE's: Add Panel, Add Widgets,
-    // Settings, Done. (Each panel has its own toolbar too: PanelEditor.qml.)
-    PanelWindow {
-        id: banner
+    // A right-click menu's card: entries { act, icon, label } or { sep: true }.
+    // (the desktop's: DesktopMenu.qml; the bar's: shell.qml)
+    Rectangle {
+        id: card
 
-        anchors.top: true
-        exclusionMode: ExclusionMode.Ignore
-        WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.namespace: "edit-banner"
-        color: "transparent"
-        implicitWidth: card.width + 40
-        implicitHeight: card.height + 30
+        property var model: []
+        signal picked(string act)
 
-        // the panels on this screen
-        readonly property var mine: Panels.list.filter(p => p.enabled && (p.screen === "" || (banner.screen && p.screen === banner.screen.name)))
+        width: 220
+        height: items.height + 12
+        radius: 12
+        color: Theme.c.overlay
+        border.width: 1
+        border.color: Theme.pillSolid
 
-        Glass {
-            id: card
-            x: 20
-            y: 14
-            width: row.width + 24
-            height: 44
-            radius: 22
-            shadow: true
-            Row {
-                id: row
-                x: 12
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 8
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    rightPadding: 6
-                    text: "Editing desktop"
-                    color: Theme.accent
-                    font.family: Theme.font
-                    font.pixelSize: 13
-                    font.weight: 800
-                }
-                SetButton {
-                    anchors.verticalCenter: parent.verticalCenter
-                    icon: "add_box"
-                    text: "Add Panel"
-                    onClicked: Panels.add()
-                }
-                SetButton {
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: banner.mine.length > 0
-                    icon: "widgets"
-                    text: "Add Widgets"
-                    onClicked: Panels.drawerPanel = banner.mine[0].id
-                }
-                SetButton {
-                    anchors.verticalCenter: parent.verticalCenter
-                    icon: "settings"
-                    text: "Settings"
-                    onClicked: Settings.show("panels")
-                }
-                SetButton {
-                    anchors.verticalCenter: parent.verticalCenter
-                    icon: "check"
-                    text: "Done"
-                    accent: true
-                    onClicked: Panels.editMode = false
+        Column {
+            id: items
+            x: 6
+            y: 6
+            width: parent.width - 12
+
+            Repeater {
+                model: card.model
+                Item {
+                    id: entry
+                    required property var modelData
+                    width: items.width
+                    height: modelData.sep ? 9 : 32
+                    Rectangle {
+                        visible: !!entry.modelData.sep
+                        anchors.centerIn: parent
+                        width: parent.width - 16
+                        height: 1
+                        color: Theme.pill
+                    }
+                    Rectangle {
+                        visible: !entry.modelData.sep
+                        anchors.fill: parent
+                        radius: 8
+                        color: entryMouse.containsMouse ? Theme.pill : "transparent"
+                        Row {
+                            x: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 10
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: entry.modelData.icon || ""
+                                color: Theme.accent
+                                font.family: Theme.iconFont
+                                font.pixelSize: 17
+                                font.variableAxes: Theme.iconAxes
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: entry.modelData.label || ""
+                                color: Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: 12
+                                font.weight: 600
+                            }
+                        }
+                        MouseArea {
+                            id: entryMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: card.picked(entry.modelData.act)
+                        }
+                    }
                 }
             }
         }
@@ -12094,7 +12782,9 @@ in
         x: v ? (e === "left" ? hostBody.x + hostBody.width + 10 : hostBody.x - width - 10) : Math.max(8, Math.min(host.width - width - 8, hostBody.x + hostBody.width / 2 - width / 2))
         y: !v ? (e === "top" ? hostBody.y + hostBody.height + 10 : hostBody.y - height - 10) : Math.max(8, Math.min(host.height - height - 8, hostBody.y + hostBody.height / 2 - height / 2))
 
-        readonly property int cardWidth: v ? 320 : Math.min(780, host.width - 16)
+        // wide enough that every control fits on its line (the side panels' card stands
+        // beside the panel, so it can be wider than the panel is thick)
+        readonly property int cardWidth: v ? 430 : Math.min(800, host.width - 16)
 
         function set(changes) {
             Panels.update(pid, changes, true);
@@ -12218,11 +12908,13 @@ in
                         visible: ed.editable
                         spacing: 6
                         Label {
+                            width: 84
                             anchors.verticalCenter: parent.verticalCenter
                             text: "Length"
                         }
                         SetChoice {
                             anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(fitWidth, tools.width - 92)
                             options: [
                                 { id: "fill", label: "Fill" },
                                 { id: "fit", label: "Fit" },
@@ -12266,6 +12958,7 @@ in
                         visible: ed.editable
                         spacing: 6
                         Label {
+                            width: 84
                             anchors.verticalCenter: parent.verticalCenter
                             text: "Thickness"
                         }
@@ -12284,11 +12977,13 @@ in
                         visible: ed.editable
                         spacing: 6
                         Label {
+                            width: 84
                             anchors.verticalCenter: parent.verticalCenter
                             text: "Style"
                         }
                         SetChoice {
                             anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(fitWidth, tools.width - 92)
                             options: [
                                 { id: "smooth", label: "Smooth" },
                                 { id: "floating", label: "Floating" },
@@ -12303,11 +12998,13 @@ in
                         visible: ed.editable
                         spacing: 6
                         Label {
+                            width: 84
                             anchors.verticalCenter: parent.verticalCenter
                             text: "Visibility"
                         }
                         SetChoice {
                             anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(fitWidth, tools.width - 92)
                             options: [
                                 { id: "always", label: "Always" },
                                 { id: "autohide", label: "Auto-hide" },
@@ -12315,6 +13012,22 @@ in
                             ]
                             current: ed.p ? ed.p.visibility || "always" : "always"
                             onPicked: s => ed.set({ visibility: s })
+                        }
+                    }
+                    Row {
+                        visible: ed.editable && !!ed.p && ed.p.visibility === "autohide"
+                        spacing: 6
+                        Label {
+                            width: 84
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Hiding"
+                        }
+                        SetChoice {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(fitWidth, tools.width - 92)
+                            options: Settings.anims
+                            current: Settings.v.panelAnim
+                            onPicked: a => Settings.v.panelAnim = a
                         }
                     }
                     Row {
@@ -13546,6 +14259,746 @@ in
     }
   '';
 
+  xdg.configFile."quickshell/BarEditor.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // The main bar in Edit desktop (shell.qml), like your own panels (PanelEditor.qml):
+    // drag a widget along the bar or to the other side, drag it off the bar (or its ×) to
+    // take it away, and add more from the widget drawer. Under the bar: its toolbar,
+    // with Edit desktop's own buttons (Add Panel, Done) on top.
+    // The order is Settings.v.barLeft / barRight; the bar lays itself out from those.
+    Item {
+        id: ed
+
+        required property Item body       // the bar (barBody)
+        required property Item leftRow
+        required property Item rightRow
+
+        readonly property bool active: Panels.editMode
+        visible: active
+        onActiveChanged: if (!active) {
+            drawerOpen = false;
+            dragId = "";
+        }
+
+        property bool drawerOpen: false
+        readonly property Item toolbar: toolCard
+        readonly property Item drawer: drawerCard
+        readonly property Item ghostItem: dragId !== "" ? ghost : null
+
+        // ── what's on the bar, where ──
+        function modsIn(row) {
+            const out = [];
+            const kids = row.children;
+            for (let i = 0; i < kids.length; i++) {
+                const k = kids[i];
+                if (!k.objectName.startsWith("mod:") || !k.visible || k.width <= 0)
+                    continue;
+                const p = k.mapToItem(ed, 0, 0);
+                out.push({ id: k.objectName.slice(4), x: p.x, y: p.y, w: k.width, h: k.height });
+            }
+            return out.sort((a, b) => a.x - b.x);
+        }
+        function modAt(x, y) {
+            for (const m of modsIn(leftRow).concat(modsIn(rightRow)))
+                if (x >= m.x - 6 && x < m.x + m.w + 6)
+                    return m;
+            return null;
+        }
+        // where a widget dropped at x would go: the side, its place in that side's list, and
+        // where to draw the marker
+        function spotAt(x) {
+            const side = x < body.x + body.width / 2 ? "left" : "right";
+            const list = (side === "left" ? Settings.v.barLeft : Settings.v.barRight).filter(id => id !== dragId);
+            const mods = modsIn(side === "left" ? leftRow : rightRow).filter(m => m.id !== dragId);
+            let i = 0;
+            while (i < mods.length && mods[i].x + mods[i].w / 2 < x)
+                i++;
+            const index = i < mods.length ? list.indexOf(mods[i].id) : list.length;
+            const gap = 6;
+            let mx;
+            if (mods.length === 0)
+                mx = side === "left" ? body.x + 14 : body.x + body.width - 14;
+            else if (i < mods.length)
+                mx = mods[i].x - gap;
+            else
+                mx = mods[mods.length - 1].x + mods[mods.length - 1].w + gap;
+            return { side: side, index: index < 0 ? list.length : index, x: mx };
+        }
+
+        // ── dragging ──
+        property string dragId: ""          // the widget being dragged (on the bar, or new)
+        property bool dragNew: false        // out of the drawer
+        property point dragAt: Qt.point(-1, -1)
+        readonly property bool overBar: dragId !== "" && dragAt.y > body.y - 30 && dragAt.y < body.y + body.height + 30
+        readonly property var spot: overBar ? spotAt(dragAt.x) : null
+        function drop() {
+            if (dragId === "")
+                return;
+            if (spot)
+                Settings.placeMod(dragId, spot.side, spot.index);
+            else if (!dragNew)
+                Settings.removeMod(dragId);      // dragged off the bar
+            dragId = "";
+            dragNew = false;
+        }
+
+        // the two sides light up while something's dragged
+        Repeater {
+            model: [ed.leftRow, ed.rightRow]
+            Rectangle {
+                required property Item modelData
+                readonly property bool here: !!ed.spot && (ed.spot.side === "left") === (modelData === ed.leftRow)
+                visible: ed.dragId !== ""
+                x: (modelData === ed.leftRow ? ed.body.x : ed.body.x + ed.body.width / 2) + 4
+                y: ed.body.y + 3
+                width: ed.body.width / 2 - 8
+                height: ed.body.height - 6
+                radius: Math.min(12, height / 2)
+                color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, here ? 0.16 : 0.06)
+                border.width: 1
+                border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, here ? 0.8 : 0.3)
+            }
+        }
+        // where it'll land
+        Rectangle {
+            visible: !!ed.spot
+            x: ed.spot ? ed.spot.x - 1.5 : 0
+            y: ed.body.y + 5
+            width: 3
+            height: ed.body.height - 10
+            radius: 1.5
+            color: Theme.accent
+        }
+
+        // ── the bar's widgets: hover, drag, × ──
+        MouseArea {
+            id: area
+            x: ed.body.x
+            y: ed.body.y
+            width: ed.body.width
+            height: ed.body.height
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+            cursorShape: ed.dragId !== "" ? Qt.ClosedHandCursor : hovered ? Qt.OpenHandCursor : Qt.ArrowCursor
+            property var hovered: null
+            property var pressed: null
+            property point pressAt
+            onPositionChanged: m => {
+                const p = mapToItem(ed, m.x, m.y);
+                if (pressed && ed.dragId === "" && Math.abs(m.x - pressAt.x) + Math.abs(m.y - pressAt.y) > 6) {
+                    ed.dragNew = false;
+                    ed.dragId = pressed.id;
+                }
+                if (ed.dragId !== "")
+                    ed.dragAt = p;
+                else
+                    hovered = ed.modAt(p.x, p.y);
+            }
+            onExited: if (ed.dragId === "")
+                hovered = null
+            onPressed: m => {
+                const p = mapToItem(ed, m.x, m.y);
+                pressed = ed.modAt(p.x, p.y);
+                pressAt = Qt.point(m.x, m.y);
+            }
+            onReleased: {
+                ed.drop();
+                pressed = null;
+            }
+            onCanceled: {
+                ed.dragId = "";
+                pressed = null;
+            }
+        }
+        // the one under the mouse: outlined, with its ×
+        Rectangle {
+            id: hoverBox
+            readonly property var m: area.hovered
+            visible: !!m && ed.dragId === ""
+            x: m ? m.x - 5 : 0
+            y: ed.body.y + 3
+            width: m ? m.w + 10 : 0
+            height: ed.body.height - 6
+            radius: Math.min(10, height / 2)
+            color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.1)
+            border.width: 1.5
+            border.color: Theme.accent
+            Rectangle {
+                // inside the top right corner (a top bar's edge would cut it off)
+                x: parent.width - width + 5
+                y: -3
+                width: 16
+                height: 16
+                radius: 8
+                color: xMouse.containsMouse ? Theme.red : Theme.c.overlay
+                border.width: 1
+                border.color: Theme.red
+                Text {
+                    anchors.centerIn: parent
+                    text: "close"
+                    color: xMouse.containsMouse ? Theme.bg : Theme.red
+                    font.family: Theme.iconFont
+                    font.pixelSize: 12
+                    font.variableAxes: Theme.iconAxes
+                }
+                MouseArea {
+                    id: xMouse
+                    anchors.fill: parent
+                    anchors.margins: -3
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        Settings.removeMod(hoverBox.m.id);
+                        area.hovered = null;
+                    }
+                }
+            }
+        }
+
+        // ── cards under the bar ──
+        component Card: Rectangle {
+            radius: 14
+            color: Theme.c.overlay
+            border.width: 1
+            border.color: Theme.pillSolid
+        }
+        component Label: Text {
+            color: Theme.text
+            opacity: 0.55
+            font.family: Theme.font
+            font.pixelSize: 11
+            font.weight: 600
+        }
+
+        Column {
+            id: cards
+            x: Math.max(8, Math.min(ed.width - width - 8, ed.body.x + ed.body.width / 2 - width / 2))
+            y: ed.body.y + ed.body.height + 12
+            width: Math.min(760, ed.width - 16)
+            spacing: 8
+
+            Card {
+                id: toolCard
+                width: cards.width
+                height: head.height + tools.height + 30
+
+                // Edit desktop itself (it was a bar of its own at the top: EditBanner)
+                Item {
+                    id: head
+                    x: 10
+                    y: 10
+                    width: parent.width - 20
+                    height: 30
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Editing desktop"
+                        color: Theme.accent
+                        font.family: Theme.font
+                        font.pixelSize: 13
+                        font.weight: 800
+                    }
+                    Row {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 6
+                        SetButton {
+                            icon: "add_box"
+                            text: "Add Panel"
+                            onClicked: Panels.add()
+                        }
+                        SetButton {
+                            icon: "settings"
+                            text: "Settings"
+                            onClicked: Settings.show("panels")
+                        }
+                        SetButton {
+                            icon: "check"
+                            text: "Done"
+                            accent: true
+                            onClicked: Panels.editMode = false
+                        }
+                    }
+                }
+                Rectangle {
+                    x: 10
+                    y: head.y + head.height + 4
+                    width: parent.width - 20
+                    height: 1
+                    color: Theme.pill
+                }
+                Flow {
+                    id: tools
+                    x: 10
+                    y: head.y + head.height + 10
+                    width: parent.width - 20
+                    spacing: 10
+
+                    Text {
+                        height: 30
+                        verticalAlignment: Text.AlignVCenter
+                        rightPadding: 4
+                        text: "Bar"
+                        color: Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: 14
+                        font.weight: 800
+                    }
+                    Row {
+                        spacing: 6
+                        Label {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Style"
+                        }
+                        SetChoice {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(fitWidth, tools.width - 60)
+                            options: [
+                                { id: "smooth", label: "Smooth" },
+                                { id: "floating", label: "Floating" },
+                                { id: "pill", label: "Pill" },
+                                { id: "minimal", label: "Minimal" }
+                            ]
+                            current: Settings.v.barStyle
+                            onPicked: s => Settings.v.barStyle = s
+                        }
+                    }
+                    Row {
+                        spacing: 6
+                        Label {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Height"
+                        }
+                        SetSlider {
+                            anchors.verticalCenter: parent.verticalCenter
+                            sliderWidth: 110
+                            from: 28
+                            to: 60
+                            live: false
+                            value: Settings.v.barHeight
+                            suffix: " px"
+                            onMoved: val => Settings.v.barHeight = val
+                        }
+                    }
+                    Row {
+                        spacing: 6
+                        Label {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Popups"
+                        }
+                        SetChoice {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(fitWidth, tools.width - 60)
+                            options: Settings.anims
+                            current: Settings.v.popupAnim
+                            onPicked: a => Settings.v.popupAnim = a
+                        }
+                    }
+                    Row {
+                        spacing: 6
+                        SetButton {
+                            icon: "add"
+                            text: "Add widgets"
+                            accent: ed.drawerOpen
+                            onClicked: ed.drawerOpen = !ed.drawerOpen
+                        }
+                        SetButton {
+                            icon: "settings"
+                            text: "More"
+                            onClicked: Settings.show("bar")
+                        }
+                    }
+                }
+            }
+
+            // ── the widget drawer: drag one onto the bar, or click to add / take it away ──
+            Card {
+                id: drawerCard
+                visible: ed.drawerOpen
+                width: cards.width
+                height: visible ? drawerCol.height + 20 : 0
+                Column {
+                    id: drawerCol
+                    x: 10
+                    y: 10
+                    width: parent.width - 20
+                    spacing: 8
+                    Item {
+                        width: parent.width
+                        height: 24
+                        Label {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Drag onto the bar · click to add or remove"
+                        }
+                        IconButton {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            icon: "close"
+                            tip: "Close"
+                            onClicked: ed.drawerOpen = false
+                        }
+                    }
+                    Flow {
+                        width: parent.width
+                        spacing: 6
+                        Repeater {
+                            model: Settings.barMods
+                            Rectangle {
+                                id: tile
+                                required property var modelData
+                                readonly property bool on: Settings.onBar(modelData.id)
+                                width: 104
+                                height: 60
+                                radius: 10
+                                color: tileMouse.containsMouse ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18) : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.55)
+                                border.width: on ? 1 : 0
+                                border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.6)
+                                Column {
+                                    anchors.centerIn: parent
+                                    spacing: 4
+                                    opacity: tile.on ? 0.6 : 1
+                                    Text {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        text: tile.modelData.icon
+                                        color: Theme.accent
+                                        font.family: Theme.iconFont
+                                        font.pixelSize: 21
+                                        font.variableAxes: Theme.iconAxes
+                                    }
+                                    Text {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        width: tile.width - 8
+                                        horizontalAlignment: Text.AlignHCenter
+                                        elide: Text.ElideRight
+                                        text: tile.modelData.label
+                                        color: Theme.text
+                                        font.family: Theme.font
+                                        font.pixelSize: 11
+                                        font.weight: 600
+                                    }
+                                }
+                                Text {
+                                    visible: tile.on
+                                    x: parent.width - width - 5
+                                    y: 4
+                                    text: "check_circle"
+                                    color: Theme.accent
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: 14
+                                    font.variableAxes: Theme.iconAxes
+                                }
+                                MouseArea {
+                                    id: tileMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                                    property point pressAt
+                                    onPressed: m => pressAt = Qt.point(m.x, m.y)
+                                    onPositionChanged: m => {
+                                        if (!pressed)
+                                            return;
+                                        if (ed.dragId === "" && Math.abs(m.x - pressAt.x) + Math.abs(m.y - pressAt.y) > 6) {
+                                            ed.dragNew = !tile.on;
+                                            ed.dragId = tile.modelData.id;
+                                        }
+                                        if (ed.dragId !== "")
+                                            ed.dragAt = mapToItem(ed, m.x, m.y);
+                                    }
+                                    onReleased: {
+                                        if (ed.dragId !== "") {
+                                            // let go back on the drawer: leave it where it was
+                                            if (!ed.spot)
+                                                ed.dragNew = true;
+                                            ed.drop();
+                                        } else {
+                                            Settings.setOnBar(tile.modelData.id, !tile.on);
+                                        }
+                                    }
+                                    onCanceled: ed.dragId = ""
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // what's being dragged, under the mouse
+        Rectangle {
+            id: ghost
+            readonly property var m: ed.dragId !== "" ? Settings.barMod(ed.dragId) : null
+            visible: !!m
+            x: ed.dragAt.x - width / 2
+            y: ed.dragAt.y - height / 2
+            width: ghostRow.width + 20
+            height: 34
+            radius: 17
+            color: Theme.accent
+            opacity: ed.overBar || ed.dragNew ? 0.92 : 0.55
+            Row {
+                id: ghostRow
+                anchors.centerIn: parent
+                spacing: 6
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: ghost.m ? (ed.overBar || ed.dragNew ? ghost.m.icon : "delete") : ""
+                    color: Theme.bg
+                    font.family: Theme.iconFont
+                    font.pixelSize: 17
+                    font.variableAxes: Theme.iconAxes
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: ghost.m ? (ed.overBar || ed.dragNew ? ghost.m.label : "Remove") : ""
+                    color: Theme.bg
+                    font.family: Theme.font
+                    font.pixelSize: 12
+                    font.weight: 700
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/DockEditor.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Wayland
+
+    // The two docks in Edit desktop (shell.qml makes one per screen while editing): a
+    // card beside each, to switch it on or off and change how it looks and moves. Both
+    // docks stay out while you edit (Dock.qml, WorkspaceDock.qml), so you see it change.
+    // The same settings as Settings → Docks.
+    PanelWindow {
+        id: win
+
+        anchors {
+            top: true
+            bottom: true
+            left: true
+            right: true
+        }
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.namespace: "dock-editor"
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+        color: "transparent"
+        mask: Region {
+            item: dockCard
+            Region {
+                item: wsCard
+            }
+        }
+
+        // about how much room each dock takes (out, with its apps), to stand the cards
+        // clear of it
+        readonly property real dockHeight: Settings.v.dockIconSize + Settings.v.dockSlotPad + 2 * Settings.v.dockPadding + (Settings.v.dockStyle === "smooth" ? 0 : Settings.v.dockGap)
+        readonly property real wsWidth: Settings.v.wsCell + 16 + Settings.v.wsMaxIcons * (Settings.v.wsIconSize + 4) + 2 * Settings.v.wsPadding + (Settings.v.wsStyle === "smooth" ? 0 : Settings.v.wsGap)
+
+        component Card: Rectangle {
+            width: 380
+            height: col.height + 24
+            radius: 14
+            color: Theme.c.overlay
+            border.width: 1
+            border.color: Theme.pillSolid
+            default property alias rows: col.data
+            Column {
+                id: col
+                x: 12
+                y: 12
+                width: parent.width - 24
+                spacing: 10
+            }
+        }
+        component Label: Text {
+            width: 84
+            color: Theme.text
+            opacity: 0.55
+            font.family: Theme.font
+            font.pixelSize: 11
+            font.weight: 600
+        }
+        // the card's title, with the dock's on / off switch
+        component Head: Item {
+            id: head
+            property string title
+            property string icon
+            property bool checked
+            signal toggled(bool on)
+            width: parent ? parent.width : 300
+            height: 28
+            Row {
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 8
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: head.icon
+                    color: Theme.accent
+                    font.family: Theme.iconFont
+                    font.pixelSize: 18
+                    font.variableAxes: Theme.iconAxes
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: head.title
+                    color: Theme.text
+                    font.family: Theme.font
+                    font.pixelSize: 14
+                    font.weight: 800
+                }
+            }
+            SetSwitch {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                checked: head.checked
+                onToggled: v => head.toggled(v)
+            }
+        }
+        component ChoiceRow: Row {
+            id: crow
+            property string label
+            property var options: []
+            property var current
+            signal picked(var id)
+            spacing: 6
+            Label {
+                anchors.verticalCenter: parent.verticalCenter
+                text: crow.label
+            }
+            SetChoice {
+                anchors.verticalCenter: parent.verticalCenter
+                options: crow.options
+                current: crow.current
+                onPicked: v => crow.picked(v)
+            }
+        }
+        component SliderRow: Row {
+            id: srow
+            property string label
+            property real from
+            property real to
+            property real value
+            signal moved(real v)
+            spacing: 6
+            Label {
+                anchors.verticalCenter: parent.verticalCenter
+                text: srow.label
+            }
+            SetSlider {
+                anchors.verticalCenter: parent.verticalCenter
+                sliderWidth: 170
+                from: srow.from
+                to: srow.to
+                live: false
+                value: srow.value
+                suffix: " px"
+                onMoved: v => srow.moved(v)
+            }
+        }
+        readonly property var styles: [
+            { id: "smooth", label: "Smooth" },
+            { id: "floating", label: "Floating" },
+            { id: "pill", label: "Pill" }
+        ]
+
+        // ── the dock (bottom) ──
+        Card {
+            id: dockCard
+            x: (win.width - width) / 2
+            y: win.height - height - (Settings.v.dock ? win.dockHeight + 20 : 20)
+            Head {
+                title: "Dock"
+                icon: "dock_to_bottom"
+                checked: Settings.v.dock
+                onToggled: v => Settings.v.dock = v
+            }
+            Column {
+                spacing: 10
+                enabled: Settings.v.dock
+                opacity: enabled ? 1 : 0.45
+                ChoiceRow {
+                    label: "Style"
+                    options: win.styles
+                    current: Settings.v.dockStyle
+                    onPicked: v => Settings.v.dockStyle = v
+                }
+                ChoiceRow {
+                    label: "Animation"
+                    options: Settings.anims
+                    current: Settings.v.dockAnim
+                    onPicked: v => Settings.v.dockAnim = v
+                }
+                SliderRow {
+                    label: "Icons"
+                    from: 20
+                    to: 72
+                    value: Settings.v.dockIconSize
+                    onMoved: v => Settings.v.dockIconSize = v
+                }
+                ChoiceRow {
+                    label: "Hides"
+                    options: [
+                        { id: false, label: "When you leave it" },
+                        { id: true, label: "Never" }
+                    ]
+                    current: Settings.v.dockStayUp
+                    onPicked: v => Settings.v.dockStayUp = v
+                }
+            }
+            SetButton {
+                icon: "settings"
+                text: "More"
+                onClicked: Settings.show("docks")
+            }
+        }
+
+        // ── the workspaces dock (left) ──
+        Card {
+            id: wsCard
+            x: Settings.v.wsDock ? win.wsWidth + 24 : 20
+            // the middle of the screen, unless the dock's card is in the way
+            y: Math.max(Theme.barBottom + 12, Math.min((win.height - height) / 2, dockCard.y - height - 12))
+            Head {
+                title: "Workspaces dock"
+                icon: "view_sidebar"
+                checked: Settings.v.wsDock
+                onToggled: v => Settings.v.wsDock = v
+            }
+            Column {
+                spacing: 10
+                enabled: Settings.v.wsDock
+                opacity: enabled ? 1 : 0.45
+                ChoiceRow {
+                    label: "Style"
+                    options: win.styles
+                    current: Settings.v.wsStyle
+                    onPicked: v => Settings.v.wsStyle = v
+                }
+                ChoiceRow {
+                    label: "Animation"
+                    options: Settings.anims
+                    current: Settings.v.wsAnim
+                    onPicked: v => Settings.v.wsAnim = v
+                }
+                SliderRow {
+                    label: "Rows"
+                    from: 28
+                    to: 72
+                    value: Settings.v.wsCell
+                    onMoved: v => Settings.v.wsCell = v
+                }
+            }
+            SetButton {
+                icon: "settings"
+                text: "More"
+                onClicked: Settings.show("docks")
+            }
+        }
+    }
+  '';
+
   xdg.configFile."quickshell/Theme.qml".text = ''
     pragma Singleton
 
@@ -13858,6 +15311,11 @@ in
             return Math.round(base * (0.9 + 0.3 * Math.min(1, height / 900)));
         }
 
+        // how the popup shows and hides (Settings → Bar, Edit desktop): "slide" drops out
+        // of the bar, "fade" fades in where it is, "pop" fades in and grows a little, "none"
+        readonly property string anim: Settings.v.popupAnim
+        readonly property real grow: anim === "slide" ? openness : 1
+
         // the curves into the bar: none when the popup floats (Theme.barDetached)
         readonly property int flare: Theme.barDetached ? 0 : curve
 
@@ -13902,7 +15360,7 @@ in
             closeSlide.stop()
             resize.stop()
             popup.shownHeight = popup.bodyHeight
-            openSlide.duration = root.timeFor(root.duration, popup.bodyHeight)
+            openSlide.duration = root.anim === "none" ? 0 : root.timeFor(root.duration, popup.bodyHeight)
             openSlide.restart()
         }
 
@@ -13916,7 +15374,7 @@ in
             // Closing: back up into the bar (closeCurve)
             openSlide.stop()
             resize.stop()
-            closeSlide.duration = root.timeFor(root.closeDuration, popup.shownHeight)
+            closeSlide.duration = root.anim === "none" ? 0 : root.timeFor(root.closeDuration, popup.shownHeight)
             closeSlide.restart()
         }
 
@@ -14003,6 +15461,9 @@ in
             parent: root.QsWindow.contentItem
             z: 100                  // over the rest of the bar (its corner curves)
             visible: root.popupShown
+            opacity: root.anim === "slide" ? 1 : root.openness
+            transformOrigin: Item.Top
+            scale: root.anim === "pop" ? 0.9 + 0.1 * root.openness : 1
             y: Theme.barBottom + Theme.popupGap
             width: implicitWidth
             height: shape.height    // only the part showing takes clicks (the bar's mask)
@@ -14048,7 +15509,7 @@ in
             Shape {
                 id: shape
                 width: popup.implicitWidth
-                height: root.openness * popup.shownHeight     // grows down as it opens
+                height: root.grow * popup.shownHeight     // grows down as it opens (slide)
                 visible: height > 0.5 && !Theme.barDetached
                 preferredRendererType: Shape.CurveRenderer    // smooth, anti-aliased curves
 
@@ -14112,10 +15573,10 @@ in
                     x: root.pad
                     // Slides down out of the bar while opening. Once open it stays put, and
                     // the shape grows or shrinks underneath when the content does.
-                    y: (root.openness - 1) * popup.shownHeight + root.pad
+                    y: (root.grow - 1) * popup.shownHeight + root.pad
                     width: popup.bodyWidth - root.pad * 2
                     height: popup.bodyHeight - root.pad * 2
-                    opacity: root.openness
+                    opacity: root.anim === "slide" ? root.openness : 1     // (the others fade it all)
                 }
             }
         }
@@ -17331,7 +18792,9 @@ in
         // ── the dock ──
         DockPanel {
             id: panel
-            open: dock.shown || Settings.v.dockStayUp || Settings.peek === "dock"     // (Settings → Dock)
+            // out while you're editing the desktop too, so you see what you change
+            open: dock.shown || Settings.v.dockStayUp || Settings.peek === "dock" || Panels.editMode     // (Settings → Dock)
+            anim: Settings.v.dockAnim
             padding: Settings.v.dockPadding
             style: Settings.v.dockStyle
             gap: Settings.v.dockGap
@@ -18133,6 +19596,17 @@ in
 
         default property alias content: area.data
 
+
+        // how it shows and hides (Settings → Docks / Edit desktop): "slide" grows out of
+        // the edge, "fade" fades in where it is, "pop" fades in and grows a little, "none"
+        property string anim: "slide"
+        // how much of its size it's showing: slide follows the opening, the others are
+        // always full size
+        readonly property real grow: anim === "slide" ? openness : 1
+        opacity: anim === "slide" ? 1 : openness
+        transformOrigin: Item.Bottom
+        scale: anim === "pop" ? 0.86 + 0.14 * openness : 1
+
         // 0 = closed (flat in the edge), 1 = all the way up
         property real openness: 0
         visible: openness > 0
@@ -18162,7 +19636,7 @@ in
         x: anchorX - shownWidth / 2 - flare
         y: baseY - height - (detached ? gap : 0)
         width: shownWidth + flare * 2
-        height: openness * shownHeight
+        height: grow * shownHeight
 
         // a bigger one gets a little longer, like Widget.qml
         function timeFor(base) {
@@ -18171,13 +19645,18 @@ in
         onOpenChanged: {
             if (open) {
                 closeAnim.stop();
-                openAnim.duration = timeFor(duration);
+                openAnim.duration = anim === "none" ? 0 : timeFor(duration);
                 openAnim.restart();
             } else {
                 openAnim.stop();
-                closeAnim.duration = timeFor(closeDuration);
+                closeAnim.duration = anim === "none" ? 0 : timeFor(closeDuration);
                 closeAnim.restart();
             }
+        }
+        // made while it should already be out (switched on from Settings, Edit desktop)
+        Component.onCompleted: if (open) {
+            openAnim.duration = anim === "none" ? 0 : timeFor(duration);
+            openAnim.restart();
         }
         NumberAnimation {
             id: openAnim
@@ -18290,10 +19769,10 @@ in
             Item {
                 id: area
                 x: (pop.shownWidth - pop.bodyWidth) / 2 + pop.padding
-                y: pop.openness * (pop.shownHeight - pop.bodyHeight) + pop.padding
+                y: pop.grow * (pop.shownHeight - pop.bodyHeight) + pop.padding
                 width: pop.bodyWidth - pop.padding * 2
                 height: pop.bodyHeight - pop.padding * 2
-                opacity: pop.openness
+                opacity: pop.anim === "slide" ? pop.openness : 1     // (the others fade it all)
             }
         }
     }
@@ -18339,6 +19818,17 @@ in
 
         default property alias content: area.data
 
+
+        // how it shows and hides (Settings → Docks / Edit desktop): "slide" grows out of
+        // the edge, "fade" fades in where it is, "pop" fades in and grows a little, "none"
+        property string anim: "slide"
+        // how much of its size it's showing: slide follows the opening, the others are
+        // always full size
+        readonly property real grow: anim === "slide" ? openness : 1
+        opacity: anim === "slide" ? 1 : openness
+        transformOrigin: Item.Left
+        scale: anim === "pop" ? 0.86 + 0.14 * openness : 1
+
         // 0 = closed (flat in the edge), 1 = all the way out
         property real openness: 0
         visible: openness > 0
@@ -18368,7 +19858,7 @@ in
 
         x: baseX + (detached ? gap : 0)
         y: anchorY - shownHeight / 2 - flare
-        width: openness * shownWidth
+        width: grow * shownWidth
         height: shownHeight + flare * 2
 
         // a bigger one gets a little longer, like Widget.qml
@@ -18378,13 +19868,18 @@ in
         onOpenChanged: {
             if (open) {
                 closeAnim.stop();
-                openAnim.duration = timeFor(duration);
+                openAnim.duration = anim === "none" ? 0 : timeFor(duration);
                 openAnim.restart();
             } else {
                 openAnim.stop();
-                closeAnim.duration = timeFor(closeDuration);
+                closeAnim.duration = anim === "none" ? 0 : timeFor(closeDuration);
                 closeAnim.restart();
             }
+        }
+        // made while it should already be out (switched on from Settings, Edit desktop)
+        Component.onCompleted: if (open) {
+            openAnim.duration = anim === "none" ? 0 : timeFor(duration);
+            openAnim.restart();
         }
         NumberAnimation {
             id: openAnim
@@ -18499,7 +19994,7 @@ in
                 y: (pop.shownHeight - pop.bodyHeight) / 2 + pop.padding
                 width: pop.bodyWidth - pop.padding * 2
                 height: pop.bodyHeight - pop.padding * 2
-                opacity: pop.openness
+                opacity: pop.anim === "slide" ? pop.openness : 1     // (the others fade it all)
             }
         }
     }
@@ -18822,7 +20317,8 @@ in
 
         SidePanel {
             id: panel
-            open: side.shown || Settings.peek === "workspaces"
+            open: side.shown || Settings.peek === "workspaces" || Panels.editMode
+            anim: Settings.v.wsAnim
             padding: Settings.v.wsPadding      // (Settings → Docks)
             style: Settings.v.wsStyle
             gap: Settings.v.wsGap
@@ -21007,7 +22503,7 @@ in
         // Scroll just enough to show the one you're on (when it changes, and when the
         // dock comes out).
         function showActive() {
-            if (!root.scrolls || root.activeIndex < 0)
+            if (!root.scrolls || root.activeIndex < 0 || flick.height <= 0)
                 return;
             const top = root.activeIndex * root.step;
             const bottom = top + root.cell;
@@ -21024,13 +22520,28 @@ in
         onActiveIndexChanged: showActive()
         onVisibleChanged: if (visible)
             Qt.callLater(showActive)
-        onScrollsChanged: Qt.callLater(showActive)
+        onScrollsChanged: {
+            clampScroll();
+            Qt.callLater(showActive);
+        }
+        // Never scrolled past the end. (Made while its window was still 0 px tall, it
+        // "scrolled" to the one you're on, and once the list fit again it stayed scrolled
+        // up out of sight: the empty dock after switching it off and on.)
+        function clampScroll() {
+            const most = Math.max(0, flick.contentHeight - flick.height);
+            if (flick.contentY > most || !root.scrolls) {
+                follow.stop();
+                flick.contentY = root.scrolls ? most : 0;
+            }
+        }
 
         Flickable {
             id: flick
             anchors.fill: parent
             contentWidth: width
             contentHeight: root.fullHeight
+            onHeightChanged: root.clampScroll()
+            onContentHeightChanged: root.clampScroll()
             clip: true
             interactive: root.scrolls
             boundsBehavior: Flickable.StopAtBounds
