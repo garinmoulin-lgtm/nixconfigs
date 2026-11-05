@@ -2164,6 +2164,7 @@ in
                 }
 
                 ListView {
+                    FastWheel {}
                     id: toastList
                     anchors.top: parent.top
                     anchors.right: parent.right
@@ -2436,6 +2437,9 @@ in
                 mask: Region {
                     item: barBody
                     Region {
+                        item: barEdge
+                    }
+                    Region {
                         item: bar.openWidget ? bar.openWidget.popupItem : null
                     }
                     Region {
@@ -2505,17 +2509,39 @@ in
                         Ui.openWidget.closePopup();
                     barMenu.x = Math.max(8, Math.min(width - barMenu.width - 8, x - barMenu.width / 2));
                     menuOpen = true;
+                    menuClose.restart();
                 }
-                HyprlandFocusGrab {
-                    active: bar.menuOpen
-                    windows: [bar]
-                    onCleared: bar.menuOpen = false
+                // It closes once the mouse has been off it (and off the bar) for a
+                // moment, or after a few seconds if you never go to it. No focus grab:
+                // that needed the bar to take the keyboard, and Hyprland and Qt fought
+                // over the focus (the textinput warnings) and the menu didn't stay.
+                Timer {
+                    id: menuClose        // never went to it
+                    interval: 2500
+                    onTriggered: if (!barMenuHover.hovered)
+                        bar.menuOpen = false
+                }
+                Timer {
+                    id: menuLeft         // went to it, then away
+                    interval: 500
+                    onTriggered: if (!barMenuHover.hovered)
+                        bar.menuOpen = false
                 }
                 MenuCard {
                     id: barMenu
                     visible: bar.menuOpen
                     z: 200
                     y: Theme.barBottom + 6
+                    HoverHandler {
+                        id: barMenuHover
+                        onHoveredChanged: {
+                            menuClose.stop();
+                            if (hovered)
+                                menuLeft.stop();
+                            else if (bar.menuOpen)
+                                menuLeft.restart();
+                        }
+                    }
                     model: [
                         { act: "edit", icon: Panels.editMode ? "check" : "edit", label: Panels.editMode ? "Done editing" : "Edit desktop" },
                         { act: "panel", icon: "add_box", label: "Add Panel" },
@@ -2539,10 +2565,7 @@ in
                 // Typing goes to an open popup (search boxes, the calendar's add row...):
                 // the bar takes the keyboard when you click in it while a popup is open.
                 // Otherwise it never does, so it can't take focus from your windows.
-                // (and while its right-click menu is open: Hyprland's focus grab, which
-                // closes the menu when you click elsewhere, needs a surface that can
-                // take the keyboard, like an open popup's)
-                WlrLayershell.keyboardFocus: bar.openWidget || bar.menuOpen ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+                WlrLayershell.keyboardFocus: bar.openWidget ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
                 // ── the inward curves under both ends of the bar ──
                 // So the bar looks like it wraps around the top corners of the screen.
@@ -2557,6 +2580,20 @@ in
                     mirrored: true
                     anchors.right: parent.right
                     y: Theme.barHeight
+                }
+
+                // The strip the bar sits in, margins and all (floating / pill styles leave
+                // a gap above and beside it): right-clicks there are the bar's too. Before,
+                // they went through to the desktop, whose menu opened behind your windows.
+                Item {
+                    id: barEdge
+                    width: parent.width
+                    height: Theme.barBottom
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.RightButton
+                        onClicked: m => bar.showMenu(m.x)
+                    }
                 }
 
                 // the bar itself
@@ -2582,6 +2619,7 @@ in
                         visible: Theme.barStyle === "smooth"
                         anchors.fill: parent
                         radius: 0
+                        outlined: false     // edge to edge, and its popups melt into it
                     }
                     Glass {
                         visible: Theme.barStyle === "floating"
@@ -2739,6 +2777,7 @@ in
                             Loader {
                                 active: btMod.open || btMod.popupShown
                                 sourceComponent: Flickable {
+                                    FastWheel {}
                                     width: 380
                                     height: Math.min(contentHeight, 520)
                                     contentHeight: btPage.height
@@ -3876,6 +3915,7 @@ in
                                     // ── the library list ──
                                     // ListView only creates rows that are on screen, so thousands of songs are fine.
                                     ListView {
+                                        FastWheel {}
                                         id: songList
                                         visible: lib.tab === "library" && (lib.view === "songs" || lib.pick !== null) && lib.results.length > 0
                                         width: parent.width
@@ -4189,6 +4229,7 @@ in
                                     // ── artists / albums ──
                                     // Click one to see its songs; the play button plays all of them.
                                     ListView {
+                                        FastWheel {}
                                         id: groupList
                                         visible: lib.tab === "library" && lib.view !== "songs" && !lib.pick && lib.groups.length > 0
                                         width: parent.width
@@ -4347,6 +4388,7 @@ in
 
                                     // ── the queue ──
                                     ListView {
+                                        FastWheel {}
                                         id: queueList
                                         visible: lib.tab === "queue" && lib.queueShown.length > 0
                                         width: parent.width
@@ -4974,6 +5016,7 @@ in
 
                                 // The list scrolls once it's taller than 400 px.
                                 ListView {
+                                    FastWheel {}
                                     width: 340
                                     height: Math.min(contentHeight, 400)
                                     visible: count > 0
@@ -5579,6 +5622,7 @@ in
 
                                 // Scrolls once the list is taller than 360 px (lots of devices or networks around).
                                 Flickable {
+                                    FastWheel {}
                                     id: netScroll
                                     width: 280
                                     height: Math.min(contentHeight, 360)
@@ -6821,7 +6865,19 @@ in
                 popupAnim: "slide",      // the bar's popups
                 dockAnim: "slide",
                 wsAnim: "slide",
-                panelAnim: "slide"       // your panels' auto-hide
+                panelAnim: "slide",      // your panels' auto-hide
+                // surfaces: what the bar, docks, popups and cards are made of
+                // (Settings → Appearance → Surfaces; Theme.qml uses them)
+                surfaceBase: "bg",       // the theme color under the glass: bg, surface, bgDim, overlay
+                surfaceTint: 0.0,        // 0..0.4: that much accent mixed in
+                pillTint: 0.0,           // the same for pills and buttons
+                borderWidth: 0,          // px, 0 = none
+                borderColor: "subtle",   // subtle (the text color, faint), theme (its border color), accent
+                borderOpacity: 0.35,
+                borderPills: false,      // the pills on the bar get it too
+                uiFont: "",              // "" = SFMono Nerd Font
+                iconFill: false,         // filled icons
+                scrollSpeed: 2.0         // the mouse wheel in the shell's lists and pages (FastWheel.qml); 1 = Qt's own
             })
 
         // the show / hide animations, for the choices in Settings and Edit desktop
@@ -6993,6 +7049,16 @@ in
                 property string dockAnim: root.defaults.dockAnim
                 property string wsAnim: root.defaults.wsAnim
                 property string panelAnim: root.defaults.panelAnim
+                property string surfaceBase: root.defaults.surfaceBase
+                property real surfaceTint: root.defaults.surfaceTint
+                property real pillTint: root.defaults.pillTint
+                property int borderWidth: root.defaults.borderWidth
+                property string borderColor: root.defaults.borderColor
+                property real borderOpacity: root.defaults.borderOpacity
+                property bool borderPills: root.defaults.borderPills
+                property string uiFont: root.defaults.uiFont
+                property bool iconFill: root.defaults.iconFill
+                property real scrollSpeed: root.defaults.scrollSpeed
             }
         }
         Timer {
@@ -7155,6 +7221,7 @@ in
 
                 // (scrolls when the window is short)
                 Flickable {
+                    FastWheel {}
                     anchors.fill: parent
                     contentHeight: tabs.height + 36
                     clip: true
@@ -7295,13 +7362,9 @@ in
                     ScrollBar.vertical: ThinScrollBar {}
 
                     // the wheel moves it further than Qt's default (about a third of this)
-                    WheelHandler {
-                        target: null
-                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                        onWheel: e => {
-                            const d = e.pixelDelta.y !== 0 ? e.pixelDelta.y : e.angleDelta.y / 120 * 110;
-                            flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height, flick.contentY - d));
-                        }
+                    // the page: 110 px a notch at 1× (Settings → Appearance → Scroll speed)
+                    FastWheel {
+                        base: 110
                     }
 
                     Loader {
@@ -7960,7 +8023,7 @@ in
                                 // its outline, over everything in it (accent: the one that's on)
                                 Rectangle {
                                     anchors.fill: parent
-                                    radius: parent.radius
+                                    radius: preview.radius     // (inside a ClippingRectangle, parent is its content)
                                     color: "transparent"
                                     border.width: card.selected ? 2 : 1
                                     border.color: card.selected ? Theme.accent : Theme.pill
@@ -8273,8 +8336,8 @@ in
             actions: SetButton {
                 icon: "restart_alt"
                 text: "Reset"
-                enabled: !Settings.isDefault(["glassOpacity", "animScale"])
-                onClicked: Settings.reset(["glassOpacity", "animScale"])
+                enabled: !Settings.isDefault(["glassOpacity", "animScale", "scrollSpeed"])
+                onClicked: Settings.reset(["glassOpacity", "animScale", "scrollSpeed"])
             }
 
             SetRow {
@@ -8301,6 +8364,216 @@ in
                     value: Settings.v.animScale
                     suffix: "×"
                     onMoved: v => Settings.v.animScale = v
+                }
+            }
+            SetRow {
+                label: "Scroll speed"
+                description: "Mouse wheel, in lists and pages"
+                SetSlider {
+                    from: 0.5
+                    to: 4
+                    stepSize: 0.25
+                    decimals: 2
+                    value: Settings.v.scrollSpeed
+                    suffix: "×"
+                    onMoved: v => Settings.v.scrollSpeed = v
+                }
+            }
+        }
+
+        // ── surfaces: what the bar, docks, popups and cards are made of ──
+        SetSection {
+            id: surfSection
+            title: "Surfaces"
+            caption: "Background, border, type · bar, docks, popups, cards"
+            readonly property var keys: ["surfaceBase", "surfaceTint", "pillTint", "borderWidth", "borderColor", "borderOpacity", "borderPills", "uiFont", "iconFill"]
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(surfSection.keys)
+                onClicked: Settings.reset(surfSection.keys)
+            }
+
+            SetRow {
+                label: "Background"
+                description: "The theme color under the glass"
+                SetChoice {
+                    options: [
+                        { id: "bg", label: "Base" },
+                        { id: "surface", label: "Surface" },
+                        { id: "bgDim", label: "Darker" },
+                        { id: "overlay", label: "Lighter" }
+                    ]
+                    current: Settings.v.surfaceBase
+                    onPicked: k => Settings.v.surfaceBase = k
+                }
+            }
+            SetRow {
+                label: "Tint"
+                description: "Accent mixed in"
+                SetSlider {
+                    from: 0
+                    to: 0.4
+                    stepSize: 0.02
+                    factor: 100
+                    value: Settings.v.surfaceTint
+                    suffix: "%"
+                    onMoved: v => Settings.v.surfaceTint = v
+                }
+            }
+            SetRow {
+                label: "Pill tint"
+                description: "Pills, buttons, hovered rows"
+                SetSlider {
+                    from: 0
+                    to: 0.4
+                    stepSize: 0.02
+                    factor: 100
+                    value: Settings.v.pillTint
+                    suffix: "%"
+                    onMoved: v => Settings.v.pillTint = v
+                }
+            }
+            SetRow {
+                label: "Border"
+                description: Settings.v.borderWidth === 0 ? "None" : "Round the edges"
+                SetSlider {
+                    from: 0
+                    to: 4
+                    value: Settings.v.borderWidth
+                    suffix: " px"
+                    onMoved: v => Settings.v.borderWidth = v
+                }
+            }
+            SetRow {
+                enabled: Settings.v.borderWidth > 0
+                label: "Border color"
+                SetChoice {
+                    options: [
+                        { id: "subtle", label: "Subtle" },
+                        { id: "theme", label: "Theme" },
+                        { id: "accent", label: "Accent" }
+                    ]
+                    current: Settings.v.borderColor
+                    onPicked: k => Settings.v.borderColor = k
+                }
+            }
+            SetRow {
+                enabled: Settings.v.borderWidth > 0
+                label: "Border strength"
+                SetSlider {
+                    from: 0.05
+                    to: 1
+                    stepSize: 0.05
+                    factor: 100
+                    value: Settings.v.borderOpacity
+                    suffix: "%"
+                    onMoved: v => Settings.v.borderOpacity = v
+                }
+            }
+            SetRow {
+                enabled: Settings.v.borderWidth > 0
+                label: "Pills too"
+                description: "The bar's pills (not in the Pill style)"
+                SetSwitch {
+                    checked: Settings.v.borderPills
+                    onToggled: on => Settings.v.borderPills = on
+                }
+            }
+            SetRow {
+                label: "Font"
+                description: "Its name, then Enter · empty = SFMono Nerd Font"
+                SetField {
+                    width: 220
+                    placeholder: "SFMono Nerd Font"
+                    text: Settings.v.uiFont
+                    property string draft: Settings.v.uiFont
+                    onEdited: t => draft = t
+                    onAccepted: Settings.v.uiFont = draft.trim()     // (Enter)
+                }
+            }
+            SetRow {
+                label: "Filled icons"
+                SetSwitch {
+                    checked: Settings.v.iconFill
+                    onToggled: on => Settings.v.iconFill = on
+                }
+            }
+        }
+
+        // ── Theme.qml, by hand: your own changes on top of it ──
+        SetSection {
+            id: themeCode
+            title: "Theme code"
+            caption: Theme.user ? "Your changes are on · " + Theme.userPath.replace(Quickshell.env("HOME"), "~") : "Uncomment a line, change it, Ctrl+S · " + Theme.userPath.replace(Quickshell.env("HOME"), "~")
+            readonly property string template: [
+                "import QtQuick",
+                "",
+                "// Changes to Theme.qml. Any property here replaces Theme's own of the same",
+                "// name, live. Theme.c has the theme's colors: bg, surface, bgDim, overlay,",
+                "// border, fg, dim, accent, red, green, blue, yellow, magenta, cyan, orange.",
+                "QtObject {",
+                "    // ── surfaces (bar, docks, popups, cards) ──",
+                "    // property color glass: Qt.rgba(Theme.c.surface.r, Theme.c.surface.g, Theme.c.surface.b, 0.85)",
+                "    // property real glassOpacity: 0.85",
+                "    // property int borderWidth: 1",
+                "    // property color border: Qt.rgba(1, 1, 1, 0.12)",
+                "    // property int radius: 12",
+                "",
+                "    // ── pills, buttons, hovered rows ──",
+                "    // property color pillSolid: Theme.c.overlay",
+                "    // property color pill: Qt.rgba(Theme.c.overlay.r, Theme.c.overlay.g, Theme.c.overlay.b, 0.6)",
+                "    // property color pillIcon: Theme.c.dim",
+                "",
+                "    // ── text and icons ──",
+                "    // property color text: Theme.c.fg",
+                "    // property color accent: Theme.c.accent",
+                "    // property string font: \"SFMono Nerd Font\"",
+                "    // property real textSize: 12.5",
+                "    // property real letterSpacing: -0.5",
+                "    // property int iconSize: 16",
+                "    // property var iconAxes: ({ FILL: 1, wght: 500, opsz: 20, GRAD: 0 })",
+                "}",
+                ""
+            ].join("\n")
+            actions: Row {
+                spacing: 6
+                SetButton {
+                    icon: "restart_alt"
+                    text: "Undo all"
+                    enabled: Theme.userText !== "" && Theme.userText !== themeCode.template
+                    onClicked: Theme.saveUser(themeCode.template)
+                }
+                SetButton {
+                    icon: "save"
+                    text: "Save"
+                    accent: themeEditor.dirty
+                    enabled: themeEditor.dirty
+                    onClicked: Theme.saveUser(themeEditor.current)
+                }
+            }
+            CodeEditor {
+                id: themeEditor
+                width: parent.width
+                height: 420
+                text: Theme.userText !== "" ? Theme.userText : themeCode.template
+                errorLines: Theme.userError.map(e => e.line).filter(l => l > 0)
+                onSaved: t => Theme.saveUser(t)
+            }
+            Repeater {
+                model: Theme.userError
+                Text {
+                    required property var modelData
+                    width: parent.width
+                    leftPadding: 12
+                    rightPadding: 12
+                    topPadding: 6
+                    bottomPadding: 6
+                    wrapMode: Text.Wrap
+                    text: (modelData.line > 0 ? "Line " + modelData.line + ": " : "") + modelData.message + " · not applied"
+                    color: Theme.red
+                    font.family: Theme.font
+                    font.pixelSize: 12
                 }
             }
         }
@@ -10361,6 +10634,7 @@ in
             input.text = text
 
         Flickable {
+            FastWheel {}
             id: flick
             anchors.fill: parent
             anchors.margins: 1
@@ -10373,6 +10647,10 @@ in
 
             // keep the cursor in view
             function follow(r) {
+                // only while you're typing in it (text put in while it was still being
+                // laid out, 0 px wide, used to scroll it sideways and down)
+                if (!input.activeFocus || width <= 0 || height <= 0)
+                    return;
                 const x = r.x + gutter.width, y = r.y + 12;
                 if (y < contentY)
                     contentY = y;
@@ -10514,6 +10792,7 @@ in
         property bool shadow: Settings.v.shading === "neumorphic"
         property color color: Theme.glass
         property real neuScale: 1        // smaller for little things (the bar's pills)
+        property bool outlined: true     // the border (Settings → Appearance → Surfaces), if any
 
         readonly property real strength: Settings.v.neuIntensity
         readonly property int sy: Settings.v.neuLight.startsWith("top") ? 1 : -1
@@ -10529,6 +10808,8 @@ in
             anchors.fill: parent
             radius: g.radius
             color: g.color
+            border.width: g.outlined ? Theme.borderWidth : 0
+            border.color: Theme.border
         }
         // convex: lit on the light's side, shaded on the other; concave: the other way
         Rectangle {
@@ -11936,6 +12217,7 @@ in
                 border.color: Theme.pillSolid
             }
             contentItem: ListView {
+                FastWheel {}
                 implicitHeight: Math.min(contentHeight, 320)
                 clip: true
                 model: dd.options
@@ -12613,28 +12895,18 @@ in
     import QtQuick
     import Quickshell
     import Quickshell.Wayland
-    import Quickshell.Hyprland
 
     // Right-click the desktop (the wallpaper, where there's no window): Edit Mode, a new
-    // panel, the wallpaper, Settings. A see-through layer just above the wallpaper, under
-    // every window, so only clicks on empty desktop reach it.
-    PanelWindow {
-        id: desk
+    // panel, the wallpaper, Settings. Two layers: a see-through one just above the
+    // wallpaper, under every window, so only clicks on empty desktop reach it; and the
+    // menu itself in one over your windows, so a window next to where you clicked can't
+    // cover it.
+    Scope {
+        id: root
 
-        anchors {
-            top: true
-            bottom: true
-            left: true
-            right: true
-        }
-        exclusionMode: ExclusionMode.Ignore
-        WlrLayershell.layer: WlrLayer.Bottom
-        WlrLayershell.namespace: "desktop"
-        // while the menu's open it can take the keyboard: the focus grab below needs that
-        WlrLayershell.keyboardFocus: open ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
-        color: "transparent"
-
+        property var screen
         property bool open: false
+
         function run(act) {
             if (act === "edit")
                 Panels.editMode = !Panels.editMode;
@@ -12647,41 +12919,100 @@ in
                 Settings.open = true;
         }
         function show(x, y) {
-            menu.x = Math.min(x, width - menu.width - 8);
-            menu.y = Math.min(y, height - menu.height - 8);
+            menu.x = Math.min(x, desk.width - menu.width - 8);
+            menu.y = Math.min(y, desk.height - menu.height - 8);
             open = true;
+            neverWent.restart();
         }
 
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.LeftButton | Qt.RightButton
-            onClicked: m => {
-                if (m.button === Qt.RightButton)
-                    desk.show(m.x, m.y);
-                else
-                    desk.open = false;
+        // Closes when you click the desktop, or once the mouse has been off it for a
+        // moment (or a few seconds if you never go to it). No focus grab: like the
+        // bar's menu (shell.qml), it fought Qt over the keyboard.
+        Timer {
+            id: neverWent
+            interval: 2500
+            onTriggered: if (!menuHover.hovered)
+                root.open = false
+        }
+        Timer {
+            id: wentAway
+            interval: 500
+            onTriggered: if (!menuHover.hovered)
+                root.open = false
+        }
+
+        // the desktop: under the windows
+        PanelWindow {
+            id: desk
+            screen: root.screen
+            anchors {
+                top: true
+                bottom: true
+                left: true
+                right: true
+            }
+            exclusionMode: ExclusionMode.Ignore
+            WlrLayershell.layer: WlrLayer.Bottom
+            WlrLayershell.namespace: "desktop"
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+            color: "transparent"
+
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: m => {
+                    if (m.button === Qt.RightButton)
+                        root.show(m.x, m.y);
+                    else
+                        root.open = false;
+                }
             }
         }
-        HyprlandFocusGrab {
-            active: desk.open
-            windows: [desk]
-            onCleared: desk.open = false
-        }
 
-        MenuCard {
-            id: menu
-            visible: desk.open
-            width: 230
-            model: [
-                { act: "edit", icon: Panels.editMode ? "check" : "edit", label: Panels.editMode ? "Done editing" : "Edit desktop" },
-                { act: "panel", icon: "add_box", label: "Add Panel" },
-                { sep: true },
-                { act: "wallpaper", icon: "wallpaper", label: "Wallpaper and theme" },
-                { act: "settings", icon: "settings", label: "Settings" }
-            ]
-            onPicked: act => {
-                desk.open = false;
-                desk.run(act);
+        // the menu: over the windows (only while it's open)
+        PanelWindow {
+            id: pop
+            screen: root.screen
+            visible: root.open
+            anchors {
+                top: true
+                bottom: true
+                left: true
+                right: true
+            }
+            exclusionMode: ExclusionMode.Ignore
+            WlrLayershell.layer: WlrLayer.Top
+            WlrLayershell.namespace: "desktop-menu"   // its blur rule in the Hyprland config
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+            color: "transparent"
+            mask: Region {
+                item: menu
+            }
+
+            MenuCard {
+                id: menu
+                width: 230
+                HoverHandler {
+                    id: menuHover
+                    onHoveredChanged: {
+                        neverWent.stop();
+                        if (hovered)
+                            wentAway.stop();
+                        else if (root.open)
+                            wentAway.restart();
+                    }
+                }
+                model: [
+                    { act: "edit", icon: Panels.editMode ? "check" : "edit", label: Panels.editMode ? "Done editing" : "Edit desktop" },
+                    { act: "panel", icon: "add_box", label: "Add Panel" },
+                    { sep: true },
+                    { act: "wallpaper", icon: "wallpaper", label: "Wallpaper and theme" },
+                    { act: "settings", icon: "settings", label: "Settings" }
+                ]
+                onPicked: act => {
+                    root.open = false;
+                    root.run(act);
+                }
             }
         }
     }
@@ -12692,7 +13023,8 @@ in
 
     // A right-click menu's card: entries { act, icon, label } or { sep: true }.
     // (the desktop's: DesktopMenu.qml; the bar's: shell.qml)
-    Rectangle {
+    // glass, like the bar's popups
+    Glass {
         id: card
 
         property var model: []
@@ -12701,9 +13033,6 @@ in
         width: 220
         height: items.height + 12
         radius: 12
-        color: Theme.c.overlay
-        border.width: 1
-        border.color: Theme.pillSolid
 
         Column {
             id: items
@@ -12792,6 +13121,10 @@ in
         // wide enough that every control fits on its line (the side panels' card stands
         // beside the panel, so it can be wider than the panel is thick)
         readonly property int cardWidth: v ? 430 : Math.min(800, host.width - 16)
+        // the panel's options (length, thickness, style, visibility): folded away until
+        // you open them, so the toolbar is one short line
+        property bool opts: false
+        onPidChanged: opts = false
 
         function set(changes) {
             Panels.update(pid, changes, true);
@@ -12823,12 +13156,10 @@ in
             }
         }
 
-        component Card: Rectangle {
+        // the same glass as the panels and the bar
+        component Card: Glass {
             width: ed.cardWidth
             radius: 14
-            color: Theme.c.overlay
-            border.width: 1
-            border.color: Theme.pillSolid
         }
         component Label: Text {
             color: Theme.text
@@ -12843,10 +13174,21 @@ in
             id: toolbarC
             Card {
                 height: tools.height + 20
+                // just wide enough for one line while the options are folded away
+                width: ed.opts ? ed.cardWidth : Math.min(ed.cardWidth, tools.lineWidth + 20)
 
                 // a panel edited by hand: only what doesn't touch its file
                 Flow {
                     id: tools
+                    readonly property real lineWidth: {
+                        let w = 0, n = 0;
+                        for (let i = 0; i < children.length; i++)
+                            if (children[i].visible && children[i].width > 0) {
+                                w += children[i].width;
+                                n++;
+                            }
+                        return w + Math.max(0, n - 1) * spacing;
+                    }
                     x: 10
                     y: 10
                     width: parent.width - 20
@@ -12912,7 +13254,7 @@ in
                         font.weight: 700
                     }
                     Row {
-                        visible: ed.editable
+                        visible: ed.opts && ed.editable
                         spacing: 6
                         Label {
                             width: 84
@@ -12932,7 +13274,7 @@ in
                         }
                     }
                     SetSlider {
-                        visible: ed.editable && !!ed.p && ed.p.length === "custom"
+                        visible: ed.opts && ed.editable && !!ed.p && ed.p.length === "custom"
                         sliderWidth: 140
                         from: 120
                         to: ed.v ? host.height : host.width
@@ -12943,7 +13285,7 @@ in
                         onMoved: val => ed.set({ lengthPx: val })
                     }
                     Row {
-                        visible: ed.editable && !!ed.p && (ed.p.length || "fill") !== "fill"
+                        visible: ed.opts && ed.editable && !!ed.p && (ed.p.length || "fill") !== "fill"
                         spacing: 0
                         Repeater {
                             model: [
@@ -12962,7 +13304,7 @@ in
                         }
                     }
                     Row {
-                        visible: ed.editable
+                        visible: ed.opts && ed.editable
                         spacing: 6
                         Label {
                             width: 84
@@ -12981,7 +13323,7 @@ in
                         }
                     }
                     Row {
-                        visible: ed.editable
+                        visible: ed.opts && ed.editable
                         spacing: 6
                         Label {
                             width: 84
@@ -13002,7 +13344,7 @@ in
                         }
                     }
                     Row {
-                        visible: ed.editable
+                        visible: ed.opts && ed.editable
                         spacing: 6
                         Label {
                             width: 84
@@ -13022,7 +13364,7 @@ in
                         }
                     }
                     Row {
-                        visible: ed.editable && !!ed.p && ed.p.visibility === "autohide"
+                        visible: ed.opts && ed.editable && !!ed.p && ed.p.visibility === "autohide"
                         spacing: 6
                         Label {
                             width: 84
@@ -13039,6 +13381,13 @@ in
                     }
                     Row {
                         spacing: 6
+                        SetButton {
+                            visible: ed.editable
+                            icon: ed.opts ? "expand_less" : "tune"
+                            text: "Options"
+                            accent: ed.opts
+                            onClicked: ed.opts = !ed.opts
+                        }
                         SetButton {
                             visible: ed.editable
                             icon: "add"
@@ -14286,10 +14635,12 @@ in
         visible: active
         onActiveChanged: if (!active) {
             drawerOpen = false;
+            barOpts = false;
             dragId = "";
         }
 
         property bool drawerOpen: false
+        property bool barOpts: false        // the bar's style, height, popups (Bar ▾)
         readonly property Item toolbar: toolCard
         readonly property Item drawer: drawerCard
         readonly property Item ghostItem: dragId !== "" ? ghost : null
@@ -14465,11 +14816,9 @@ in
         }
 
         // ── cards under the bar ──
-        component Card: Rectangle {
+        // the same glass as the bar and the docks (blurred: it's in the bar's window)
+        component Card: Glass {
             radius: 14
-            color: Theme.c.overlay
-            border.width: 1
-            border.color: Theme.pillSolid
         }
         component Label: Text {
             color: Theme.text
@@ -14483,13 +14832,14 @@ in
             id: cards
             x: Math.max(8, Math.min(ed.width - width - 8, ed.body.x + ed.body.width / 2 - width / 2))
             y: ed.body.y + ed.body.height + 12
-            width: Math.min(760, ed.width - 16)
+            // one line until you open the bar's options or the drawer
+            width: ed.barOpts || ed.drawerOpen ? Math.min(760, ed.width - 16) : head.implicitWidth + 20
             spacing: 8
 
             Card {
                 id: toolCard
                 width: cards.width
-                height: head.height + tools.height + 30
+                height: ed.barOpts ? head.height + tools.height + 30 : head.height + 20
 
                 // Edit desktop itself (it was a bar of its own at the top: EditBanner)
                 Item {
@@ -14498,7 +14848,9 @@ in
                     y: 10
                     width: parent.width - 20
                     height: 30
+                    implicitWidth: headTitle.width + 24 + headButtons.width
                     Text {
+                        id: headTitle
                         anchors.verticalCenter: parent.verticalCenter
                         text: "Editing desktop"
                         color: Theme.accent
@@ -14507,12 +14859,25 @@ in
                         font.weight: 800
                     }
                     Row {
+                        id: headButtons
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 6
                         SetButton {
+                            icon: "add"
+                            text: "Widgets"
+                            accent: ed.drawerOpen
+                            onClicked: ed.drawerOpen = !ed.drawerOpen
+                        }
+                        SetButton {
+                            icon: ed.barOpts ? "expand_less" : "tune"
+                            text: "Bar"
+                            accent: ed.barOpts
+                            onClicked: ed.barOpts = !ed.barOpts
+                        }
+                        SetButton {
                             icon: "add_box"
-                            text: "Add Panel"
+                            text: "Panel"
                             onClicked: Panels.add()
                         }
                         SetButton {
@@ -14529,6 +14894,7 @@ in
                     }
                 }
                 Rectangle {
+                    visible: ed.barOpts
                     x: 10
                     y: head.y + head.height + 4
                     width: parent.width - 20
@@ -14537,6 +14903,7 @@ in
                 }
                 Flow {
                     id: tools
+                    visible: ed.barOpts
                     x: 10
                     y: head.y + head.height + 10
                     width: parent.width - 20
@@ -14602,19 +14969,10 @@ in
                             onPicked: a => Settings.v.popupAnim = a
                         }
                     }
-                    Row {
-                        spacing: 6
-                        SetButton {
-                            icon: "add"
-                            text: "Add widgets"
-                            accent: ed.drawerOpen
-                            onClicked: ed.drawerOpen = !ed.drawerOpen
-                        }
-                        SetButton {
-                            icon: "settings"
-                            text: "More"
-                            onClicked: Settings.show("bar")
-                        }
+                    SetButton {
+                        icon: "settings"
+                        text: "More"
+                        onClicked: Settings.show("bar")
                     }
                 }
             }
@@ -14803,13 +15161,15 @@ in
         readonly property real dockHeight: Settings.v.dockIconSize + Settings.v.dockSlotPad + 2 * Settings.v.dockPadding + (Settings.v.dockStyle === "smooth" ? 0 : Settings.v.dockGap)
         readonly property real wsWidth: Settings.v.wsCell + 16 + Settings.v.wsMaxIcons * (Settings.v.wsIconSize + 4) + 2 * Settings.v.wsPadding + (Settings.v.wsStyle === "smooth" ? 0 : Settings.v.wsGap)
 
-        component Card: Rectangle {
-            width: 380
+        // the same glass as the docks (Hyprland blurs this window: "dock-editor")
+        // Folded down to its title (and switch) until you open it with its arrow, so
+        // editing the desktop isn't a screen full of cards.
+        component Card: Glass {
+            id: card
+            property bool expanded: false
+            width: expanded ? 380 : 270
             height: col.height + 24
             radius: 14
-            color: Theme.c.overlay
-            border.width: 1
-            border.color: Theme.pillSolid
             default property alias rows: col.data
             Column {
                 id: col
@@ -14833,7 +15193,9 @@ in
             property string title
             property string icon
             property bool checked
+            property bool expanded
             signal toggled(bool on)
+            signal expand
             width: parent ? parent.width : 300
             height: 28
             Row {
@@ -14856,11 +15218,21 @@ in
                     font.weight: 800
                 }
             }
-            SetSwitch {
+            Row {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                checked: head.checked
-                onToggled: v => head.toggled(v)
+                spacing: 4
+                SetSwitch {
+                    anchors.verticalCenter: parent.verticalCenter
+                    checked: head.checked
+                    onToggled: v => head.toggled(v)
+                }
+                IconButton {
+                    anchors.verticalCenter: parent.verticalCenter
+                    icon: head.expanded ? "expand_more" : "expand_less"
+                    tip: head.expanded ? "Fold" : "Style, size, animation"
+                    onClicked: head.expand()
+                }
             }
         }
         component ChoiceRow: Row {
@@ -14913,15 +15285,20 @@ in
         // ── the dock (bottom) ──
         Card {
             id: dockCard
-            x: (win.width - width) / 2
+            // bottom left: out of the way of the dock, and of a bottom panel's toolbar
+            // (that one's in the middle)
+            x: 20
             y: win.height - height - (Settings.v.dock ? win.dockHeight + 20 : 20)
             Head {
                 title: "Dock"
+                expanded: dockCard.expanded
+                onExpand: dockCard.expanded = !dockCard.expanded
                 icon: "dock_to_bottom"
                 checked: Settings.v.dock
                 onToggled: v => Settings.v.dock = v
             }
             Column {
+                visible: dockCard.expanded
                 spacing: 10
                 enabled: Settings.v.dock
                 opacity: enabled ? 1 : 0.45
@@ -14955,6 +15332,7 @@ in
                 }
             }
             SetButton {
+                visible: dockCard.expanded
                 icon: "settings"
                 text: "More"
                 onClicked: Settings.show("docks")
@@ -14969,11 +15347,14 @@ in
             y: Math.max(Theme.barBottom + 12, Math.min((win.height - height) / 2, dockCard.y - height - 12))
             Head {
                 title: "Workspaces dock"
+                expanded: wsCard.expanded
+                onExpand: wsCard.expanded = !wsCard.expanded
                 icon: "view_sidebar"
                 checked: Settings.v.wsDock
                 onToggled: v => Settings.v.wsDock = v
             }
             Column {
+                visible: wsCard.expanded
                 spacing: 10
                 enabled: Settings.v.wsDock
                 opacity: enabled ? 1 : 0.45
@@ -14998,10 +15379,80 @@ in
                 }
             }
             SetButton {
+                visible: wsCard.expanded
                 icon: "settings"
                 text: "More"
                 onClicked: Settings.show("docks")
             }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/FastWheel.qml".text = ''
+    import QtQuick
+
+    // The mouse wheel, faster (Settings → Appearance → Glass and motion: Scroll speed).
+    // Put it straight inside a Flickable, ListView or GridView: `FastWheel {}`. A notch
+    // moves `base` px (Qt's own is 72) times the speed, with a short glide; a touchpad's
+    // pixels are sped up the same. Up / down scrolls sideways in something that only
+    // scrolls sideways. At an end, or with nothing to scroll, the wheel goes on to
+    // whatever's under it (an outer list, the page).
+    WheelHandler {
+        id: wh
+
+        property real base: 72
+        // the Flickable: a handler written inside one sits on its content item
+        readonly property var flick: parent && parent.parent && parent.parent.contentY !== undefined ? parent.parent : null
+
+        target: null
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+
+        function scroll(f, axis, d) {
+            const pos = axis === "y" ? "contentY" : "contentX";
+            const lo = axis === "y" ? f.originY : f.originX;
+            const hi = lo + Math.max(0, (axis === "y" ? f.contentHeight - f.height : f.contentWidth - f.width));
+            if (hi <= lo)
+                return false;
+            const from = wh.glide.running && wh.glide.property === pos ? wh.glide.to : f[pos];
+            const to = Math.max(lo, Math.min(hi, from - d));
+            if (to === f[pos] && !wh.glide.running)
+                return false;           // already at that end
+            wh.glide.stop();
+            wh.glide.target = f;
+            wh.glide.property = pos;
+            wh.glide.to = to;
+            wh.glide.start();
+            return true;
+        }
+
+        onWheel: e => {
+            const f = wh.flick;
+            if (!f || !f.interactive) {
+                e.accepted = false;
+                return;
+            }
+            const speed = Settings.v.scrollSpeed;
+            const px = e.pixelDelta, ang = e.angleDelta;
+            let dy = px.y !== 0 ? px.y * speed : ang.y / 120 * wh.base * speed;
+            let dx = px.x !== 0 ? px.x * speed : ang.x / 120 * wh.base * speed;
+            const canY = f.contentHeight > f.height + 0.5;
+            const canX = f.contentWidth > f.width + 0.5;
+            if (!canY && canX && dx === 0) {      // sideways only: up / down goes sideways
+                dx = dy;
+                dy = 0;
+            }
+            let used = false;
+            if (dy !== 0)
+                used = wh.scroll(f, "y", dy) || used;
+            if (dx !== 0)
+                used = wh.scroll(f, "x", dx) || used;
+            e.accepted = used;
+        }
+
+        // (a handler has no children of its own: the glide is a property)
+        readonly property NumberAnimation glide: NumberAnimation {
+            duration: 140
+            easing.type: Easing.OutCubic
         }
     }
   '';
@@ -15184,23 +15635,100 @@ in
             }
         }
 
-        property color bg: c.bg
-        // pills, buttons, hovered rows: the theme's overlay color, as see-through as
-        // the glass under them (glassOpacity below), so everything has the same look
-        property color pillSolid: c.overlay
-        readonly property color pill: Qt.rgba(pillSolid.r, pillSolid.g, pillSolid.b, glassOpacity)
-        property color pillIcon: c.dim
-        property color text: c.fg
-        property color red: c.red
-        property color green: c.green
-        property color blue: c.blue
-        property color yellow: c.yellow
-        property color magenta: c.magenta
-        property color cyan: c.cyan
-        property color orange: c.orange
-        property color accent: c.accent
+        // ── your own changes (Settings → Appearance → Theme code) ──
+        // ~/.local/state/quickshell/theme.qml: a QtObject whose properties replace the ones
+        // here with the same name (ov() below). It's loaded like a panel's file, so it can
+        // use Theme.c (the theme's colors), Settings and the rest. A mistake in it: it's
+        // left out (userError says why) and these stay as they are.
+        readonly property string userPath: Quickshell.env("HOME") + "/.local/state/quickshell/theme.qml"
+        property QtObject user: null
+        property var userError: []
+        property int userVersion: 0
+        function ov(name, fallback) {
+            return user && user[name] !== undefined ? user[name] : fallback;
+        }
+        function loadUser(t) {
+            if (t.trim() === "") {
+                clearUser();
+                return;
+            }
+            try {
+                const made = Qt.createQmlObject(t, theme, Qt.resolvedUrl("theme-user.qml") + "?v=" + (++userVersion));
+                const old = user;
+                user = made;
+                userError = [];
+                if (old)
+                    old.destroy();
+            } catch (e) {
+                const errs = (e.qmlErrors || []).map(x => ({ line: x.lineNumber, column: x.columnNumber, message: x.message }));
+                userError = errs.length > 0 ? errs : [{ line: 0, column: 0, message: String(e) }];
+            }
+        }
+        function clearUser() {
+            const old = user;
+            user = null;
+            userError = [];
+            if (old)
+                old.destroy();
+        }
+        function saveUser(t) {
+            userFile.setText(t);
+            loadUser(t);
+        }
+        property string userText: ""
+        FileView {
+            id: userFile
+            path: theme.userPath
+            blockLoading: true      // the first frame already has your changes
+            watchChanges: true
+            printErrors: false      // no file: nothing changed
+            onFileChanged: reload()
+            onLoaded: {
+                theme.userText = text();
+                theme.loadUser(theme.userText);
+            }
+            onLoadFailed: {
+                theme.userText = "";
+                theme.clearUser();
+            }
+        }
+
+        // a mix of two colors: t = 0 → a, 1 → b. (The themes' colors are "#rrggbb"
+        // strings: Qt.darker(x, 1) makes a color of one, unchanged.)
+        function mix(a, b, t) {
+            const x = Qt.darker(a, 1), y = Qt.darker(b, 1);
+            return Qt.rgba(x.r + (y.r - x.r) * t, x.g + (y.g - x.g) * t, x.b + (y.b - x.b) * t, 1);
+        }
+
+        property color bg: ov("bg", c.bg)
+        // pills, buttons, hovered rows: the theme's overlay color (with some accent, if
+        // you like: Settings → Appearance → Surfaces), as see-through as the glass under
+        // them (glassOpacity below), so everything has the same look
+        property color pillSolid: ov("pillSolid", mix(c.overlay, c.accent, Settings.v.pillTint))
+        readonly property color pill: ov("pill", Qt.rgba(pillSolid.r, pillSolid.g, pillSolid.b, glassOpacity))
+        property color pillIcon: ov("pillIcon", c.dim)
+        property color text: ov("text", c.fg)
+        property color red: ov("red", c.red)
+        property color green: ov("green", c.green)
+        property color blue: ov("blue", c.blue)
+        property color yellow: ov("yellow", c.yellow)
+        property color magenta: ov("magenta", c.magenta)
+        property color cyan: ov("cyan", c.cyan)
+        property color orange: ov("orange", c.orange)
+        property color accent: ov("accent", c.accent)
+        // what the glass is made of: one of the theme's background colors, maybe with
+        // some accent in it (Settings → Appearance → Surfaces)
+        property color surface: ov("surface", mix(c[Settings.v.surfaceBase] || c.bg, c.accent, Settings.v.surfaceTint))
+        // the outline round the bar, docks, popups and cards (0 = none)
+        readonly property int borderWidth: ov("borderWidth", Settings.v.borderWidth)
+        readonly property color border: ov("border", (() => {
+                const k = Settings.v.borderColor;
+                const b = Qt.darker(k === "accent" ? accent : k === "theme" ? (c.border || c.overlay) : text, 1);
+                return Qt.rgba(b.r, b.g, b.b, Settings.v.borderOpacity);
+            })())
 
         Behavior on bg { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
+        Behavior on surface { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
         Behavior on pillSolid { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
         Behavior on pillIcon { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
         Behavior on text { enabled: theme.ready; ColorAnimation { duration: theme.fade; easing.type: Easing.InOutQuad } }
@@ -15222,8 +15750,8 @@ in
         // The bar and the widgets that drop out of it all use this one color, so an
         // open widget and the bar read as one piece.
         // (Settings → Bar: this and the sizes below; Settings.qml has where they start)
-        readonly property real glassOpacity: Settings.v.glassOpacity
-        readonly property color glass: Qt.rgba(bg.r, bg.g, bg.b, glassOpacity)
+        readonly property real glassOpacity: ov("glassOpacity", Settings.v.glassOpacity)
+        readonly property color glass: ov("glass", Qt.rgba(surface.r, surface.g, surface.b, glassOpacity))
 
         readonly property int barHeight: Settings.v.barHeight
         // the bar's style (Settings → Bar): smooth, floating, pill or minimal. Anything
@@ -15240,16 +15768,17 @@ in
         readonly property bool barCurve: Settings.v.barCurve && !barDetached
         readonly property int moduleHeight: Settings.v.moduleHeight
         readonly property int spacing: Settings.v.spacing
-        readonly property int radius: Settings.v.radius
+        readonly property int radius: ov("radius", Settings.v.radius)
 
-        property string font: "SFMono Nerd Font"
-        readonly property real textSize: Settings.v.textSize
-        property real letterSpacing: -0.5
+        // (Settings → Appearance → Surfaces: Font; "" = this one)
+        property string font: ov("font", Settings.v.uiFont !== "" ? Settings.v.uiFont : "SFMono Nerd Font")
+        readonly property real textSize: ov("textSize", Settings.v.textSize)
+        property real letterSpacing: ov("letterSpacing", -0.5)
 
-        property string iconFont: "Material Symbols Rounded"
-        readonly property int iconSize: Settings.v.iconSize
-        property var iconAxes: ({
-                "FILL": 0,
+        property string iconFont: ov("iconFont", "Material Symbols Rounded")
+        readonly property int iconSize: ov("iconSize", Settings.v.iconSize)
+        property var iconAxes: ov("iconAxes", {
+                "FILL": Settings.v.iconFill ? 1 : 0,
                 "wght": 700,
                 "opsz": 20,
                 "GRAD": 0
@@ -15528,7 +16057,10 @@ in
 
                 ShapePath {
                     fillColor: Theme.glass         // the bar's color, in the same window: one piece
-                    strokeColor: "transparent"
+                    // the border (Settings → Appearance → Surfaces); the path starts and
+                    // ends on the bar's edge, so there's no line between it and the bar
+                    strokeColor: Theme.borderWidth > 0 ? Theme.border : "transparent"
+                    strokeWidth: Theme.borderWidth
 
                     // Start on the bar's edge, left of the box, and trace clockwise.
                     startX: shape.boxLeft - shape.c
@@ -16869,6 +17401,7 @@ in
                         }
                     }
                     ListView {
+                        FastWheel {}
                         id: eventList
                         width: parent.width
                         height: Math.min(contentHeight, 150)
@@ -17266,6 +17799,7 @@ in
                     }
 
                     ListView {
+                        FastWheel {}
                         id: allList
                         visible: count > 0
                         width: parent.width
@@ -17411,6 +17945,7 @@ in
                     spacing: 6
 
                     ListView {
+                        FastWheel {}
                         id: remList
                         width: parent.width
                         height: Math.min(contentHeight, 240)
@@ -17825,6 +18360,7 @@ in
                 }
 
                 ListView {
+                    FastWheel {}
                     id: timerList
                     width: parent.width
                     height: Math.min(contentHeight, 240)
@@ -17972,6 +18508,7 @@ in
 
                 // laps, newest on top. The quickest one is green, the slowest red.
                 ListView {
+                    FastWheel {}
                     id: lapList
                     width: parent.width
                     height: Math.min(contentHeight, 168)
@@ -18168,6 +18705,7 @@ in
 
             // ── the pictures ──
             GridView {
+                FastWheel {}
                 id: grid
                 visible: root.count > 0
                 width: parent.width + 6           // the last column's gap hangs off the edge
@@ -18868,6 +19406,7 @@ in
                     }
 
                     Flickable {
+                        FastWheel {}
                         id: listFlick
                         width: listCol.width
                         height: Math.min(listCol.gridH, listCol.maxGridH)
@@ -19714,7 +20253,10 @@ in
 
             ShapePath {
                 fillColor: Theme.glass      // see-through and blurred, like the bar
-                strokeColor: "transparent"
+                // the border (Settings → Appearance → Surfaces); the path's ends are on the
+                // screen's edge, so there's no line along it
+                strokeColor: Theme.borderWidth > 0 ? Theme.border : "transparent"
+                strokeWidth: Theme.borderWidth
 
                 // on the edge, left of the box; around clockwise
                 startX: shape.boxLeft - shape.c
@@ -19937,7 +20479,10 @@ in
 
             ShapePath {
                 fillColor: Theme.glass      // see-through and blurred, like the bar
-                strokeColor: "transparent"
+                // the border (Settings → Appearance → Surfaces); the path's ends are on the
+                // screen's edge, so there's no line along it
+                strokeColor: Theme.borderWidth > 0 ? Theme.border : "transparent"
+                strokeWidth: Theme.borderWidth
 
                 // on the edge, above the box; around clockwise
                 startX: 0
@@ -20414,6 +20959,7 @@ in
                 font.pixelSize: Theme.textSize * 0.9
             }
             ListView {
+                FastWheel {}
                 id: pinList
                 visible: count > 0
                 width: parent.width
@@ -20522,6 +21068,7 @@ in
                 }
             }
             ListView {
+                FastWheel {}
                 id: appList
                 width: parent.width
                 height: Math.min(contentHeight, 240)
@@ -22543,6 +23090,7 @@ in
         }
 
         Flickable {
+            FastWheel {}
             id: flick
             anchors.fill: parent
             contentWidth: width
@@ -22836,6 +23384,15 @@ in
                 font.weight: 600
                 font.letterSpacing: Theme.letterSpacing
             }
+        }
+        // the border (Settings → Appearance → Surfaces: "Pills too")
+        Rectangle {
+            visible: Settings.v.borderPills && !root.bare && Theme.borderWidth > 0
+            anchors.fill: parent
+            radius: root.radius
+            color: "transparent"
+            border.width: Theme.borderWidth
+            border.color: Theme.border
         }
     }
   '';
@@ -23709,6 +24266,9 @@ in
       hl.layer_rule({ name = "workspace-dock-blur", match = { namespace = "workspace-dock" }, blur = true, ignore_alpha = 0.35, xray = false })
       hl.layer_rule({ name = "notification-blur", match = { namespace = "notification-popups" }, blur = true, ignore_alpha = 0.1, xray = false })
       hl.layer_rule({ name = "user-panel-blur", match = { namespace = "user-panel" }, blur = true, ignore_alpha = 0.35, xray = false })
+      -- Edit desktop's cards beside the docks, and the desktop's right-click menu
+      hl.layer_rule({ name = "dock-editor-blur", match = { namespace = "dock-editor" }, blur = true, ignore_alpha = 0.35, xray = false })
+      hl.layer_rule({ name = "desktop-menu-blur", match = { namespace = "desktop-menu" }, blur = true, ignore_alpha = 0.35, xray = false })
       -- The shell's Settings window (SettingsWindow.qml): a normal app window, but floating,
       -- centered, at its size. Quickshell's windows are all "org.quickshell"; this one is
       -- the one called "Settings".
