@@ -1651,20 +1651,6 @@ in
                     session.logout();
                 }
             }
-            // the bar's popups on / off from a key or a script:
-            // quickshell ipc call popups toggle   (or on / off)
-            IpcHandler {
-                target: "popups"
-                function toggle(): void {
-                    Settings.v.popups = !Settings.v.popups;
-                }
-                function on(): void {
-                    Settings.v.popups = true;
-                }
-                function off(): void {
-                    Settings.v.popups = false;
-                }
-            }
             // so the Super + drag bind can say when a window drag starts and ends
             // (WindowDrag.qml): quickshell ipc call windowdrag start / finish ...
             IpcHandler {
@@ -6876,7 +6862,7 @@ in
                 barRight: ["dockpins", "weather", "notifications", "volume", "battery", "network", "clock", "sysmon", "power"],
                 barLayout: 1,            // (the old on / off switches were read into the lists)
                 // show / hide animations: "slide", "fade", "pop", "none"
-                popupAnim: "slide",      // the bar's popups
+                popupAnim: "slide",      // the bar's popups (Settings → Appearance)
                 dockAnim: "slide",
                 wsAnim: "slide",
                 panelAnim: "slide",      // your panels' auto-hide
@@ -6891,7 +6877,9 @@ in
                 borderPills: false,      // the pills on the bar get it too
                 uiFont: "",              // "" = SFMono Nerd Font
                 iconFill: false,         // filled icons
-                popups: true,            // the bar's widgets open their popups (off: clicks do nothing)
+                // the bar's popups: "auto" (like the bar), smooth (melt into it), floating
+                // (a card under it), pill (a rounder card) (Settings → Appearance → Style)
+                popupStyle: "auto",
                 scrollSpeed: 2.0         // the mouse wheel in the shell's lists and pages (FastWheel.qml); 1 = Qt's own
             })
 
@@ -7074,7 +7062,7 @@ in
                 property string uiFont: root.defaults.uiFont
                 property bool iconFill: root.defaults.iconFill
                 property real scrollSpeed: root.defaults.scrollSpeed
-                property bool popups: root.defaults.popups
+                property string popupStyle: root.defaults.popupStyle
             }
         }
         Timer {
@@ -8170,24 +8158,56 @@ in
             }
         }
 
-        // ── one style for the bar and both docks (each has its own on its page) ──
+        // ── one style for the bar, both docks and the popups (each has its own too) ──
         SetSection {
+            id: styleSec
             title: "Style"
+            // the popups' style as it is (auto: the bar's)
+            readonly property string popupNow: Theme.popupStyle
+            readonly property bool same: Settings.v.barStyle === Settings.v.dockStyle && Settings.v.dockStyle === Settings.v.wsStyle && popupNow === Settings.v.barStyle
             SetRow {
                 label: "Everything"
-                description: Settings.v.barStyle === Settings.v.dockStyle && Settings.v.dockStyle === Settings.v.wsStyle ? "Bar and docks" : "Mixed · set each on its page"
+                description: styleSec.same ? "Bar, docks, popups" : "Mixed · set each below or on its page"
                 SetChoice {
                     options: [
                         { id: "smooth", label: "Smooth" },
                         { id: "floating", label: "Floating" },
                         { id: "pill", label: "Pill" }
                     ]
-                    current: Settings.v.barStyle === Settings.v.dockStyle && Settings.v.dockStyle === Settings.v.wsStyle ? Settings.v.barStyle : ""
+                    current: styleSec.same ? Settings.v.barStyle : ""
                     onPicked: s => {
                         Settings.v.barStyle = s;
                         Settings.v.dockStyle = s;
                         Settings.v.wsStyle = s;
+                        Settings.v.popupStyle = s;
                     }
+                }
+            }
+            SetRow {
+                label: "Popups"
+                description: ({
+                        auto: "Like the bar",
+                        smooth: "Melt into the bar",
+                        floating: "A card under it",
+                        pill: "A rounder card"
+                    })[Settings.v.popupStyle] || ""
+                SetChoice {
+                    options: [
+                        { id: "auto", label: "Like the bar" },
+                        { id: "smooth", label: "Smooth" },
+                        { id: "floating", label: "Floating" },
+                        { id: "pill", label: "Pill" }
+                    ]
+                    current: Settings.v.popupStyle
+                    onPicked: s => Settings.v.popupStyle = s
+                }
+            }
+            SetRow {
+                label: "Popup animation"
+                SetChoice {
+                    options: Settings.anims
+                    current: Settings.v.popupAnim
+                    onPicked: a => Settings.v.popupAnim = a
                 }
             }
             SetRow {
@@ -8675,7 +8695,7 @@ in
         readonly property var sizeKeys: ["barHeight", "moduleHeight", "textSize", "iconSize", "spacing"]
         readonly property var shapeKeys: ["radius", "barCurve", "popupCurve", "popupCorner"]
 
-        readonly property var styleKeys: ["barStyle", "popups", "popupAnim", "barMargin", "floatRadius", "shading"]
+        readonly property var styleKeys: ["barStyle", "barMargin", "floatRadius", "shading"]
 
         // ── the bar's widgets: on or off, and where their settings are ──
         // (on = in Settings.v.barLeft / barRight; Edit desktop drags them around)
@@ -8971,26 +8991,6 @@ in
                     ]
                     current: Settings.v.barStyle
                     onPicked: s => Settings.v.barStyle = s
-                }
-            }
-            SetRow {
-                label: "Popups"
-                description: Settings.v.popups ? "Click a widget to open it · how it opens" : "Off · clicking a widget does nothing"
-                Row {
-                    spacing: 12
-                    SetChoice {
-                        anchors.verticalCenter: parent.verticalCenter
-                        enabled: Settings.v.popups
-                        opacity: enabled ? 1 : 0.4
-                        options: Settings.anims
-                        current: Settings.v.popupAnim
-                        onPicked: a => Settings.v.popupAnim = a
-                    }
-                    SetSwitch {
-                        anchors.verticalCenter: parent.verticalCenter
-                        checked: Settings.v.popups
-                        onToggled: on => Settings.v.popups = on
-                    }
                 }
             }
             SetRow {
@@ -14988,16 +14988,9 @@ in
                             anchors.verticalCenter: parent.verticalCenter
                             text: "Popups"
                         }
-                        SetSwitch {
-                            anchors.verticalCenter: parent.verticalCenter
-                            checked: Settings.v.popups
-                            onToggled: on => Settings.v.popups = on
-                        }
                         SetChoice {
                             anchors.verticalCenter: parent.verticalCenter
-                            width: Math.min(fitWidth, tools.width - 110)
-                            enabled: Settings.v.popups
-                            opacity: enabled ? 1 : 0.4
+                            width: Math.min(fitWidth, tools.width - 60)
                             options: Settings.anims
                             current: Settings.v.popupAnim
                             onPicked: a => Settings.v.popupAnim = a
@@ -15794,7 +15787,11 @@ in
         readonly property bool barDetached: barStyle !== "smooth"
         readonly property int barMargin: barDetached ? Settings.v.barMargin : 0
         readonly property int barBottom: barMargin + barHeight   // where the bar ends
-        readonly property int popupGap: barDetached ? 6 : 0      // between it and a popup
+        // the popups' own style (Settings → Appearance → Style): "auto" = like the bar
+        // (smooth with a smooth bar, a rounder card with the pill one, a card otherwise)
+        readonly property string popupStyle: Settings.v.popupStyle !== "auto" ? Settings.v.popupStyle : barStyle === "smooth" ? "smooth" : barStyle === "pill" ? "pill" : "floating"
+        readonly property bool popupDetached: popupStyle !== "smooth"
+        readonly property int popupGap: popupDetached ? 6 : 0    // between the bar and a popup
         readonly property int pillPad: 14                         // pill style: a widget's pill past it, sideways
         readonly property int pillHeight: moduleHeight + 8        // pill style: each widget's pill
         // the bar curves inward under both ends (Theme.radius big), like it wraps
@@ -15864,7 +15861,7 @@ in
         property int padding: 12       // space between the popup's edge and your content
         // a floating popup (any bar style but Smooth) is a rounded card: a bit more room
         // inside it, so the content keeps clear of its corners
-        readonly property int pad: padding + (Theme.barDetached ? 6 : 0)
+        readonly property int pad: padding + (Theme.popupDetached ? 6 : 0)
         property int curve: Settings.v.popupCurve   // size of the two curves where the popup melts into the bar
         property int cornerRadius: Settings.v.popupCorner  // roundness of the popup's two bottom corners
         property int duration: Settings.ms(320)       // slide-down (open) time in ms, for an average-size popup
@@ -15886,8 +15883,9 @@ in
         readonly property string anim: Settings.v.popupAnim
         readonly property real grow: anim === "slide" ? openness : 1
 
-        // the curves into the bar: none when the popup floats (Theme.barDetached)
-        readonly property int flare: Theme.barDetached ? 0 : curve
+        // the curves into the bar: none when the popup floats (Theme.popupStyle: its own
+        // style, Settings → Appearance → Style)
+        readonly property int flare: Theme.popupDetached ? 0 : curve
 
         // true while the popup is open (or opening)
         property bool open: false
@@ -15919,9 +15917,6 @@ in
         }
 
         function openPopup() {
-            // popups switched off (Settings → Bar → Popups, or Edit desktop's Bar ▾)
-            if (!Settings.v.popups)
-                return;
             // one popup at a time: close whichever widget is open now (any monitor's bar)
             if (Ui.openWidget && Ui.openWidget !== root)
                 Ui.openWidget.closePopup()
@@ -16001,7 +15996,7 @@ in
             anchors.centerIn: parent
             sourceComponent: root.button
 
-            scale: mouse.containsMouse && Settings.v.popups ? 0.85 : 1
+            scale: mouse.containsMouse ? 0.85 : 1
             Behavior on scale {
                 NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
             }
@@ -16011,17 +16006,10 @@ in
             id: mouse
             anchors.fill: parent
             hoverEnabled: true
-            cursorShape: Settings.v.popups ? Qt.PointingHandCursor : Qt.ArrowCursor
+            cursorShape: Qt.PointingHandCursor
             onClicked: root.open ? root.closePopup() : root.openPopup()
         }
-        // switched off while one's open: it goes
-        Connections {
-            target: Settings.v
-            function onPopupsChanged() {
-                if (!Settings.v.popups)
-                    root.closePopup();
-            }
-        }
+
 
         // The default button: a Material Symbols icon, like IconButton.
         Component {
@@ -16091,7 +16079,7 @@ in
                 id: shape
                 width: popup.implicitWidth
                 height: root.grow * popup.shownHeight     // grows down as it opens (slide)
-                visible: height > 0.5 && !Theme.barDetached
+                visible: height > 0.5 && !Theme.popupDetached
                 preferredRendererType: Shape.CurveRenderer    // smooth, anti-aliased curves
 
                 // Curves can't be bigger than half the height, so they grow in while opening.
@@ -16135,13 +16123,13 @@ in
                 }
             }
 
-            // Under a floating bar (any style but smooth) the popup floats too: a
-            // rounded card with a gap above it, no curves into the bar.
+            // Floating / pill popups (Theme.popupStyle): a rounded card with a gap above
+            // it, no curves into the bar; pill: rounder.
             Glass {
-                visible: Theme.barDetached && shape.height > 0.5
+                visible: Theme.popupDetached && shape.height > 0.5
                 width: shape.width
                 height: shape.height
-                radius: Math.min(root.cornerRadius, height / 2)
+                radius: Math.min(Theme.popupStyle === "pill" ? Math.max(24, root.cornerRadius * 2) : root.cornerRadius, height / 2)
             }
 
             // The content window: as tall as the shape is right now, so anything
