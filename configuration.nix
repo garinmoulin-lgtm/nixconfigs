@@ -2134,10 +2134,15 @@ in
   # Options include: linuxPackages-cachyos-latest, linuxPackages-cachyos-lts, etc.
   # boot.kernelPackages = pkgs.cachyosKernels.linuxPackages-cachyos-latest;
   services.flatpak.enable = true;
-  # 3. (Optional) Enable Sched-ext (scx) framework support if you want to use its modern schedulers
-  services.scx = {
+  # 3. (Optional) Sched-ext (scx) schedulers. nixpkgs replaced services.scx with
+  # services.scx-loader: a daemon (scx_loader) that starts default_sched at boot and
+  # can switch schedulers over D-Bus without a rebuild (`scxctl --help`).
+  services.scx-loader = {
     enable = true;
-    scheduler = "scx_bpfland"; # or scx_rusty, scx_lavd, etc — pick per workload
+    config.default_sched = "scx_bpfland"; # or scx_lavd, scx_rusty, etc — pick per workload
+    # config.default_mode = "Gaming"; # Auto (default), Gaming, PowerSave, LowLatency, Server
+    # (Quickshell: Settings → System → Scheduler switches and changes mode until a reboot,
+    # asking for your password through hyprpolkitagent.)
   };
   services.udisks2.enable = true;
   # Install firefox.
