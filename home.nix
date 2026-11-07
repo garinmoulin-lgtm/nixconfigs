@@ -2174,33 +2174,51 @@ in
                     spacing: 8
                     model: toastModel
 
-                    // slide in from the right, slide back out, the others move up/down
+                    // in and out (Settings → Appearance → Motion: Notifications): slide in
+                    // from the right, fade, pop (fade and grow), or none; the others move up/down
+                    readonly property string anim: Settings.v.toastAnim
+                    readonly property real slideBy: anim === "slide" ? 360 : 0
+                    readonly property real popFrom: anim === "pop" ? 0.88 : 1
+                    readonly property int inTime: anim === "none" ? 0 : Settings.ms(320)
+                    readonly property int outTime: anim === "none" ? 0 : Settings.ms(260)
                     add: Transition {
                         NumberAnimation {
                             property: "x"
-                            from: 360
+                            from: toastList.slideBy
                             to: 0
-                            duration: 320
+                            duration: toastList.inTime
                             easing.type: Easing.OutCubic
                         }
                         NumberAnimation {
                             property: "opacity"
                             from: 0
                             to: 1
-                            duration: 200
+                            duration: toastList.anim === "none" ? 0 : Settings.ms(200)
+                        }
+                        NumberAnimation {
+                            property: "scale"
+                            from: toastList.popFrom
+                            to: 1
+                            duration: toastList.inTime
+                            easing.type: Easing.OutBack
                         }
                     }
                     remove: Transition {
                         NumberAnimation {
                             property: "x"
-                            to: 360
-                            duration: 260
+                            to: toastList.slideBy
+                            duration: toastList.outTime
                             easing.type: Easing.InCubic
                         }
                         NumberAnimation {
                             property: "opacity"
                             to: 0
-                            duration: 260
+                            duration: toastList.outTime
+                        }
+                        NumberAnimation {
+                            property: "scale"
+                            to: toastList.popFrom
+                            duration: toastList.outTime
                         }
                     }
                     displaced: Transition {
@@ -6831,7 +6849,8 @@ in
                 neuLight: "top-left",    // where the light comes from: top-left, top-right, bottom-left, bottom-right
                 neuAuto: true,           // distance from each thing's size
                 neuDistance: 5,          // px the shadows sit off it
-                neuBlur: 10,             // px
+                neuBlur: 10,             // px (old: Softness below took its place)
+                neuSoft: 2.4,            // blur = distance × this (tied, so it can't go hard or bloom)
                 neuIntensity: 0.55,      // 0..1
                 neuSurface: "flat",      // flat, convex (bulges), concave (dips)
                 neuPills: true,          // the pills in the bar (volume, clock...) shaded too
@@ -6880,6 +6899,8 @@ in
                 // the bar's popups: "auto" (like the bar), smooth (melt into it), floating
                 // (a card under it), pill (a rounder card) (Settings → Appearance → Style)
                 popupStyle: "auto",
+                menuAnim: "slide",       // the right-click menus
+                toastAnim: "slide",      // notifications
                 scrollSpeed: 2.0         // the mouse wheel in the shell's lists and pages (FastWheel.qml); 1 = Qt's own
             })
 
@@ -7025,6 +7046,7 @@ in
                 property bool neuAuto: root.defaults.neuAuto
                 property int neuDistance: root.defaults.neuDistance
                 property int neuBlur: root.defaults.neuBlur
+                property real neuSoft: root.defaults.neuSoft
                 property real neuIntensity: root.defaults.neuIntensity
                 property string neuSurface: root.defaults.neuSurface
                 property bool neuPills: root.defaults.neuPills
@@ -7063,6 +7085,8 @@ in
                 property bool iconFill: root.defaults.iconFill
                 property real scrollSpeed: root.defaults.scrollSpeed
                 property string popupStyle: root.defaults.popupStyle
+                property string menuAnim: root.defaults.menuAnim
+                property string toastAnim: root.defaults.toastAnim
             }
         }
         Timer {
@@ -7211,10 +7235,95 @@ in
         readonly property var page: pages.find(p => p.id === pageId) ?? pages[0]
         onPageChanged: flick.contentY = 0
 
+        // ── search (the box above the pages; Ctrl+F) ──
+        // Looks through every page's sections and rows (SettingsIndex.qml) and the pages
+        // themselves; picking one opens its page, scrolls to it and lights it up.
+        property string query: ""
+        readonly property var results: {
+            const words = query.toLowerCase().split(/\s+/).filter(w => w !== "");
+            if (words.length === 0)
+                return [];
+            const pageOf = id => pages.find(p => p.id === id);
+            const all = pages.map(p => ({ page: p.id, sub: "", section: "", label: p.label, desc: p.caption, kind: "page" })).concat(SettingsIndex.items);
+            const hits = [];
+            for (const it of all) {
+                const p = pageOf(it.page);
+                const hay = (it.label + " " + it.desc + " " + it.section + " " + (it.keys || "") + " " + (p ? p.label : "")).toLowerCase();
+                if (!words.every(w => hay.includes(w)))
+                    continue;
+                // the best first: the name itself starts with it, then has it, then anywhere
+                const name = it.label.toLowerCase();
+                const score = name.startsWith(words[0]) ? 0 : name.includes(words[0]) ? 1 : 2;
+                hits.push({ item: it, score: score, pageLabel: p ? p.label : it.page });
+            }
+            hits.sort((a, b) => a.score - b.score);
+            return hits.slice(0, 60);
+        }
+        property var target: null       // what to show once its page is open
+        function go(it) {
+            target = it;
+            query = "";
+            search.clear();
+            Settings.page = it.sub !== "" ? it.sub : it.page;
+            finder.tries = 0;
+            finder.restart();
+        }
+        // after the page (and a Docks half) has loaded: find the row, scroll to it, flash it
+        Timer {
+            id: finder
+            property int tries: 0
+            interval: 60
+            onTriggered: {
+                const t = win.target;
+                if (!t || !loader.item)
+                    return;
+                if (t.kind === "page") {
+                    win.target = null;
+                    return;
+                }
+                const found = win.findIn(loader.item, t);
+                if (!found) {
+                    if (++tries < 8)
+                        restart();
+                    else
+                        win.target = null;
+                    return;
+                }
+                const p = found.mapToItem(loader, 0, 0);
+                flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height, loader.y + p.y - 48));
+                flash.x = loader.x + p.x - 6;
+                flash.y = loader.y + p.y - 4;
+                flash.width = found.width + 12;
+                flash.height = Math.min(found.height + 8, t.kind === "section" ? 60 : found.height + 8);
+                flashAnim.restart();
+                win.target = null;
+            }
+        }
+        function findIn(item, t) {
+            const kids = item.children;
+            for (let i = 0; i < kids.length; i++) {
+                const k = kids[i];
+                if (!k.visible)
+                    continue;
+                if (t.kind === "section" ? k.title === t.label && k.caption !== undefined : k.label === t.label && k.description !== undefined)
+                    return k;
+                const deeper = findIn(k, t);
+                if (deeper)
+                    return deeper;
+            }
+            return null;
+        }
+
         Item {
             anchors.fill: parent
             focus: true
             Keys.onEscapePressed: Settings.open = false
+            Keys.onPressed: e => {
+                if (e.key === Qt.Key_F && (e.modifiers & Qt.ControlModifier)) {
+                    search.focusIn();
+                    e.accepted = true;
+                }
+            }
 
             // ── the pages ──
             Rectangle {
@@ -7248,13 +7357,45 @@ in
                         font.letterSpacing: Theme.letterSpacing
                     }
 
+                    SetField {
+                        id: search
+                        width: parent.width
+                        height: 34
+                        placeholder: "Search  ·  Ctrl+F"
+                        onEdited: t => win.query = t
+                        onAccepted: if (win.results.length > 0)
+                            win.go(win.results[0].item)
+                        Text {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: win.query !== "" ? "close" : "search"
+                            color: Theme.text
+                            opacity: 0.5
+                            font.family: Theme.iconFont
+                            font.pixelSize: 16
+                            font.variableAxes: Theme.iconAxes
+                            MouseArea {
+                                anchors.fill: parent
+                                anchors.margins: -4
+                                enabled: win.query !== ""
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: search.clear()
+                            }
+                        }
+                    }
+                    Item {
+                        width: 1
+                        height: 8
+                    }
+
                     Repeater {
                         model: win.pages
 
                         Rectangle {
                             id: tab
                             required property var modelData
-                            readonly property bool selected: win.page.id === modelData.id
+                            readonly property bool selected: win.query === "" && win.page.id === modelData.id
 
                             width: parent.width
                             height: 34
@@ -7311,6 +7452,55 @@ in
                             }
                         }
                     }
+
+                    // ── Hyprland's own settings: HyprMod (its own app) ──
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        color: Theme.pill
+                    }
+                    Item {
+                        width: 1
+                        height: 4
+                    }
+                    Rectangle {
+                        width: parent.width
+                        height: 34
+                        radius: 10
+                        color: hyprMouse.containsMouse ? Theme.pill : "transparent"
+                        Row {
+                            x: 12
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 12
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "open_in_new"
+                                color: Theme.text
+                                font.family: Theme.iconFont
+                                font.pixelSize: 19
+                                font.variableAxes: Theme.iconAxes
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "Open HyprMod"
+                                color: Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: 13
+                                font.weight: 500
+                                font.letterSpacing: Theme.letterSpacing
+                            }
+                        }
+                        MouseArea {
+                            id: hyprMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                Quickshell.execDetached(["hyprmod"]);
+                                Settings.open = false;
+                            }
+                        }
+                    }
                 }
                 }
             }
@@ -7332,7 +7522,7 @@ in
                     spacing: 4
 
                     Text {
-                        text: win.page.label
+                        text: win.query !== "" ? "Search" : win.page.label
                         color: Theme.text
                         font.family: Theme.font
                         font.pixelSize: 24
@@ -7342,7 +7532,7 @@ in
                     Text {
                         width: parent.width
                         wrapMode: Text.Wrap
-                        text: win.page.caption
+                        text: win.query !== "" ? (win.results.length === 0 ? "Nothing for \u201c" + win.query + "\u201d" : win.results.length + (win.results.length === 1 ? " match" : " matches") + " · Enter opens the first") : win.page.caption
                         color: Theme.text
                         opacity: 0.6
                         font.family: Theme.font
@@ -7371,11 +7561,40 @@ in
                         base: 110
                     }
 
+                    // a row you searched for, lit up for a moment
+                    Rectangle {
+                        id: flash
+                        z: 5
+                        opacity: 0
+                        radius: 12
+                        color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.16)
+                        border.width: 1.5
+                        border.color: Theme.accent
+                        SequentialAnimation {
+                            id: flashAnim
+                            NumberAnimation {
+                                target: flash
+                                property: "opacity"
+                                to: 1
+                                duration: 120
+                            }
+                            PauseAnimation {
+                                duration: 900
+                            }
+                            NumberAnimation {
+                                target: flash
+                                property: "opacity"
+                                to: 0
+                                duration: 700
+                            }
+                        }
+                    }
+
                     Loader {
                         id: loader
                         x: 32
                         width: flick.width - 64
-                        sourceComponent: ({
+                        sourceComponent: win.query !== "" ? resultsPage : ({
                                 appearance: appearancePage,
                                 bar: barPage,
                                 docks: docksPage,
@@ -7391,6 +7610,69 @@ in
                                 general: generalPage,
                                 about: aboutPage
                             })[win.page.id]
+                    }
+                }
+            }
+        }
+
+        // ── search results ──
+        Component {
+            id: resultsPage
+            Column {
+                spacing: 4
+                Repeater {
+                    model: win.results
+                    Rectangle {
+                        id: hit
+                        required property var modelData
+                        required property int index
+                        readonly property var it: modelData.item
+                        width: parent ? parent.width : 400
+                        height: hitCol.height + 20
+                        radius: 12
+                        color: hitMouse.containsMouse || index === 0 ? Theme.pill : "transparent"
+                        Text {
+                            id: hitIcon
+                            x: 14
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: hit.it.kind === "page" ? "web_asset" : hit.it.kind === "section" ? "segment" : "tune"
+                            color: Theme.accent
+                            font.family: Theme.iconFont
+                            font.pixelSize: 18
+                            font.variableAxes: Theme.iconAxes
+                        }
+                        Column {
+                            id: hitCol
+                            x: 46
+                            y: 10
+                            width: parent.width - x - 14
+                            spacing: 2
+                            Text {
+                                width: parent.width
+                                elide: Text.ElideRight
+                                text: hit.it.label
+                                color: Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: 13
+                                font.weight: 700
+                            }
+                            Text {
+                                width: parent.width
+                                elide: Text.ElideRight
+                                text: [hit.modelData.pageLabel, hit.it.sub === "workspaces" ? "Workspaces dock" : hit.it.sub === "dock" ? "Dock" : "", hit.it.kind === "row" ? hit.it.section : ""].filter(x => x !== "").join("  ›  ") + (hit.it.desc !== "" ? "   ·   " + hit.it.desc : "")
+                                color: Theme.text
+                                opacity: 0.55
+                                font.family: Theme.font
+                                font.pixelSize: 11
+                            }
+                        }
+                        MouseArea {
+                            id: hitMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: win.go(hit.it)
+                        }
                     }
                 }
             }
@@ -7827,6 +8109,7 @@ in
     // Settings → Appearance: the themes (and the wallpaper one), the wallpaper, glass and speed
     Column {
         id: page
+
         spacing: 26
 
         readonly property bool wallTheme: Theme.current === "matugen"
@@ -8203,14 +8486,6 @@ in
                 }
             }
             SetRow {
-                label: "Popup animation"
-                SetChoice {
-                    options: Settings.anims
-                    current: Settings.v.popupAnim
-                    onPicked: a => Settings.v.popupAnim = a
-                }
-            }
-            SetRow {
                 label: "Shading"
                 description: Settings.v.shading === "neumorphic" ? "Raised · bar, docks, pills, panels" : "No shadows"
                 SetChoice {
@@ -8229,7 +8504,7 @@ in
             id: shadeSec
             visible: Settings.v.shading === "neumorphic"
             title: "Shading"
-            readonly property var keys: ["neuLight", "neuAuto", "neuDistance", "neuBlur", "neuIntensity", "neuSurface", "neuPills"]
+            readonly property var keys: ["neuLight", "neuAuto", "neuDistance", "neuSoft", "neuIntensity", "neuSurface", "neuPills"]
             actions: SetButton {
                 icon: "restart_alt"
                 text: "Reset"
@@ -8355,25 +8630,89 @@ in
             }
             SetRow {
                 enabled: !Settings.v.neuAuto
-                label: "Blur"
+                label: "Softness"
+                description: "Blur, as a share of the distance"
                 SetSlider {
-                    from: 0
-                    to: 40
-                    value: Settings.v.neuBlur
-                    suffix: " px"
-                    onMoved: v => Settings.v.neuBlur = v
+                    from: 1.5
+                    to: 4
+                    stepSize: 0.1
+                    decimals: 1
+                    value: Settings.v.neuSoft
+                    suffix: "×"
+                    onMoved: v => Settings.v.neuSoft = v
                 }
             }
         }
 
-        // ── glass and speed ──
+        // ── how everything that pops out moves: one choice for all, or each its own ──
         SetSection {
-            title: "Glass and motion"
+            id: motionSec
+            title: "Motion"
+            readonly property var keys: ["popupAnim", "dockAnim", "wsAnim", "panelAnim", "menuAnim", "toastAnim"]
+            readonly property var things: [
+                { key: "popupAnim", label: "Popups", desc: "The bar's widgets" },
+                { key: "dockAnim", label: "Dock", desc: "Out of the bottom edge" },
+                { key: "wsAnim", label: "Workspaces dock", desc: "Out of the left edge" },
+                { key: "panelAnim", label: "Panels", desc: "Auto-hide ones" },
+                { key: "menuAnim", label: "Menus", desc: "Right-click" },
+                { key: "toastAnim", label: "Notifications", desc: "Coming and going" }
+            ]
+            readonly property bool same: keys.every(k => Settings.v[k] === Settings.v[keys[0]])
             actions: SetButton {
                 icon: "restart_alt"
                 text: "Reset"
-                enabled: !Settings.isDefault(["glassOpacity", "animScale", "scrollSpeed"])
-                onClicked: Settings.reset(["glassOpacity", "animScale", "scrollSpeed"])
+                enabled: !Settings.isDefault(motionSec.keys.concat(["animScale"]))
+                onClicked: Settings.reset(motionSec.keys.concat(["animScale"]))
+            }
+            SetRow {
+                label: "Everything"
+                description: motionSec.same ? "Popups, docks, panels, menus, notifications" : "Mixed · set each below"
+                SetChoice {
+                    options: Settings.anims
+                    current: motionSec.same ? Settings.v.popupAnim : ""
+                    onPicked: a => {
+                        for (const k of motionSec.keys)
+                            Settings.v[k] = a;
+                    }
+                }
+            }
+            Repeater {
+                model: motionSec.things
+                SetRow {
+                    id: mrow
+                    required property var modelData
+                    label: modelData.label
+                    description: modelData.desc
+                    SetChoice {
+                        options: Settings.anims
+                        current: Settings.v[mrow.modelData.key]
+                        onPicked: a => Settings.v[mrow.modelData.key] = a
+                    }
+                }
+            }
+            SetRow {
+                label: "Speed"
+                description: "Lower = quicker · everything"
+                SetSlider {
+                    from: 0.25
+                    to: 2
+                    stepSize: 0.05
+                    decimals: 2
+                    value: Settings.v.animScale
+                    suffix: "×"
+                    onMoved: v => Settings.v.animScale = v
+                }
+            }
+        }
+
+        // ── glass and scrolling ──
+        SetSection {
+            title: "Glass and scrolling"
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(["glassOpacity", "scrollSpeed"])
+                onClicked: Settings.reset(["glassOpacity", "scrollSpeed"])
             }
 
             SetRow {
@@ -8387,19 +8726,6 @@ in
                     value: Settings.v.glassOpacity
                     suffix: "%"
                     onMoved: v => Settings.v.glassOpacity = v
-                }
-            }
-            SetRow {
-                label: "Animations"
-                description: "Lower = quicker"
-                SetSlider {
-                    from: 0.25
-                    to: 2
-                    stepSize: 0.05
-                    decimals: 2
-                    value: Settings.v.animScale
-                    suffix: "×"
-                    onMoved: v => Settings.v.animScale = v
                 }
             }
             SetRow {
@@ -9199,15 +9525,6 @@ in
                 }
             }
             SetRow {
-                label: "Animation"
-                description: "Showing and hiding"
-                SetChoice {
-                    options: Settings.anims
-                    current: Settings.v.wsAnim
-                    onPicked: a => Settings.v.wsAnim = a
-                }
-            }
-            SetRow {
                 label: "Shading"
                 description: Settings.v.shading === "neumorphic" ? "Raised · bar, docks, pills, panels" : "No shadows"
                 SetChoice {
@@ -9382,15 +9699,6 @@ in
                     ]
                     current: Settings.v.dockStyle
                     onPicked: s => Settings.v.dockStyle = s
-                }
-            }
-            SetRow {
-                label: "Animation"
-                description: "Showing and hiding"
-                SetChoice {
-                    options: Settings.anims
-                    current: Settings.v.dockAnim
-                    onPicked: a => Settings.v.dockAnim = a
                 }
             }
             SetRow {
@@ -10595,15 +10903,6 @@ in
             Fact {
                 label: "Theme"
                 value: Theme.info(Theme.current) ? Theme.info(Theme.current).name + " " + Theme.info(Theme.current).variant : Theme.current
-            }
-            SetRow {
-                label: "Window settings"
-                description: "Gaps, borders, input: HyprMod"
-                SetButton {
-                    icon: "open_in_new"
-                    text: "Open HyprMod"
-                    onClicked: Quickshell.execDetached(["hyprmod"])
-                }
             }
             SetRow {
                 label: "Restart the shell"
@@ -12306,6 +12605,16 @@ in
         property bool mono: false
         signal edited(string text)
         signal accepted
+        signal escaped          // Esc in it
+
+        function focusIn() {
+            input.forceActiveFocus();
+            input.selectAll();
+        }
+        function clear() {
+            input.text = "";
+            field.edited("");
+        }
 
         implicitWidth: 200
         implicitHeight: 30
@@ -12336,6 +12645,15 @@ in
             font.pixelSize: 12
             onTextEdited: field.edited(text)
             onAccepted: field.accepted()
+            Keys.onEscapePressed: e => {
+                if (input.text !== "") {
+                    field.clear();
+                    e.accepted = true;
+                } else {
+                    e.accepted = false;      // (the window's own Esc: close)
+                }
+                field.escaped();
+            }
 
             Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -12700,16 +13018,6 @@ in
                         onPicked: s => page.set({ visibility: s })
                     }
                 }
-                SetRow {
-                    enabled: !!page.p && page.p.visibility === "autohide"
-                    label: "Hiding"
-                    description: "Every auto-hide panel"
-                    SetChoice {
-                        options: Settings.anims
-                        current: Settings.v.panelAnim
-                        onPicked: a => Settings.v.panelAnim = a
-                    }
-                }
             }
 
             SetSection {
@@ -13057,6 +13365,29 @@ in
         property var model: []
         signal picked(string act)
 
+        // how it appears (Settings → Appearance → Motion: Menus): slide (drops a little),
+        // fade, pop (grows a little), none
+        readonly property string anim: Settings.v.menuAnim
+        property real shown: 1
+        onVisibleChanged: if (visible) {
+            shown = 0;
+            appear.restart();
+        }
+        NumberAnimation {
+            id: appear
+            target: card
+            property: "shown"
+            to: 1
+            duration: card.anim === "none" ? 0 : Settings.ms(170)
+            easing.type: Easing.OutCubic
+        }
+        opacity: anim === "none" ? 1 : shown
+        scale: anim === "pop" ? 0.9 + 0.1 * shown : 1
+        transformOrigin: Item.Top
+        transform: Translate {
+            y: card.anim === "slide" ? (card.shown - 1) * 10 : 0
+        }
+
         width: 220
         height: items.height + 12
         radius: 12
@@ -13388,22 +13719,6 @@ in
                             ]
                             current: ed.p ? ed.p.visibility || "always" : "always"
                             onPicked: s => ed.set({ visibility: s })
-                        }
-                    }
-                    Row {
-                        visible: ed.opts && ed.editable && !!ed.p && ed.p.visibility === "autohide"
-                        spacing: 6
-                        Label {
-                            width: 84
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "Hiding"
-                        }
-                        SetChoice {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: Math.min(fitWidth, tools.width - 92)
-                            options: Settings.anims
-                            current: Settings.v.panelAnim
-                            onPicked: a => Settings.v.panelAnim = a
                         }
                     }
                     Row {
@@ -14616,7 +14931,9 @@ in
         visible: on
 
         readonly property real depth: (Settings.v.neuAuto ? Math.max(5, Math.min(10, Math.min(width, height) / 6)) : Settings.v.neuDistance) * scale
-        readonly property real blur: Settings.v.neuAuto ? depth * 2.4 : Settings.v.neuBlur * scale
+        // tied to the distance: blur below about 1.5× it left a hard-edged slab sticking
+        // out (the shadow's solid middle), far above it was a glow all round (bloom)
+        readonly property real blur: depth * (Settings.v.neuAuto ? 2.4 : Settings.v.neuSoft)
         readonly property real strength: Settings.v.neuIntensity
         readonly property int sx: Settings.v.neuLight.endsWith("left") ? 1 : -1
         readonly property int sy: Settings.v.neuLight.startsWith("top") ? 1 : -1
@@ -14982,20 +15299,6 @@ in
                             onMoved: val => Settings.v.barHeight = val
                         }
                     }
-                    Row {
-                        spacing: 6
-                        Label {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "Popups"
-                        }
-                        SetChoice {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: Math.min(fitWidth, tools.width - 60)
-                            options: Settings.anims
-                            current: Settings.v.popupAnim
-                            onPicked: a => Settings.v.popupAnim = a
-                        }
-                    }
                     SetButton {
                         icon: "settings"
                         text: "More"
@@ -15335,12 +15638,6 @@ in
                     current: Settings.v.dockStyle
                     onPicked: v => Settings.v.dockStyle = v
                 }
-                ChoiceRow {
-                    label: "Animation"
-                    options: Settings.anims
-                    current: Settings.v.dockAnim
-                    onPicked: v => Settings.v.dockAnim = v
-                }
                 SliderRow {
                     label: "Icons"
                     from: 20
@@ -15391,12 +15688,6 @@ in
                     current: Settings.v.wsStyle
                     onPicked: v => Settings.v.wsStyle = v
                 }
-                ChoiceRow {
-                    label: "Animation"
-                    options: Settings.anims
-                    current: Settings.v.wsAnim
-                    onPicked: v => Settings.v.wsAnim = v
-                }
                 SliderRow {
                     label: "Rows"
                     from: 28
@@ -15418,7 +15709,7 @@ in
   xdg.configFile."quickshell/FastWheel.qml".text = ''
     import QtQuick
 
-    // The mouse wheel, faster (Settings → Appearance → Glass and motion: Scroll speed).
+    // The mouse wheel, faster (Settings → Appearance → Glass and scrolling: Scroll speed).
     // Put it straight inside a Flickable, ListView or GridView: `FastWheel {}`. A notch
     // moves `base` px (Qt's own is 72) times the speed, with a short glide; a touchpad's
     // pixels are sped up the same. Up / down scrolls sideways in something that only
@@ -15481,6 +15772,172 @@ in
             duration: 140
             easing.type: Easing.OutCubic
         }
+    }
+  '';
+
+  xdg.configFile."quickshell/SettingsIndex.qml".text = ''
+    pragma Singleton
+    import QtQuick
+    import Quickshell
+
+    // What Settings' search looks through: every section and row of every page.
+    // Made from the pages' text (gen_index.py, when home.nix is put together), so
+    // don't edit it by hand.
+    Singleton {
+        readonly property var items: [
+            {"page": "appearance", "sub": "", "section": "Theme", "label": "Theme", "desc": "", "kind": "section", "keys": ""},
+            {"page": "appearance", "sub": "", "section": "Wallpaper", "label": "Wallpaper", "desc": "", "kind": "section", "keys": ""},
+            {"page": "appearance", "sub": "", "section": "Style", "label": "Style", "desc": "", "kind": "section", "keys": "smooth floating pill"},
+            {"page": "appearance", "sub": "", "section": "Style", "label": "Everything", "desc": "Bar, docks, popups · Mixed · set each below or on its page", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "appearance", "sub": "", "section": "Style", "label": "Popups", "desc": "", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "appearance", "sub": "", "section": "Style", "label": "Shading", "desc": "neumorphic · Raised · bar, docks, pills, panels · No shadows", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "appearance", "sub": "", "section": "Shading", "label": "Shading", "desc": "", "kind": "section", "keys": "neumorphic shadow light"},
+            {"page": "appearance", "sub": "", "section": "Shading", "label": "Pills", "desc": "The bar's pills too (volume, clock…)", "kind": "row", "keys": "neumorphic shadow light"},
+            {"page": "appearance", "sub": "", "section": "Shading", "label": "Surface", "desc": "", "kind": "row", "keys": "neumorphic shadow light"},
+            {"page": "appearance", "sub": "", "section": "Shading", "label": "Intensity", "desc": "", "kind": "row", "keys": "neumorphic shadow light"},
+            {"page": "appearance", "sub": "", "section": "Shading", "label": "Auto depth", "desc": "From each thing's size", "kind": "row", "keys": "neumorphic shadow light"},
+            {"page": "appearance", "sub": "", "section": "Shading", "label": "Distance", "desc": "", "kind": "row", "keys": "neumorphic shadow light"},
+            {"page": "appearance", "sub": "", "section": "Shading", "label": "Softness", "desc": "Blur, as a share of the distance", "kind": "row", "keys": "neumorphic shadow light"},
+            {"page": "appearance", "sub": "", "section": "Motion", "label": "Motion", "desc": "", "kind": "section", "keys": "animation animations slide fade pop transition"},
+            {"page": "appearance", "sub": "", "section": "Motion", "label": "Everything", "desc": "Popups, docks, panels, menus, notifications · Mixed · set each below", "kind": "row", "keys": "animation animations slide fade pop transition"},
+            {"page": "appearance", "sub": "", "section": "Motion", "label": "Speed", "desc": "Lower = quicker · everything", "kind": "row", "keys": "animation animations slide fade pop transition"},
+            {"page": "appearance", "sub": "", "section": "Glass and scrolling", "label": "Glass and scrolling", "desc": "", "kind": "section", "keys": ""},
+            {"page": "appearance", "sub": "", "section": "Glass and scrolling", "label": "Opacity", "desc": "Bar, popups, docks", "kind": "row", "keys": ""},
+            {"page": "appearance", "sub": "", "section": "Glass and scrolling", "label": "Scroll speed", "desc": "Mouse wheel, in lists and pages", "kind": "row", "keys": ""},
+            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Surfaces", "desc": "", "kind": "section", "keys": "background border font tint"},
+            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Background", "desc": "The theme color under the glass", "kind": "row", "keys": "background border font tint"},
+            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Tint", "desc": "Accent mixed in", "kind": "row", "keys": "background border font tint"},
+            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Pill tint", "desc": "Pills, buttons, hovered rows", "kind": "row", "keys": "background border font tint"},
+            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Border", "desc": "None · Round the edges", "kind": "row", "keys": "background border font tint"},
+            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Border color", "desc": "", "kind": "row", "keys": "background border font tint"},
+            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Border strength", "desc": "", "kind": "row", "keys": "background border font tint"},
+            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Pills too", "desc": "The bar's pills (not in the Pill style)", "kind": "row", "keys": "background border font tint"},
+            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Font", "desc": "Its name, then Enter · empty = SFMono Nerd Font", "kind": "row", "keys": "background border font tint"},
+            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Filled icons", "desc": "", "kind": "row", "keys": "background border font tint"},
+            {"page": "appearance", "sub": "", "section": "Theme code", "label": "Theme code", "desc": "", "kind": "section", "keys": "theme.qml code override"},
+            {"page": "appearance", "sub": "", "section": "From wallpaper", "label": "From wallpaper", "desc": "", "kind": "section", "keys": ""},
+            {"page": "appearance", "sub": "", "section": "From wallpaper", "label": "Built around", "desc": "Main colors, most first · Main color", "kind": "row", "keys": ""},
+            {"page": "appearance", "sub": "", "section": "From wallpaper", "label": "Style", "desc": "", "kind": "row", "keys": ""},
+            {"page": "appearance", "sub": "", "section": "From wallpaper", "label": "Contrast", "desc": "0 = Material default", "kind": "row", "keys": ""},
+            {"page": "bar", "sub": "", "section": "Widgets", "label": "Widgets", "desc": "", "kind": "section", "keys": ""},
+            {"page": "bar", "sub": "", "section": "Style", "label": "Style", "desc": "", "kind": "section", "keys": "smooth floating pill"},
+            {"page": "bar", "sub": "", "section": "Style", "label": "Look", "desc": "", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "bar", "sub": "", "section": "Style", "label": "Gap", "desc": "", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "bar", "sub": "", "section": "Style", "label": "Corners", "desc": "Floating", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "bar", "sub": "", "section": "Style", "label": "Shading", "desc": "neumorphic · Raised · bar, docks, pills, panels · No shadows", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "bar", "sub": "", "section": "Size", "label": "Size", "desc": "", "kind": "section", "keys": ""},
+            {"page": "bar", "sub": "", "section": "Size", "label": "Height", "desc": "", "kind": "row", "keys": ""},
+            {"page": "bar", "sub": "", "section": "Size", "label": "Buttons", "desc": "", "kind": "row", "keys": ""},
+            {"page": "bar", "sub": "", "section": "Size", "label": "Text", "desc": "", "kind": "row", "keys": ""},
+            {"page": "bar", "sub": "", "section": "Size", "label": "Icons", "desc": "", "kind": "row", "keys": ""},
+            {"page": "bar", "sub": "", "section": "Size", "label": "Spacing", "desc": "", "kind": "row", "keys": ""},
+            {"page": "bar", "sub": "", "section": "Shape", "label": "Shape", "desc": "", "kind": "section", "keys": ""},
+            {"page": "bar", "sub": "", "section": "Shape", "label": "Roundness", "desc": "Pills, buttons, rows", "kind": "row", "keys": ""},
+            {"page": "bar", "sub": "", "section": "Shape", "label": "Curved ends", "desc": "Smooth style only", "kind": "row", "keys": ""},
+            {"page": "bar", "sub": "", "section": "Shape", "label": "Popup curves", "desc": "Smooth style only", "kind": "row", "keys": ""},
+            {"page": "bar", "sub": "", "section": "Shape", "label": "Popup corners", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "", "label": "Dock", "desc": "Bottom edge", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "", "label": "Always up", "desc": "Never hides", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "", "label": "Tray", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "Style", "label": "Style", "desc": "", "kind": "section", "keys": "smooth floating pill"},
+            {"page": "docks", "sub": "dock", "section": "Style", "label": "Look", "desc": "", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "docks", "sub": "dock", "section": "Style", "label": "Shading", "desc": "neumorphic · Raised · bar, docks, pills, panels · No shadows", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "docks", "sub": "dock", "section": "Style", "label": "Gap", "desc": "", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "docks", "sub": "dock", "section": "Size and shape", "label": "Size and shape", "desc": "", "kind": "section", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "Size and shape", "label": "Icons", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "Size and shape", "label": "Icon padding", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "Size and shape", "label": "Padding", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "Size and shape", "label": "Curves", "desc": "Smooth style only", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "Size and shape", "label": "Corners", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "Pinned", "label": "Pinned", "desc": "", "kind": "section", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "Timing", "label": "Timing", "desc": "", "kind": "section", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "Timing", "label": "Hides after", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "Timing", "label": "Previews after", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "workspaces", "section": "", "label": "Workspaces dock", "desc": "Left edge", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "workspaces", "section": "Style", "label": "Style", "desc": "", "kind": "section", "keys": "smooth floating pill"},
+            {"page": "docks", "sub": "workspaces", "section": "Style", "label": "Look", "desc": "", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "docks", "sub": "workspaces", "section": "Style", "label": "Shading", "desc": "neumorphic · Raised · bar, docks, pills, panels · No shadows", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "docks", "sub": "workspaces", "section": "Style", "label": "Gap", "desc": "", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Size and shape", "desc": "", "kind": "section", "keys": ""},
+            {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Rows", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "App icons", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Apps per workspace", "desc": "Then \\\"+N\\\"", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Padding", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Curves", "desc": "Smooth style only", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Corners", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Hides after", "desc": "", "kind": "row", "keys": ""},
+            {"page": "panels", "sub": "", "section": "Panels", "label": "Panels", "desc": "", "kind": "section", "keys": ""},
+            {"page": "panels", "sub": "", "section": "Place", "label": "Place", "desc": "", "kind": "section", "keys": ""},
+            {"page": "panels", "sub": "", "section": "Place", "label": "Name", "desc": "", "kind": "row", "keys": ""},
+            {"page": "panels", "sub": "", "section": "Place", "label": "Edge", "desc": "", "kind": "row", "keys": ""},
+            {"page": "panels", "sub": "", "section": "Place", "label": "Style", "desc": "", "kind": "row", "keys": ""},
+            {"page": "panels", "sub": "", "section": "Place", "label": "Thickness", "desc": "", "kind": "row", "keys": ""},
+            {"page": "panels", "sub": "", "section": "Place", "label": "Gap", "desc": "From the edge (not smooth)", "kind": "row", "keys": ""},
+            {"page": "panels", "sub": "", "section": "Place", "label": "Screen", "desc": "", "kind": "row", "keys": ""},
+            {"page": "panels", "sub": "", "section": "Place", "label": "Length", "desc": "", "kind": "row", "keys": ""},
+            {"page": "panels", "sub": "", "section": "Place", "label": "Custom length", "desc": "", "kind": "row", "keys": ""},
+            {"page": "panels", "sub": "", "section": "Place", "label": "Alignment", "desc": "", "kind": "row", "keys": ""},
+            {"page": "panels", "sub": "", "section": "Place", "label": "Visibility", "desc": "Windows keep out of its way · Hides · push the edge to show · Windows go under it · always · always", "kind": "row", "keys": ""},
+            {"page": "panels", "sub": "", "section": "Widgets", "label": "Widgets", "desc": "", "kind": "section", "keys": ""},
+            {"page": "display", "sub": "", "section": "Brightness", "label": "Brightness", "desc": "", "kind": "section", "keys": ""},
+            {"page": "display", "sub": "", "section": "Brightness", "label": "Brightness", "desc": "backlight · Backlight · Software (no backlight)", "kind": "row", "keys": ""},
+            {"page": "display", "sub": "", "section": "Night light", "label": "Night light", "desc": "", "kind": "section", "keys": ""},
+            {"page": "display", "sub": "", "section": "Night light", "label": "Night light", "desc": "Warmer at night", "kind": "row", "keys": ""},
+            {"page": "display", "sub": "", "section": "Night light", "label": "Warmth", "desc": "Lower = warmer", "kind": "row", "keys": ""},
+            {"page": "display", "sub": "", "section": "Color filter", "label": "Color filter", "desc": "", "kind": "section", "keys": ""},
+            {"page": "display", "sub": "", "section": "Color filter", "label": "Filter", "desc": "One at a time", "kind": "row", "keys": ""},
+            {"page": "network", "sub": "", "section": "", "label": "Wi-Fi", "desc": "No Wi-Fi adapter · On · Off", "kind": "row", "keys": ""},
+            {"page": "network", "sub": "", "section": "", "label": "Wired", "desc": "Connected · Cable in · No cable", "kind": "row", "keys": ""},
+            {"page": "network", "sub": "", "section": "Networks", "label": "Networks", "desc": "", "kind": "section", "keys": ""},
+            {"page": "media", "sub": "", "section": "Music library", "label": "Music library", "desc": "", "kind": "section", "keys": ""},
+            {"page": "media", "sub": "", "section": "Music library", "label": "Folder", "desc": "Blank = ~/Music", "kind": "row", "keys": ""},
+            {"page": "media", "sub": "", "section": "Music library", "label": "Scan again", "desc": "For new songs", "kind": "row", "keys": ""},
+            {"page": "media", "sub": "", "section": "Players", "label": "Players", "desc": "", "kind": "section", "keys": ""},
+            {"page": "power", "sub": "", "section": "Power mode", "label": "Power mode", "desc": "", "kind": "section", "keys": ""},
+            {"page": "power", "sub": "", "section": "Power mode", "label": "Mode", "desc": "Quieter, longer battery · Fastest · Balanced", "kind": "row", "keys": ""},
+            {"page": "power", "sub": "", "section": "Battery", "label": "Battery", "desc": "", "kind": "section", "keys": ""},
+            {"page": "power", "sub": "", "section": "Battery", "label": "No battery", "desc": "Desktop", "kind": "row", "keys": ""},
+            {"page": "power", "sub": "", "section": "Battery", "label": "Health", "desc": "Of its original capacity", "kind": "row", "keys": ""},
+            {"page": "power", "sub": "", "section": "Warnings", "label": "Warnings", "desc": "", "kind": "section", "keys": ""},
+            {"page": "power", "sub": "", "section": "Warnings", "label": "Low at", "desc": "", "kind": "row", "keys": ""},
+            {"page": "power", "sub": "", "section": "Warnings", "label": "Critical at", "desc": "", "kind": "row", "keys": ""},
+            {"page": "sysmon", "sub": "", "section": "Bar", "label": "Bar", "desc": "", "kind": "section", "keys": ""},
+            {"page": "sysmon", "sub": "", "section": "Bar", "label": "Shows", "desc": "", "kind": "row", "keys": ""},
+            {"page": "sysmon", "sub": "", "section": "Graph", "label": "Graph", "desc": "", "kind": "section", "keys": ""},
+            {"page": "sysmon", "sub": "", "section": "Graph", "label": "Spans", "desc": "", "kind": "row", "keys": ""},
+            {"page": "sysmon", "sub": "", "section": "Now", "label": "Now", "desc": "", "kind": "section", "keys": ""},
+            {"page": "sysmon", "sub": "", "section": "Now", "label": "CPU", "desc": "", "kind": "row", "keys": ""},
+            {"page": "sysmon", "sub": "", "section": "Now", "label": "Memory", "desc": "", "kind": "row", "keys": ""},
+            {"page": "sysmon", "sub": "", "section": "Now", "label": "GPU", "desc": "", "kind": "row", "keys": ""},
+            {"page": "bluetooth", "sub": "", "section": "", "label": "Bluetooth", "desc": "No Bluetooth adapter found. · On · Blocked (rfkill) · Off", "kind": "row", "keys": ""},
+            {"page": "bluetooth", "sub": "", "section": "", "label": "Discoverable", "desc": "", "kind": "row", "keys": ""},
+            {"page": "notifications", "sub": "", "section": "", "label": "Do not disturb", "desc": "No popups or sounds · critical ones and alarms still come", "kind": "row", "keys": ""},
+            {"page": "notifications", "sub": "", "section": "Popups", "label": "Popups", "desc": "", "kind": "section", "keys": ""},
+            {"page": "notifications", "sub": "", "section": "Popups", "label": "Stay up for", "desc": "Hover keeps it up", "kind": "row", "keys": ""},
+            {"page": "notifications", "sub": "", "section": "Popups", "label": "At once", "desc": "", "kind": "row", "keys": ""},
+            {"page": "notifications", "sub": "", "section": "Sounds", "label": "Sounds", "desc": "", "kind": "section", "keys": ""},
+            {"page": "notifications", "sub": "", "section": "Sounds", "label": "Sound effects", "desc": "All shell sounds", "kind": "row", "keys": ""},
+            {"page": "notifications", "sub": "", "section": "Sounds", "label": "Notification sounds", "desc": "", "kind": "row", "keys": ""},
+            {"page": "general", "sub": "", "section": "Clock", "label": "Clock", "desc": "", "kind": "section", "keys": ""},
+            {"page": "general", "sub": "", "section": "Clock", "label": "24-hour time", "desc": "Now ", "kind": "row", "keys": ""},
+            {"page": "general", "sub": "", "section": "Weather", "label": "Weather", "desc": "", "kind": "section", "keys": ""},
+            {"page": "general", "sub": "", "section": "Weather", "label": "Place", "desc": ",  · Not set", "kind": "row", "keys": ""},
+            {"page": "general", "sub": "", "section": "Weather", "label": "Units", "desc": "°F · mph · in · °C · km/h · mm", "kind": "row", "keys": ""},
+            {"page": "about", "sub": "", "section": "This computer", "label": "This computer", "desc": "", "kind": "section", "keys": ""},
+            {"page": "about", "sub": "", "section": "The desktop", "label": "The desktop", "desc": "", "kind": "section", "keys": ""},
+            {"page": "about", "sub": "", "section": "The desktop", "label": "Restart the shell", "desc": "Settings are kept", "kind": "row", "keys": ""},
+            {"page": "about", "sub": "", "section": "The desktop", "label": "Settings file", "desc": "~/.local/state/quickshell/settings.json", "kind": "row", "keys": ""},
+            {"page": "sound", "sub": "", "section": "Output", "label": "Output", "desc": "", "kind": "section", "keys": ""},
+            {"page": "sound", "sub": "", "section": "Input", "label": "Input", "desc": "", "kind": "section", "keys": ""},
+            {"page": "sound", "sub": "", "section": "Apps playing", "label": "Apps playing", "desc": "", "kind": "section", "keys": ""},
+            {"page": "sound", "sub": "", "section": "Apps recording", "label": "Apps recording", "desc": "", "kind": "section", "keys": ""},
+            {"page": "appearance", "sub": "", "section": "Motion", "label": "Popups", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
+            {"page": "appearance", "sub": "", "section": "Motion", "label": "Dock", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
+            {"page": "appearance", "sub": "", "section": "Motion", "label": "Workspaces dock", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
+            {"page": "appearance", "sub": "", "section": "Motion", "label": "Panels", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
+            {"page": "appearance", "sub": "", "section": "Motion", "label": "Menus", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
+            {"page": "appearance", "sub": "", "section": "Motion", "label": "Notifications", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"}
+        ]
     }
   '';
 
@@ -20271,7 +20728,8 @@ in
                 shadowEnabled: true
                 // (Settings → Appearance → Shading: distance, blur, strength, light)
                 shadowColor: Qt.rgba(0, 0, 0, Math.min(1, 1.5 * Settings.v.neuIntensity))
-                shadowBlur: Math.min(1, Settings.v.neuBlur / 32)
+                // tied to the distance, like NeuShadow.qml
+                shadowBlur: Math.min(1, (Settings.v.neuAuto ? 4 * 2.4 : Settings.v.neuDistance * Settings.v.neuSoft) / 32)
                 blurMax: 32
                 shadowHorizontalOffset: (Settings.v.neuLight.endsWith("left") ? 1 : -1) * (Settings.v.neuAuto ? 4 : Settings.v.neuDistance)
                 shadowVerticalOffset: (Settings.v.neuLight.startsWith("top") ? 1 : -1) * (Settings.v.neuAuto ? 4 : Settings.v.neuDistance)
@@ -20497,7 +20955,8 @@ in
                 shadowEnabled: true
                 // (Settings → Appearance → Shading: distance, blur, strength, light)
                 shadowColor: Qt.rgba(0, 0, 0, Math.min(1, 1.5 * Settings.v.neuIntensity))
-                shadowBlur: Math.min(1, Settings.v.neuBlur / 32)
+                // tied to the distance, like NeuShadow.qml
+                shadowBlur: Math.min(1, (Settings.v.neuAuto ? 4 * 2.4 : Settings.v.neuDistance * Settings.v.neuSoft) / 32)
                 blurMax: 32
                 shadowHorizontalOffset: (Settings.v.neuLight.endsWith("left") ? 1 : -1) * (Settings.v.neuAuto ? 4 : Settings.v.neuDistance)
                 shadowVerticalOffset: (Settings.v.neuLight.startsWith("top") ? 1 : -1) * (Settings.v.neuAuto ? 4 : Settings.v.neuDistance)
