@@ -6903,6 +6903,7 @@ in
                 wsCurve: 14,
                 wsCorner: 14,
                 wsHideDelay: 500,
+                wsFullscreen: "hide",    // (like dockFullscreen)
                 // the dock (bottom edge)
                 dock: true,
                 dockIconSize: 36,
@@ -6912,6 +6913,7 @@ in
                 dockCorner: 14,
                 dockHideDelay: 500,
                 dockStayUp: false,       // never hides
+                dockFullscreen: "hide",  // over a fullscreen window: "hide" (not at all) or "edge" (push the edge)
                 dockTray: true,          // the tray icons on its right
                 dockPreviewDelay: 500,   // pointing at an app until its windows show
                 // notifications
@@ -7195,6 +7197,7 @@ in
                 property int wsCurve: root.defaults.wsCurve
                 property int wsCorner: root.defaults.wsCorner
                 property int wsHideDelay: root.defaults.wsHideDelay
+                property string wsFullscreen: root.defaults.wsFullscreen
                 property bool dock: root.defaults.dock
                 property int dockIconSize: root.defaults.dockIconSize
                 property int dockSlotPad: root.defaults.dockSlotPad
@@ -7203,6 +7206,7 @@ in
                 property int dockCorner: root.defaults.dockCorner
                 property int dockHideDelay: root.defaults.dockHideDelay
                 property bool dockStayUp: root.defaults.dockStayUp
+                property string dockFullscreen: root.defaults.dockFullscreen
                 property bool dockTray: root.defaults.dockTray
                 property int dockPreviewDelay: root.defaults.dockPreviewDelay
                 property bool dnd: root.defaults.dnd
@@ -9783,6 +9787,18 @@ in
                     onMoved: v => Settings.v.wsHideDelay = v
                 }
             }
+            SetRow {
+                label: "In fullscreen"
+                description: Settings.v.wsFullscreen === "hide" ? "Over a fullscreen window (a game, a video) it stays away, edge and all" : "Pushing the edge still brings it out over a fullscreen window"
+                SetChoice {
+                    options: [
+                        { id: "hide", label: "Stays away" },
+                        { id: "edge", label: "Push the edge" }
+                    ]
+                    current: Settings.v.wsFullscreen
+                    onPicked: v => Settings.v.wsFullscreen = v
+                }
+            }
         }
     }
   '';
@@ -9819,6 +9835,19 @@ in
                 SetSwitch {
                     checked: Settings.v.dockStayUp
                     onToggled: on => Settings.v.dockStayUp = on
+                }
+            }
+            SetRow {
+                enabled: Settings.v.dock
+                label: "In fullscreen"
+                description: Settings.v.dockFullscreen === "hide" ? "Over a fullscreen window (a game, a video) it stays away, edge and all" : "Pushing the edge still brings it out over a fullscreen window"
+                SetChoice {
+                    options: [
+                        { id: "hide", label: "Stays away" },
+                        { id: "edge", label: "Push the edge" }
+                    ]
+                    current: Settings.v.dockFullscreen
+                    onPicked: v => Settings.v.dockFullscreen = v
                 }
             }
             SetRow {
@@ -16331,8 +16360,8 @@ in
                 onClicked: Settings.show("docks")
             }
         }
-        readonly property var dockKeys: ["dockStyle", "dockIconSize", "dockSlotPad", "dockPadding", "dockCurve", "dockCorner", "dockGap", "dockHideDelay", "dockStayUp", "dockTray", "dockPreviewDelay"]
-        readonly property var wsKeys: ["wsStyle", "wsCell", "wsIconSize", "wsMaxIcons", "wsPadding", "wsCurve", "wsCorner", "wsGap", "wsHideDelay"]
+        readonly property var dockKeys: ["dockStyle", "dockIconSize", "dockSlotPad", "dockPadding", "dockCurve", "dockCorner", "dockGap", "dockHideDelay", "dockStayUp", "dockFullscreen", "dockTray", "dockPreviewDelay"]
+        readonly property var wsKeys: ["wsStyle", "wsCell", "wsIconSize", "wsMaxIcons", "wsPadding", "wsCurve", "wsCorner", "wsGap", "wsHideDelay", "wsFullscreen"]
 
         readonly property var styles: [
             { id: "smooth", label: "Smooth" },
@@ -16582,6 +16611,7 @@ in
             {"page": "bar", "sub": "", "section": "Shape", "label": "Popup corners", "desc": "", "kind": "row", "keys": ""},
             {"page": "docks", "sub": "dock", "section": "", "label": "Dock", "desc": "Bottom edge", "kind": "row", "keys": ""},
             {"page": "docks", "sub": "dock", "section": "", "label": "Always up", "desc": "Never hides", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "dock", "section": "", "label": "In fullscreen", "desc": "hide · Over a fullscreen window (a game, a video) it stays away, edge and all · Pushing the edge still brings it out over a fullscreen window", "kind": "row", "keys": ""},
             {"page": "docks", "sub": "dock", "section": "", "label": "Tray", "desc": "", "kind": "row", "keys": ""},
             {"page": "docks", "sub": "dock", "section": "Style", "label": "Style", "desc": "", "kind": "section", "keys": "smooth floating pill"},
             {"page": "docks", "sub": "dock", "section": "Style", "label": "Look", "desc": "", "kind": "row", "keys": "smooth floating pill"},
@@ -16610,6 +16640,7 @@ in
             {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Curves", "desc": "Smooth style only", "kind": "row", "keys": ""},
             {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Corners", "desc": "", "kind": "row", "keys": ""},
             {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Hides after", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "In fullscreen", "desc": "hide · Over a fullscreen window (a game, a video) it stays away, edge and all · Pushing the edge still brings it out over a fullscreen window", "kind": "row", "keys": ""},
             {"page": "panels", "sub": "", "section": "Panels", "label": "Panels", "desc": "", "kind": "section", "keys": ""},
             {"page": "panels", "sub": "", "section": "Place", "label": "Place", "desc": "", "kind": "section", "keys": ""},
             {"page": "panels", "sub": "", "section": "Place", "label": "Name", "desc": "", "kind": "row", "keys": ""},
@@ -17264,6 +17295,29 @@ in
                     }
                 }
             }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Fullscreen.qml".text = ''
+    pragma Singleton
+    import QtQuick
+    import Quickshell
+    import Quickshell.Hyprland
+
+    // Is a window fullscreen on this screen right now? Real fullscreen only, not maximized:
+    // Hyprland's workspace "hasfullscreen" is true for both (FullscreenController.cpp), but
+    // a window's own state over the foreign-toplevel protocol says FULLSCREEN only for real
+    // fullscreen and MAXIMIZED otherwise (ForeignToplevelWlr.cpp). So: the screen's
+    // workspace has one, and one of its windows says it's fullscreen.
+    // Read in a binding, it updates when any of that changes.
+    Singleton {
+        function on(screen) {
+            const mon = screen ? Hyprland.monitorFor(screen) : null;
+            const ws = mon ? mon.activeWorkspace : null;
+            if (!ws || !ws.hasFullscreen)
+                return false;
+            return ws.toplevels.values.some(t => !!t.wayland && t.wayland.fullscreen);
         }
     }
   '';
@@ -21015,6 +21069,10 @@ in
 
         // ── showing and hiding ──
         property bool shown: false
+        // Over a fullscreen window (a game, a video) it stays away: not up, and the edge
+        // doesn't bring it (Settings → Docks → In fullscreen). Except while you edit the
+        // desktop or look at its settings.
+        readonly property bool fullscreenAway: Settings.v.dockFullscreen === "hide" && Fullscreen.on(dock.screen) && !Panels.editMode && Settings.peek !== "dock"
         // a window card or an app icon being dragged out of the dock (WindowDrag.qml)
         readonly property bool draggingOut: WindowDrag.active && WindowDrag.internal
         // the mouse is on the dock or the bottom edge (or dragging something out of it)
@@ -21052,7 +21110,8 @@ in
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            height: 2
+            // (none in fullscreen: the bottom pixels are the game's, clicks and all)
+            height: dock.fullscreenAway ? 0 : 2
             HoverHandler {
                 id: edgeHover
             }
@@ -21155,7 +21214,7 @@ in
         DockPanel {
             id: panel
             // out while you're editing the desktop too, so you see what you change
-            open: dock.shown || Settings.v.dockStayUp || Settings.peek === "dock" || Panels.editMode     // (Settings → Dock)
+            open: !dock.fullscreenAway && (dock.shown || Settings.v.dockStayUp || Settings.peek === "dock" || Panels.editMode)     // (Settings → Dock)
             anim: Settings.v.dockAnim
             padding: Settings.v.dockPadding
             style: Settings.v.dockStyle
@@ -22648,6 +22707,8 @@ in
 
         // ── showing and hiding ──
         property bool shown: false
+        // stays away over a fullscreen window (like the dock: Settings → Docks)
+        readonly property bool fullscreenAway: Settings.v.wsFullscreen === "hide" && Fullscreen.on(side.screen) && !Panels.editMode && Settings.peek !== "workspaces"
         // the mouse (or a window you're dragging) is on the panel or the left edge
         readonly property bool held: edgeHover.hovered || panelHover.hovered || side.dragHere
         onHeldChanged: {
@@ -22679,7 +22740,7 @@ in
             id: edge
             x: 0
             y: Theme.barBottom + (Theme.barCurve ? Theme.radius : 0)
-            width: 2
+            width: side.fullscreenAway ? 0 : 2
             height: parent.height - y
             HoverHandler {
                 id: edgeHover
@@ -22688,7 +22749,7 @@ in
 
         SidePanel {
             id: panel
-            open: side.shown || Settings.peek === "workspaces" || Panels.editMode
+            open: !side.fullscreenAway && (side.shown || Settings.peek === "workspaces" || Panels.editMode)
             anim: Settings.v.wsAnim
             padding: Settings.v.wsPadding      // (Settings → Docks)
             style: Settings.v.wsStyle
