@@ -2170,9 +2170,14 @@ in
     papirus-icon-theme
     # screen brightness for the bar's Display widget and the brightness keys
     brightnessctl
-    # The Fresh Terminal Text Editor/IDE
     udisks2
-    fresh-editor
+    # The Fresh Terminal Text Editor/IDE. nixpkgs now builds every Rust package
+    # against the system's oniguruma (its cargo setup hook sets
+    # RUSTONIG_SYSTEM_LIBONIG=1), but fresh's recipe never got oniguruma, so it fails
+    # to build. Hand it oniguruma here; drop the override once nixpkgs adds it.
+    (fresh-editor.overrideAttrs (old: {
+      buildInputs = (old.buildInputs or [ ]) ++ [ oniguruma ];
+    }))
     wget
     cmake
     protontricks
