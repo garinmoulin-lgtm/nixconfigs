@@ -2462,7 +2462,12 @@ in
                 readonly property bool fsHidden: fsOverlay && !fsShown && !Panels.editMode
                 WlrLayershell.layer: fsOverlay ? WlrLayer.Overlay : WlrLayer.Top
                 onFullscreenHereChanged: fsShown = false
-                readonly property bool fsHeld: fsEdgeHover.hovered || fsBodyHover.hovered || !!openWidget || menuOpen
+                // The mouse anywhere on the bar keeps it up, resting on a button too: these
+                // handlers sit on the bar itself (barBody) and its strip (barEdge), which the
+                // buttons are inside of, so a button taking the hover doesn't take it from
+                // them (a hover handler on an item beside the buttons lost it to them, and the
+                // bar faded out under a still mouse).
+                readonly property bool fsHeld: fsEdgeHover.hovered || fsBodyHover.hovered || fsStripHover.hovered || !!openWidget || menuOpen
                 onFsHeldChanged: {
                     if (fsHeld && fsOverlay) {
                         fsHide.stop();
@@ -2497,15 +2502,6 @@ in
                     height: 2
                     HoverHandler {
                         id: fsEdgeHover
-                    }
-                }
-                // the bar's own strip, top edge to its bottom: the mouse on it keeps it up
-                Item {
-                    x: barBody.x
-                    width: barBody.width
-                    height: Theme.barBottom
-                    HoverHandler {
-                        id: fsBodyHover
                     }
                 }
                 Region {
@@ -2684,6 +2680,9 @@ in
                     id: barEdge
                     width: parent.width
                     height: Theme.barBottom
+                    HoverHandler {
+                        id: fsStripHover
+                    }
                     MouseArea {
                         anchors.fill: parent
                         acceptedButtons: Qt.RightButton
@@ -2707,6 +2706,10 @@ in
                         anchors.fill: parent
                         acceptedButtons: Qt.RightButton
                         onClicked: m => bar.showMenu(barBody.x + m.x)
+                    }
+                    // over a fullscreen window: the mouse on the bar keeps it up (bar.fsHeld)
+                    HoverHandler {
+                        id: fsBodyHover
                     }
 
                     // (the shading, neumorphic or flat, is its own setting: Glass.qml)
