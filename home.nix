@@ -2449,15 +2449,14 @@ in
                 // the name Hyprland's blur rule for the bar looks for
                 WlrLayershell.namespace: "bar"
 
-                // ── over a fullscreen window (Settings → Bar or Docks → Over fullscreen: one
-                // switch for the bar and both docks) ──
+                // ── over a fullscreen window (Edit desktop → Bar → Over fullscreen) ──
                 // Hyprland draws a fullscreen window over the Top layer, the bar's. With
                 // the setting on, the bar moves to the Overlay layer (above it: Quickshell
                 // changes a layer surface's layer live) but stays see-through and lets
                 // clicks through, all but the top 2 px. Push the mouse there and it fades
                 // in; it fades out a moment after you leave it (and its popup, its menu).
                 readonly property bool fullscreenHere: Fullscreen.on(bar.screen)
-                readonly property bool fsOverlay: fullscreenHere && Settings.v.overFullscreen
+                readonly property bool fsOverlay: fullscreenHere && Settings.v.barFullscreen
                 property bool fsShown: false
                 readonly property bool fsHidden: fsOverlay && !fsShown && !Panels.editMode
                 WlrLayershell.layer: fsOverlay ? WlrLayer.Overlay : WlrLayer.Top
@@ -6957,9 +6956,12 @@ in
         readonly property var defaults: ({
                 // the bar
                 barHeight: 38,
-                // Over a fullscreen window (a game, a video): push an edge to bring out the bar
-                // (top) or a dock (bottom, left). Off: the window covers them, edges and all.
-                overFullscreen: true,
+                // Over a fullscreen window (a game, a video): push its edge to bring out the bar
+                // (top), the dock (bottom), the workspaces dock (left). Off: the window covers
+                // it, edge and all. Switched in Edit desktop, on each one's card.
+                barFullscreen: true,
+                dockFullscreen: true,
+                wsFullscreen: true,
                 moduleHeight: 26,        // the pills and buttons on it
                 barCurve: true,          // curves under its two ends
                 radius: 8,               // roundness of pills, rows, buttons (and the bar's curves)
@@ -7253,7 +7255,9 @@ in
             JsonAdapter {
                 id: adapter
                 property int barHeight: root.defaults.barHeight
-                property bool overFullscreen: root.defaults.overFullscreen
+                property bool barFullscreen: root.defaults.barFullscreen
+                property bool dockFullscreen: root.defaults.dockFullscreen
+                property bool wsFullscreen: root.defaults.wsFullscreen
                 property int moduleHeight: root.defaults.moduleHeight
                 property bool barCurve: root.defaults.barCurve
                 property int radius: root.defaults.radius
@@ -9583,20 +9587,6 @@ in
             }
         }
 
-        // with the docks: one switch, here and in Settings → Docks
-        SetSection {
-            title: "Fullscreen"
-            caption: "The bar and both docks (the same switch as in Docks)"
-            SetRow {
-                label: "Over fullscreen"
-                description: Settings.v.overFullscreen ? "Push an edge to bring out the bar (top) or a dock (bottom, left) over a fullscreen window" : "A fullscreen window (a game, a video) covers the bar and the docks, edges and all"
-                SetSwitch {
-                    checked: Settings.v.overFullscreen
-                    onToggled: on => Settings.v.overFullscreen = on
-                }
-            }
-        }
-
         SetSection {
             title: "Size"
             caption: "Text and icons apply to popups too"
@@ -10126,20 +10116,6 @@ in
 
         // which one: `quickshell ipc call settings show workspaces` opens straight to that one
         property string which: Settings.page === "workspaces" ? "workspaces" : "dock"
-
-        // with the bar: one switch, here and in Settings → Bar
-        SetSection {
-            title: "Fullscreen"
-            caption: "The bar and both docks (the same switch as in Bar)"
-            SetRow {
-                label: "Over fullscreen"
-                description: Settings.v.overFullscreen ? "Push an edge to bring out the bar (top) or a dock (bottom, left) over a fullscreen window" : "A fullscreen window (a game, a video) covers the bar and the docks, edges and all"
-                SetSwitch {
-                    checked: Settings.v.overFullscreen
-                    onToggled: on => Settings.v.overFullscreen = on
-                }
-            }
-        }
 
         SetChoice {
             width: parent.width
@@ -15989,6 +15965,19 @@ in
                                 onMoved: val => Settings.v.barHeight = val
                             }
                         }
+                        // over a fullscreen window: push the top edge to see it (shell.qml)
+                        Row {
+                            spacing: 6
+                            Label {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "Over fullscreen"
+                            }
+                            SetSwitch {
+                                anchors.verticalCenter: parent.verticalCenter
+                                checked: Settings.v.barFullscreen
+                                onToggled: on => Settings.v.barFullscreen = on
+                            }
+                        }
                         SetButton {
                             icon: "restart_alt"
                             text: "Default widgets"
@@ -16304,7 +16293,7 @@ in
             }
         }
         component Label: Text {
-            width: 84
+            width: 104      // ("Over fullscreen")
             color: Theme.text
             opacity: 0.55
             font.family: Theme.font
@@ -16435,8 +16424,8 @@ in
                 onClicked: Settings.show("docks")
             }
         }
-        readonly property var dockKeys: ["dockStyle", "dockIconSize", "dockSlotPad", "dockPadding", "dockCurve", "dockCorner", "dockGap", "dockHideDelay", "dockStayUp", "dockTray", "dockPreviewDelay"]
-        readonly property var wsKeys: ["wsStyle", "wsCell", "wsIconSize", "wsMaxIcons", "wsPadding", "wsCurve", "wsCorner", "wsGap", "wsHideDelay"]
+        readonly property var dockKeys: ["dockStyle", "dockIconSize", "dockSlotPad", "dockPadding", "dockCurve", "dockCorner", "dockGap", "dockHideDelay", "dockStayUp", "dockFullscreen", "dockTray", "dockPreviewDelay"]
+        readonly property var wsKeys: ["wsStyle", "wsCell", "wsIconSize", "wsMaxIcons", "wsPadding", "wsCurve", "wsCorner", "wsGap", "wsHideDelay", "wsFullscreen"]
 
         readonly property var styles: [
             { id: "smooth", label: "Smooth" },
@@ -16491,6 +16480,12 @@ in
                     checked: Settings.v.dockTray
                     onToggled: v => Settings.v.dockTray = v
                 }
+                // over a fullscreen window: push the bottom edge to bring it out (off: not at all)
+                SwitchRow {
+                    label: "Over fullscreen"
+                    checked: Settings.v.dockFullscreen
+                    onToggled: v => Settings.v.dockFullscreen = v
+                }
             }
             Foot {
                 visible: dockCard.expanded
@@ -16544,6 +16539,12 @@ in
                     suffix: ""
                     value: Settings.v.wsMaxIcons
                     onMoved: v => Settings.v.wsMaxIcons = v
+                }
+                // over a fullscreen window: push the left edge to bring it out (off: not at all)
+                SwitchRow {
+                    label: "Over fullscreen"
+                    checked: Settings.v.wsFullscreen
+                    onToggled: v => Settings.v.wsFullscreen = v
                 }
             }
             Foot {
@@ -16673,8 +16674,6 @@ in
             {"page": "bar", "sub": "", "section": "Style", "label": "Gap", "desc": "", "kind": "row", "keys": "smooth floating pill"},
             {"page": "bar", "sub": "", "section": "Style", "label": "Corners", "desc": "Floating", "kind": "row", "keys": "smooth floating pill"},
             {"page": "bar", "sub": "", "section": "Style", "label": "Shading", "desc": "neumorphic · Raised · bar, docks, pills, panels · No shadows", "kind": "row", "keys": "smooth floating pill"},
-            {"page": "bar", "sub": "", "section": "Fullscreen", "label": "Fullscreen", "desc": "", "kind": "section", "keys": "bar docks top bottom left edge game video reveal hide"},
-            {"page": "bar", "sub": "", "section": "Fullscreen", "label": "Over fullscreen", "desc": "Push an edge to bring out the bar (top) or a dock (bottom, left) over a fullscreen window · A fullscreen window (a game, a video) covers the bar and the docks, edges and all", "kind": "row", "keys": "bar docks top bottom left edge game video reveal hide"},
             {"page": "bar", "sub": "", "section": "Size", "label": "Size", "desc": "", "kind": "section", "keys": ""},
             {"page": "bar", "sub": "", "section": "Size", "label": "Height", "desc": "", "kind": "row", "keys": ""},
             {"page": "bar", "sub": "", "section": "Size", "label": "Buttons", "desc": "", "kind": "row", "keys": ""},
@@ -16791,8 +16790,6 @@ in
             {"page": "scheduler", "sub": "", "section": "Mode", "label": "Mode", "desc": " has no flags for this one: its own defaults", "kind": "row", "keys": "scx gaming power save low latency server"},
             {"page": "scheduler", "sub": "", "section": "Schedulers", "label": "Schedulers", "desc": "", "kind": "section", "keys": "scx sched_ext scx_loader cpu"},
             {"page": "scheduler", "sub": "", "section": "At boot", "label": "At boot", "desc": "", "kind": "section", "keys": "scx default_sched restore stop"},
-            {"page": "docks", "sub": "", "section": "Fullscreen", "label": "Fullscreen", "desc": "", "kind": "section", "keys": "bar docks top bottom left edge game video reveal hide"},
-            {"page": "docks", "sub": "", "section": "Fullscreen", "label": "Over fullscreen", "desc": "Push an edge to bring out the bar (top) or a dock (bottom, left) over a fullscreen window · A fullscreen window (a game, a video) covers the bar and the docks, edges and all", "kind": "row", "keys": "bar docks top bottom left edge game video reveal hide"},
             {"page": "appearance", "sub": "", "section": "Motion", "label": "Popups", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
             {"page": "appearance", "sub": "", "section": "Motion", "label": "Dock", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
             {"page": "appearance", "sub": "", "section": "Motion", "label": "Workspaces dock", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
@@ -21147,11 +21144,11 @@ in
         // ── showing and hiding ──
         property bool shown: false
         // Over a fullscreen window (a game, a video) it's never just up (not even Always
-        // up): pushing the edge brings it out, or with Over fullscreen off (Settings →
-        // Bar or Docks: one switch for the bar and both docks) nothing does. Except while
-        // you edit the desktop or look at its settings.
+        // up): pushing the edge brings it out, or with Over fullscreen off (Edit desktop,
+        // the dock's card) nothing does. Except while you edit the desktop or look at its
+        // settings.
         readonly property bool fullscreenHere: Fullscreen.on(dock.screen) && !Panels.editMode && Settings.peek !== "dock"
-        readonly property bool fullscreenAway: fullscreenHere && !Settings.v.overFullscreen
+        readonly property bool fullscreenAway: fullscreenHere && !Settings.v.dockFullscreen
         // a window card or an app icon being dragged out of the dock (WindowDrag.qml)
         readonly property bool draggingOut: WindowDrag.active && WindowDrag.internal
         // the mouse is on the dock or the bottom edge (or dragging something out of it)
@@ -22787,8 +22784,8 @@ in
         // ── showing and hiding ──
         property bool shown: false
         // over a fullscreen window: the edge brings it out, or with Over fullscreen off
-        // nothing does (like the dock and the bar: one switch)
-        readonly property bool fullscreenAway: !Settings.v.overFullscreen && Fullscreen.on(side.screen) && !Panels.editMode && Settings.peek !== "workspaces"
+        // (Edit desktop, its card) nothing does
+        readonly property bool fullscreenAway: !Settings.v.wsFullscreen && Fullscreen.on(side.screen) && !Panels.editMode && Settings.peek !== "workspaces"
         // the mouse (or a window you're dragging) is on the panel or the left edge
         readonly property bool held: edgeHover.hovered || panelHover.hovered || side.dragHere
         onHeldChanged: {
