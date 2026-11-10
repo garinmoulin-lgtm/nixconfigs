@@ -2459,7 +2459,8 @@ in
                 readonly property bool fsOverlay: fullscreenHere && Settings.v.barFullscreen
                 property bool fsShown: false
                 readonly property bool fsHidden: fsOverlay && !fsShown && !Panels.editMode
-                WlrLayershell.layer: fsOverlay ? WlrLayer.Overlay : WlrLayer.Top
+                // (and while you edit the desktop: above its zoomed-out desktop, DesktopMenu.qml)
+                WlrLayershell.layer: fsOverlay || Panels.editMode ? WlrLayer.Overlay : WlrLayer.Top
                 onFullscreenHereChanged: fsShown = false
                 // The mouse anywhere on the bar keeps it up, resting on a button too: these
                 // handlers sit on the bar itself (barBody) and its strip (barEdge), which the
@@ -2494,10 +2495,12 @@ in
                     property: "opacity"
                     value: bar.fsAmount
                 }
-                // the top edge to push (only takes the mouse while the bar's hidden)
+                // the top edge to push, just over where the bar is (not the screen's whole
+                // width; only takes the mouse while the bar's hidden)
                 Item {
                     id: fsEdge
-                    width: parent.width
+                    x: barBody.x
+                    width: barBody.width
                     height: 2
                     HoverHandler {
                         id: fsEdgeHover
@@ -6927,6 +6930,10 @@ in
         // ── the window ──
         property bool open: false
         property string page: "appearance"
+        // Opening Settings finishes Edit desktop (its zoomed-out desktop would cover the
+        // window, and it's where you'd go next anyway)
+        onOpenChanged: if (open)
+            Panels.editMode = false
         function show(p) {
             if (p)
                 page = p;
@@ -11579,6 +11586,8 @@ in
         exclusiveZone: reserves ? size + gap : 0
         color: "transparent"
         WlrLayershell.namespace: "user-panel"     // its blur rule in the Hyprland config
+        // over the zoomed-out desktop while you edit (DesktopMenu.qml: it's on the Top layer)
+        WlrLayershell.layer: Panels.editMode ? WlrLayer.Overlay : WlrLayer.Top
         // typing in the widget drawer's search and the config boxes
         WlrLayershell.keyboardFocus: editing ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
         mask: Region {
@@ -11598,13 +11607,14 @@ in
         readonly property real bodyLength: Math.min(fullLength, length === "fit" ? fitLength : length === "custom" ? lengthPx : fullLength)
         readonly property real along: alignment === "start" ? gap : alignment === "end" ? (vertical ? height : width) - gap - bodyLength : ((vertical ? height : width) - bodyLength) / 2
 
-        // the edge strip that brings an auto-hidden panel back
+        // the edge strip that brings an auto-hidden panel back: just along where the
+        // panel is, not the screen's whole edge
         Item {
             id: strip
-            x: frame.edge === "right" ? frame.width - width : 0
-            y: frame.edge === "bottom" ? frame.height - height : 0
-            width: frame.vertical ? 2 : frame.width
-            height: frame.vertical ? frame.height : 2
+            x: frame.vertical ? (frame.edge === "right" ? frame.width - width : 0) : frame.along
+            y: !frame.vertical ? (frame.edge === "bottom" ? frame.height - height : 0) : frame.along
+            width: frame.vertical ? 2 : frame.bodyLength
+            height: frame.vertical ? frame.bodyLength : 2
             HoverHandler {
                 id: stripHover
             }
@@ -13490,14 +13500,18 @@ in
 
   xdg.configFile."quickshell/DesktopMenu.qml".text = ''
     import QtQuick
+    import QtQuick.Effects
     import Quickshell
     import Quickshell.Wayland
+    import Quickshell.Widgets
 
     // Right-click the desktop (the wallpaper, where there's no window): Edit Mode, a new
     // panel, the wallpaper, Settings. Two layers: a see-through one just above the
     // wallpaper, under every window, so only clicks on empty desktop reach it; and the
     // menu itself in one over your windows, so a window next to where you clicked can't
     // cover it.
+    // And Edit desktop's zoomed-out desktop (like KDE Plasma's edit mode): a third
+    // window, over your windows while you edit.
     Scope {
         id: root
 
@@ -13554,41 +13568,6 @@ in
             WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
             color: "transparent"
 
-            // Edit desktop: a faint tint and a grid of dots on the empty desktop, so it's
-            // plain you're editing (under your windows, like this whole layer)
-            Item {
-                anchors.fill: parent
-                visible: opacity > 0
-                opacity: Panels.editMode ? 1 : 0
-                Behavior on opacity {
-                    NumberAnimation {
-                        duration: Settings.ms(240)
-                        easing.type: Easing.OutCubic
-                    }
-                }
-                Rectangle {
-                    anchors.fill: parent
-                    color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.05)
-                }
-                Canvas {
-                    id: dots
-                    anchors.fill: parent
-                    readonly property color tint: Theme.accent
-                    onTintChanged: requestPaint()
-                    onWidthChanged: requestPaint()
-                    onHeightChanged: requestPaint()
-                    onPaint: {
-                        const ctx = getContext("2d");
-                        ctx.reset();
-                        ctx.fillStyle = "rgba(" + Math.round(tint.r * 255) + "," + Math.round(tint.g * 255) + "," + Math.round(tint.b * 255) + ",0.22)";
-                        const step = 32;
-                        for (let y = step / 2; y < height; y += step)
-                            for (let x = step / 2; x < width; x += step)
-                                ctx.fillRect(x - 1, y - 1, 2, 2);
-                    }
-                }
-            }
-
             MouseArea {
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
@@ -13597,6 +13576,147 @@ in
                         root.show(m.x, m.y);
                     else
                         root.open = false;
+                }
+            }
+        }
+
+        // ── Edit desktop: the desktop zooms out ──
+        // Over your windows (the Top layer; the bar, the docks, your panels and the edit
+        // cards go up to the Overlay layer meanwhile, above it): your wallpaper, blurred
+        // and dimmed, fills the screen, and on it the desktop itself, shrunk a little with
+        // round corners and a shadow, a faint grid of dots on it. Your windows fade away
+        // under it and come back when you're done. The wallpaper is the one awww shows:
+        // its picture's path is Theme.wallpaper (~/.local/state/theme/wallpaper.path).
+        PanelWindow {
+            id: zoom
+            screen: root.screen
+            // 0 = as it is, 1 = zoomed out (the animation runs between)
+            property real amount: Panels.editMode ? 1 : 0
+            Behavior on amount {
+                NumberAnimation {
+                    duration: Settings.ms(380)
+                    easing.type: Easing.OutCubic
+                }
+            }
+            visible: amount > 0.001
+            anchors {
+                top: true
+                bottom: true
+                left: true
+                right: true
+            }
+            exclusionMode: ExclusionMode.Ignore
+            WlrLayershell.layer: WlrLayer.Top
+            WlrLayershell.namespace: "edit-zoom"
+            // click it, then Esc to finish
+            WlrLayershell.keyboardFocus: Panels.editMode ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+            color: "transparent"
+
+            readonly property url wallUrl: Theme.wallpaper !== "" ? "file://" + Theme.wallpaper : "file://" + Quickshell.env("HOME") + "/.local/state/theme/wallpaper"
+            readonly property real shrink: 0.14       // how far it zooms out
+            readonly property real s: 1 - shrink * amount
+
+            Item {
+                anchors.fill: parent
+                opacity: zoom.amount
+                focus: true
+                Keys.onEscapePressed: Panels.editMode = false
+
+                // the backdrop: the wallpaper, blurred, a little darker
+                Image {
+                    id: wallSrc
+                    anchors.fill: parent
+                    visible: false
+                    source: zoom.wallUrl
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                    cache: false
+                    sourceSize: Qt.size(width, height)
+                }
+                MultiEffect {
+                    anchors.fill: parent
+                    source: wallSrc
+                    autoPaddingEnabled: false
+                    blurEnabled: true
+                    blurMax: 48
+                    blur: 0.7
+                    brightness: -0.12
+                    saturation: -0.1
+                }
+                Rectangle {
+                    anchors.fill: parent
+                    color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.25)
+                }
+
+                // the desktop, zoomed out: in the middle of what's under the bar
+                Item {
+                    id: card
+                    width: parent.width
+                    height: parent.height
+                    y: zoom.amount * Theme.barBottom / 2
+                    scale: zoom.s
+                    readonly property real r: 22 / Math.max(0.5, zoom.s) * zoom.amount
+                    RectangularShadow {
+                        anchors.fill: parent
+                        radius: card.r
+                        blur: 48 / zoom.s
+                        color: Qt.rgba(0, 0, 0, 0.45)
+                    }
+                    ClippingRectangle {
+                        anchors.fill: parent
+                        radius: card.r
+                        color: Theme.bg
+                        Image {
+                            anchors.fill: parent
+                            source: zoom.wallUrl
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            cache: false
+                            sourceSize: Qt.size(width, height)
+                        }
+                        Rectangle {
+                            anchors.fill: parent
+                            color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.05)
+                        }
+                        // a grid of dots: you're arranging things
+                        Canvas {
+                            anchors.fill: parent
+                            readonly property color tint: Theme.accent
+                            onTintChanged: requestPaint()
+                            onWidthChanged: requestPaint()
+                            onHeightChanged: requestPaint()
+                            onPaint: {
+                                const ctx = getContext("2d");
+                                ctx.reset();
+                                ctx.fillStyle = "rgba(" + Math.round(tint.r * 255) + "," + Math.round(tint.g * 255) + "," + Math.round(tint.b * 255) + ",0.25)";
+                                const step = 32;
+                                for (let y = step / 2; y < height; y += step)
+                                    for (let x = step / 2; x < width; x += step)
+                                        ctx.fillRect(x - 1, y - 1, 2, 2);
+                            }
+                        }
+                    }
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: card.r
+                        color: "transparent"
+                        border.width: 1.5 / zoom.s
+                        border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.5)
+                    }
+                }
+
+                // a right-click anywhere: the desktop's menu (Done editing...); a click
+                // closes it
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: m => {
+                        parent.forceActiveFocus();
+                        if (m.button === Qt.RightButton)
+                            root.show(m.x, m.y);
+                        else
+                            root.open = false;
+                    }
                 }
             }
         }
@@ -13613,7 +13733,8 @@ in
                 right: true
             }
             exclusionMode: ExclusionMode.Ignore
-            WlrLayershell.layer: WlrLayer.Top
+            // (over the zoomed-out desktop while you edit: that's on the Top layer)
+            WlrLayershell.layer: Panels.editMode ? WlrLayer.Overlay : WlrLayer.Top
             WlrLayershell.namespace: "desktop-menu"   // its blur rule in the Hyprland config
             WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
             color: "transparent"
@@ -21180,11 +21301,12 @@ in
             }
         }
 
-        // the bottom edge: push the mouse here to bring the dock up
+        // the bottom edge, just under where the dock is (not the whole screen's width):
+        // push the mouse there to bring it up
         Item {
             id: edge
-            anchors.left: parent.left
-            anchors.right: parent.right
+            x: panel.anchorX - panel.shownWidth / 2
+            width: panel.shownWidth
             anchors.bottom: parent.bottom
             // (none in fullscreen: the bottom pixels are the game's, clicks and all)
             height: dock.fullscreenAway ? 0 : 2
@@ -22812,13 +22934,14 @@ in
             }
         }
 
-        // the left edge: push the mouse here to bring it out
+        // the left edge, just beside where the dock is (not the screen's whole height):
+        // push the mouse there to bring it out
         Item {
             id: edge
             x: 0
-            y: Theme.barBottom + (Theme.barCurve ? Theme.radius : 0)
+            y: Math.max(Theme.barBottom + (Theme.barCurve ? Theme.radius : 0), panel.anchorY - panel.shownHeight / 2)
             width: side.fullscreenAway ? 0 : 2
-            height: parent.height - y
+            height: Math.max(0, Math.min(parent.height, panel.anchorY + panel.shownHeight / 2) - y)
             HoverHandler {
                 id: edgeHover
             }
@@ -26224,6 +26347,9 @@ in
       hl.layer_rule({ name = "dock-blur", match = { namespace = "dock" }, blur = true, ignore_alpha = 0.35, xray = false })
       hl.layer_rule({ name = "workspace-dock-blur", match = { namespace = "workspace-dock" }, blur = true, ignore_alpha = 0.35, xray = false })
       hl.layer_rule({ name = "notification-blur", match = { namespace = "notification-popups" }, blur = true, ignore_alpha = 0.1, xray = false })
+      -- Edit desktop's zoomed-out desktop (Quickshell's DesktopMenu.qml) does its own
+      -- fade and zoom: no layer animation on top of that
+      hl.layer_rule({ name = "edit-zoom-noanim", match = { namespace = "edit-zoom" }, no_anim = true })
       hl.layer_rule({ name = "user-panel-blur", match = { namespace = "user-panel" }, blur = true, ignore_alpha = 0.35, xray = false })
       -- Edit desktop's cards beside the docks, and the desktop's right-click menu
       hl.layer_rule({ name = "dock-editor-blur", match = { namespace = "dock-editor" }, blur = true, ignore_alpha = 0.35, xray = false })
