@@ -679,6 +679,7 @@ let
     "system-shutdown" = "desktop-logout";          # log out / restart / power off
     "software-update-urgent" = "message-attention"; # a critical notification
     "power-unplug-battery-low" = "battery-low";    # unplugged while it's low
+    "screen-capture" = "completion-success";       # a screenshot saved
   };
   uiSounds = pkgs.runCommand "ui-sounds" { } ''
     mkdir -p $out
@@ -693,7 +694,8 @@ let
     ${lib.concatStrings (lib.mapAttrsToList (name: file: "stand_in ${name} ${file}\n") oceanStandIns)}
     for s in message-new-instant software-update-urgent device-added device-removed \
              system-ready system-shutdown alarm-clock-elapsed bell \
-             battery-low battery-caution battery-full power-plug power-unplug power-unplug-battery-low; do
+             battery-low battery-caution battery-full power-plug power-unplug power-unplug-battery-low \
+             audio-volume-change screen-capture; do
       test -e "$out/$s.oga" || { echo "ui-sounds: $s is missing from the Ocean sound theme" >&2; exit 1; }
     done
   '';
@@ -2174,7 +2176,7 @@ in
                     spacing: 8
                     model: toastModel
 
-                    // in and out (Settings → Appearance → Motion: Notifications): slide in
+                    // in and out (Settings → Animations: Notifications): slide in
                     // from the right, fade, pop (fade and grow), or none; the others move up/down
                     readonly property string anim: Settings.v.toastAnim
                     readonly property real slideBy: anim === "slide" ? 360 : 0
@@ -2412,6 +2414,35 @@ in
                 Settings.show(page);
             }
         }
+
+        // ── The overlays ── (Overlays.qml): the launcher, clipboard history, the window
+        // overview, capture and the shortcut list, one window over everything
+        // (OverlayWindow.qml). The Hyprland config's keys call these.
+        OverlayWindow {}
+        IpcHandler {
+            target: "overlay"
+            // launcher, clipboard, overview, capture, keys
+            function toggle(page: string): void {
+                Overlays.toggle(page);
+            }
+            function close(): void {
+                Overlays.close();
+            }
+            // Alt + Tab (by = 1) and Alt + Shift + Tab (by = -1)
+            function step(by: int): void {
+                Overlays.switchWindows(by);
+            }
+            // Alt let go: go to the window picked
+            function commit(): void {
+                Overlays.commit();
+            }
+            // a screenshot straight away: region, window or screen
+            function shot(mode: string): void {
+                Overlays.capture(mode, 0);
+            }
+        }
+        // ── The on-screen display ── (Osd.qml): volume, microphone, brightness keys
+        Osd {}
 
         // ── The workspaces dock ── (WorkspaceDock.qml): one per screen, hidden at the
         // left edge
@@ -2892,7 +2923,7 @@ in
                         }
 
                         // ── Theme: the color themes, and the wallpapers next to them (off by
-                        // default; the same as Settings → Appearance) ──
+                        // default; the same as Settings → Style) ──
                         Widget {
                             objectName: "mod:theme"
                             anchors.verticalCenter: parent.verticalCenter
@@ -3050,14 +3081,15 @@ in
                             anchors.verticalCenter: parent.verticalCenter
                             PanelAwake {}
                         }
-                        // the app launcher: the same as Super + Tab (hyprland.lua)
+                        // the app launcher (Launcher.qml): the same as Super + Tab
                         BarSlot {
                             objectName: "mod:launcher"
                             anchors.verticalCenter: parent.verticalCenter
                             PanelButton {
                                 icon: "apps"
                                 tip: "Apps"
-                                command: "pkill rofi || rofi -show drun -run-command 'uwsm app -- {cmd}' -theme-str 'window { close-on-click:true; } '"
+                                clickHandled: true
+                                onClicked: Overlays.toggle("launcher")
                             }
                         }
                         // (shows up once an app puts an icon there; in Edit desktop always,
@@ -6929,12 +6961,15 @@ in
 
         // ── the window ──
         property bool open: false
-        property string page: "appearance"
+        property string page: "themes"
         // Opening Settings finishes Edit desktop (its zoomed-out desktop would cover the
         // window, and it's where you'd go next anyway)
         onOpenChanged: if (open)
             Panels.editMode = false
         function show(p) {
+            // (Appearance is now Themes, Wallpaper and Style)
+            if (p === "appearance")
+                p = "themes";
             if (p)
                 page = p;
             open = true;
@@ -6998,6 +7033,7 @@ in
                 dockHideDelay: 500,
                 dockStayUp: false,       // never hides
                 dockTray: true,          // the tray icons on its right
+                dockMagnify: false,      // the icons swell under the mouse
                 dockPreviewDelay: 500,   // pointing at an app until its windows show
                 // notifications
                 dnd: false,              // do not disturb: no popups, no sounds (critical ones still come)
@@ -7005,8 +7041,12 @@ in
                 toastMax: 4,
                 notifSounds: true,
                 uiSounds: true,          // every other sound the shell makes (Sounds.qml)
+                osd: true,               // the pill the volume and brightness keys bring up (Osd.qml)
+                osdSound: true,          // the volume keys tick at the new volume
+                launchCounts: ({}),      // how often each app was opened from the launcher (Launcher.qml)
                 // the clock
                 clock24: false,
+                clockDate: false,        // the bar's clock: "Wed 11" before the time
                 // styles: "smooth" (melts into the edge), "floating" (off the edge, rounded),
                 // "pill" (the bar: one pill per group, no bar; the docks: rounder),
                 // "minimal" (the bar only: no background at all)
@@ -7018,7 +7058,7 @@ in
                 wsGap: 8,
                 floatRadius: 16,         // floating: corner roundness
                 shading: "neumorphic",   // bar, docks, pills, panels: "neumorphic" (raised) or "flat"
-                // the neumorphic shading's own settings (Settings → Appearance → Shading)
+                // the neumorphic shading's own settings (Settings → Style → Shading)
                 neuLight: "top-left",    // where the light comes from: top-left, top-right, bottom-left, bottom-right
                 neuAuto: true,           // distance from each thing's size
                 neuDistance: 5,          // px the shadows sit off it
@@ -7054,12 +7094,12 @@ in
                 barRight: ["dockpins", "weather", "notifications", "volume", "battery", "network", "clock", "sysmon", "power"],
                 barLayout: 1,            // (the old on / off switches were read into the lists)
                 // show / hide animations: "slide", "fade", "pop", "none"
-                popupAnim: "slide",      // the bar's popups (Settings → Appearance)
+                popupAnim: "slide",      // the bar's popups (Settings → Animations)
                 dockAnim: "slide",
                 wsAnim: "slide",
                 panelAnim: "slide",      // your panels' auto-hide
                 // surfaces: what the bar, docks, popups and cards are made of
-                // (Settings → Appearance → Surfaces; Theme.qml uses them)
+                // (Settings → Style → Surfaces; Theme.qml uses them)
                 surfaceBase: "bg",       // the theme color under the glass: bg, surface, bgDim, overlay
                 surfaceTint: 0.0,        // 0..0.4: that much accent mixed in
                 pillTint: 0.0,           // the same for pills and buttons
@@ -7070,10 +7110,12 @@ in
                 uiFont: "",              // "" = SFMono Nerd Font
                 iconFill: false,         // filled icons
                 // the bar's popups: "auto" (like the bar), smooth (melt into it), floating
-                // (a card under it), pill (a rounder card) (Settings → Appearance → Style)
+                // (a card under it), pill (a rounder card) (Settings → Style → Style)
                 popupStyle: "auto",
                 menuAnim: "slide",       // the right-click menus
                 toastAnim: "slide",      // notifications
+                overlayAnim: "slide",    // the launcher, clipboard, overview... (OverlayWindow.qml)
+                editZoom: true,          // Edit desktop zooms out onto the blurred wallpaper
                 scrollSpeed: 2.0         // the mouse wheel in the shell's lists and pages (FastWheel.qml); 1 = Qt's own
             })
 
@@ -7113,12 +7155,12 @@ in
             { id: "dnd", label: "Do not disturb", icon: "notifications_off", side: "right", group: "Switches", page: "notifications", desc: "No popups or sounds" },
             { id: "night", label: "Night light", icon: "nightlight", side: "right", group: "Switches", page: "display", desc: "Warmer screen; scroll for warmth" },
             { id: "awake", label: "Keep awake", icon: "coffee", side: "right", group: "Switches", page: "", desc: "No dimming, locking or sleep" },
-            { id: "theme", label: "Theme", icon: "palette", side: "right", group: "Switches", page: "appearance", desc: "Themes and wallpapers" },
+            { id: "theme", label: "Theme", icon: "palette", side: "right", group: "Switches", page: "themes", desc: "Themes and wallpapers" },
             // ── apps ──
             { id: "launcher", label: "Apps", icon: "apps", side: "left", group: "Apps", page: "", desc: "The app launcher (Super + Tab)" },
             { id: "tray", label: "Tray", icon: "more_horiz", side: "right", group: "Apps", page: "", desc: "Apps' tray icons" },
             { id: "dockpins", label: "Dock pins", icon: "push_pin", side: "right", group: "Apps", page: "docks", desc: "Keep the docks out" },
-            { id: "settings", label: "Settings", icon: "settings", side: "left", group: "Apps", page: "appearance", desc: "This shell's settings" },
+            { id: "settings", label: "Settings", icon: "settings", side: "left", group: "Apps", page: "themes", desc: "This shell's settings" },
             // ── layout ──
             { id: "separator", label: "Separator", icon: "more_vert", side: "left", group: "Layout", page: "", desc: "A thin line between widgets" },
             { id: "spacer", label: "Space", icon: "space_bar", side: "left", group: "Layout", page: "", desc: "A gap" }
@@ -7292,13 +7334,18 @@ in
                 property int dockHideDelay: root.defaults.dockHideDelay
                 property bool dockStayUp: root.defaults.dockStayUp
                 property bool dockTray: root.defaults.dockTray
+                property bool dockMagnify: root.defaults.dockMagnify
                 property int dockPreviewDelay: root.defaults.dockPreviewDelay
                 property bool dnd: root.defaults.dnd
                 property int toastSeconds: root.defaults.toastSeconds
                 property int toastMax: root.defaults.toastMax
                 property bool notifSounds: root.defaults.notifSounds
                 property bool uiSounds: root.defaults.uiSounds
+                property bool osd: root.defaults.osd
+                property bool osdSound: root.defaults.osdSound
+                property var launchCounts: root.defaults.launchCounts
                 property bool clock24: root.defaults.clock24
+                property bool clockDate: root.defaults.clockDate
                 property string barStyle: root.defaults.barStyle
                 property string dockStyle: root.defaults.dockStyle
                 property string wsStyle: root.defaults.wsStyle
@@ -7352,6 +7399,8 @@ in
                 property string popupStyle: root.defaults.popupStyle
                 property string menuAnim: root.defaults.menuAnim
                 property string toastAnim: root.defaults.toastAnim
+                property string overlayAnim: root.defaults.overlayAnim
+                property bool editZoom: root.defaults.editZoom
             }
         }
         Timer {
@@ -7365,8 +7414,9 @@ in
             return Qt.formatDateTime(d, adapter.clock24 ? "HH:mm" : "h:mm AP");
         }
         // the same, with a leading zero on 12-hour times (the bar's clock)
+        // and the day before it, if you want that (Settings → Clock & weather)
         function clockTime(d) {
-            return Qt.formatDateTime(d, adapter.clock24 ? "HH:mm" : "hh:mm AP");
+            return (adapter.clockDate ? Qt.formatDateTime(d, "ddd d") + "  " : "") + Qt.formatDateTime(d, adapter.clock24 ? "HH:mm" : "hh:mm AP");
         }
         // animation times in ms, scaled by animScale
         function ms(t) {
@@ -7409,7 +7459,9 @@ in
         // off doesn't count as a clear (Quickshell's HyprlandFocusGrab::setActive), so
         // Settings stays open, and the grab comes back once polkit's done.
         HyprlandFocusGrab {
-            active: !Scx.busy
+            // (nor while one of the overlays is up, opened from the Launcher & keys page:
+            // it takes the keyboard, and Settings is still there when it goes)
+            active: !Scx.busy && Overlays.open === ""
             windows: [win]
             onCleared: Settings.dismiss()
         }
@@ -7424,7 +7476,10 @@ in
         ]
         readonly property var pages: [
             // ── Visual: everything that changes how the shell looks ──
-            { id: "appearance", group: "visual", label: "Appearance", icon: "palette", caption: "Theme, wallpaper, glass, motion" },
+            { id: "themes", group: "visual", label: "Themes", icon: "palette", caption: "The colors of everything · From wallpaper makes its own" },
+            { id: "wallpaper", group: "visual", label: "Wallpaper", icon: "wallpaper", caption: "The picture behind everything" },
+            { id: "style", group: "visual", label: "Style", icon: "format_paint", caption: "Look, shading, glass, surfaces" },
+            { id: "animations", group: "visual", label: "Animations", icon: "animation", caption: "How everything moves · Hyprland's own are in HyprMod" },
             { id: "bar", group: "visual", label: "Bar", icon: "toolbar", caption: "Style, size, shape, widgets" },
             { id: "docks", group: "visual", label: "Docks", icon: "dock_to_bottom", caption: "Bottom and left · the one you're on stays out" },
             { id: "panels", group: "visual", label: "Panels", icon: "view_quilt", caption: "Extra bars · right-click the desktop → Edit desktop" },
@@ -7441,6 +7496,7 @@ in
             { id: "scheduler", group: "system", label: "Scheduler", icon: "memory", caption: "The CPU scheduler (sched_ext) · switching asks for your password" },
             { id: "power", group: "system", label: "Power", icon: "battery_charging_full", caption: "Power mode, battery" },
             { id: "sysmon", group: "system", label: "System monitor", icon: "monitoring", caption: "The bar's readout and graph" },
+            { id: "overlays", group: "system", label: "Launcher & keys", icon: "keyboard_command_key", caption: "The launcher, clipboard history, the volume pill, shortcuts" },
             { id: "about", group: "system", label: "About", icon: "info", caption: "System info" }
         ]
         // ("dock" and "workspaces" are the two halves of Docks)
@@ -7609,7 +7665,7 @@ in
                             id: grp
                             required property var modelData
                             required property int index
-                            width: parent.width
+                            width: parent ? parent.width : 0     // (no parent for a moment as the window closes)
                             spacing: 2
 
                             Text {
@@ -7794,7 +7850,7 @@ in
                     ScrollBar.vertical: ThinScrollBar {}
 
                     // the wheel moves it further than Qt's default (about a third of this)
-                    // the page: 110 px a notch at 1× (Settings → Appearance → Scroll speed)
+                    // the page: 110 px a notch at 1× (Settings → Animations → Scroll speed)
                     FastWheel {
                         base: 110
                     }
@@ -7833,7 +7889,10 @@ in
                         x: 32
                         width: flick.width - 64
                         sourceComponent: win.query !== "" ? resultsPage : ({
-                                appearance: appearancePage,
+                                themes: themesPage,
+                                wallpaper: wallpaperPage,
+                                style: stylePage,
+                                animations: animationsPage,
                                 bar: barPage,
                                 docks: docksPage,
                                 panels: panelsPage,
@@ -7847,6 +7906,7 @@ in
                                 notifications: notificationsPage,
                                 general: generalPage,
                                 scheduler: schedulerPage,
+                                overlays: overlaysPage,
                                 about: aboutPage
                             })[win.page.id]
                     }
@@ -7918,8 +7978,26 @@ in
         }
 
         Component {
-            id: appearancePage
-            SetAppearance {}
+            id: themesPage
+            SetAppearance {
+                part: "themes"
+            }
+        }
+        Component {
+            id: wallpaperPage
+            SetAppearance {
+                part: "wallpaper"
+            }
+        }
+        Component {
+            id: stylePage
+            SetAppearance {
+                part: "style"
+            }
+        }
+        Component {
+            id: animationsPage
+            SetAnimations {}
         }
         Component {
             id: barPage
@@ -7972,6 +8050,10 @@ in
         Component {
             id: schedulerPage
             SetScheduler {}
+        }
+        Component {
+            id: overlaysPage
+            SetOverlays {}
         }
         Component {
             id: aboutPage
@@ -8349,9 +8431,15 @@ in
     import Quickshell
     import Quickshell.Widgets
 
-    // Settings → Appearance: the themes (and the wallpaper one), the wallpaper, glass and speed
+    // Settings → Themes, Wallpaper and Style: three pages out of this one file, `part`
+    // says which ("themes": the themes, the wallpaper theme's colors, Theme.qml by hand;
+    // "wallpaper"; "style": the look, shading, glass, surfaces). They were one long
+    // Appearance page; the pieces still lean on each other (the wallpaper picker and
+    // the themes), so they stay together here. How things move: SetAnimations.qml.
     Column {
         id: page
+
+        property string part: "themes"
 
         spacing: 26
 
@@ -8409,6 +8497,7 @@ in
         // ── the themes ──
         SetSection {
             id: themesSection
+            visible: page.part === "themes"
             title: "Theme"
             caption: "Shell, terminal, GTK, Qt, cursor, login"
 
@@ -8450,7 +8539,7 @@ in
 
                                 Behavior on scale {
                                     NumberAnimation {
-                                        duration: 140
+                                        duration: 120
                                         easing.type: Easing.OutCubic
                                     }
                                 }
@@ -8634,8 +8723,155 @@ in
             }
         }
 
+        // ── how the wallpaper theme makes its colors ──
+        SetSection {
+            visible: page.part === "themes" && (page.wallTheme)
+            title: "From wallpaper"
+            caption: Theme.busy ? "Making colors…" : "Material You palette from the wallpaper (matugen)"
+
+            SetRow {
+                label: "Built around"
+                description: Theme.matugenSources.length > 1 ? "Main colors, most first" : "Main color"
+                Row {
+                    spacing: 8
+                    Repeater {
+                        model: Theme.matugenSources
+                        Rectangle {
+                            id: swatch
+                            required property string modelData
+                            required property int index
+                            readonly property bool picked: Math.min(Theme.matugenIndex, Theme.matugenSources.length - 1) === index
+                            width: 30
+                            height: 30
+                            radius: 15
+                            color: modelData
+                            border.width: picked ? 3 : 1
+                            border.color: picked ? Theme.text : Theme.pill
+                            scale: swatchMouse.pressed ? 0.85 : swatchMouse.containsMouse ? 1.1 : 1
+                            Behavior on scale {
+                                NumberAnimation {
+                                    duration: 120
+                                }
+                            }
+                            MouseArea {
+                                id: swatchMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: if (!swatch.picked)
+                                    Theme.setMatugen("index", swatch.index)
+                            }
+                        }
+                    }
+                }
+            }
+            SetRow {
+                stacked: true
+                label: "Style"
+                description: page.schemeNotes[Theme.matugenScheme] || ""
+                SetChoice {
+                    width: parent.width
+                    options: page.schemes
+                    current: Theme.matugenScheme
+                    onPicked: s => Theme.setMatugen("scheme", s)
+                }
+            }
+            SetRow {
+                label: "Contrast"
+                description: "0 = Material default"
+                SetSlider {
+                    from: -1
+                    to: 1
+                    stepSize: 0.1
+                    decimals: 1
+                    live: false
+                    value: Theme.matugenContrast
+                    onMoved: v => Theme.setMatugen("contrast", v.toFixed(1))
+                }
+            }
+        }
+
+        // ── Theme.qml, by hand: your own changes on top of it ──
+        SetSection {
+            id: themeCode
+            visible: page.part === "themes"
+            title: "Theme code"
+            caption: Theme.user ? "Your changes are on · " + Theme.userPath.replace(Quickshell.env("HOME"), "~") : "Uncomment a line, change it, Ctrl+S · " + Theme.userPath.replace(Quickshell.env("HOME"), "~")
+            readonly property string template: [
+                "import QtQuick",
+                "",
+                "// Changes to Theme.qml. Any property here replaces Theme's own of the same",
+                "// name, live. Theme.c has the theme's colors: bg, surface, bgDim, overlay,",
+                "// border, fg, dim, accent, red, green, blue, yellow, magenta, cyan, orange.",
+                "QtObject {",
+                "    // ── surfaces (bar, docks, popups, cards) ──",
+                "    // property color glass: Qt.rgba(Theme.c.surface.r, Theme.c.surface.g, Theme.c.surface.b, 0.85)",
+                "    // property real glassOpacity: 0.85",
+                "    // property int borderWidth: 1",
+                "    // property color border: Qt.rgba(1, 1, 1, 0.12)",
+                "    // property int radius: 12",
+                "",
+                "    // ── pills, buttons, hovered rows ──",
+                "    // property color pillSolid: Theme.c.overlay",
+                "    // property color pill: Qt.rgba(Theme.c.overlay.r, Theme.c.overlay.g, Theme.c.overlay.b, 0.6)",
+                "    // property color pillIcon: Theme.c.dim",
+                "",
+                "    // ── text and icons ──",
+                "    // property color text: Theme.c.fg",
+                "    // property color accent: Theme.c.accent",
+                "    // property string font: \"SFMono Nerd Font\"",
+                "    // property real textSize: 12.5",
+                "    // property real letterSpacing: -0.5",
+                "    // property int iconSize: 16",
+                "    // property var iconAxes: ({ FILL: 1, wght: 500, opsz: 20, GRAD: 0 })",
+                "}",
+                ""
+            ].join("\n")
+            actions: Row {
+                spacing: 6
+                SetButton {
+                    icon: "restart_alt"
+                    text: "Undo all"
+                    enabled: Theme.userText !== "" && Theme.userText !== themeCode.template
+                    onClicked: Theme.saveUser(themeCode.template)
+                }
+                SetButton {
+                    icon: "save"
+                    text: "Save"
+                    accent: themeEditor.dirty
+                    enabled: themeEditor.dirty
+                    onClicked: Theme.saveUser(themeEditor.current)
+                }
+            }
+            CodeEditor {
+                id: themeEditor
+                width: parent.width
+                height: 420
+                text: Theme.userText !== "" ? Theme.userText : themeCode.template
+                errorLines: Theme.userError.map(e => e.line).filter(l => l > 0)
+                onSaved: t => Theme.saveUser(t)
+            }
+            Repeater {
+                model: Theme.userError
+                Text {
+                    required property var modelData
+                    width: parent.width
+                    leftPadding: 12
+                    rightPadding: 12
+                    topPadding: 6
+                    bottomPadding: 6
+                    wrapMode: Text.Wrap
+                    text: (modelData.line > 0 ? "Line " + modelData.line + ": " : "") + modelData.message + " · not applied"
+                    color: Theme.red
+                    font.family: Theme.font
+                    font.pixelSize: 12
+                }
+            }
+        }
+
         // ── the wallpaper ──
         SetSection {
+            visible: page.part === "wallpaper"
             title: "Wallpaper"
             actions: [
                 SetButton {
@@ -8687,6 +8923,7 @@ in
         // ── one style for the bar, both docks and the popups (each has its own too) ──
         SetSection {
             id: styleSec
+            visible: page.part === "style"
             title: "Style"
             // the popups' style as it is (auto: the bar's)
             readonly property string popupNow: Theme.popupStyle
@@ -8745,7 +8982,7 @@ in
         // ── the neumorphic shading, by hand ──
         SetSection {
             id: shadeSec
-            visible: Settings.v.shading === "neumorphic"
+            visible: page.part === "style" && (Settings.v.shading === "neumorphic")
             title: "Shading"
             readonly property var keys: ["neuLight", "neuAuto", "neuDistance", "neuSoft", "neuIntensity", "neuSurface", "neuPills"]
             actions: SetButton {
@@ -8887,75 +9124,15 @@ in
             }
         }
 
-        // ── how everything that pops out moves: one choice for all, or each its own ──
+        // ── glass ──
         SetSection {
-            id: motionSec
-            title: "Motion"
-            readonly property var keys: ["popupAnim", "dockAnim", "wsAnim", "panelAnim", "menuAnim", "toastAnim"]
-            readonly property var things: [
-                { key: "popupAnim", label: "Popups", desc: "The bar's widgets" },
-                { key: "dockAnim", label: "Dock", desc: "Out of the bottom edge" },
-                { key: "wsAnim", label: "Workspaces dock", desc: "Out of the left edge" },
-                { key: "panelAnim", label: "Panels", desc: "Auto-hide ones" },
-                { key: "menuAnim", label: "Menus", desc: "Right-click" },
-                { key: "toastAnim", label: "Notifications", desc: "Coming and going" }
-            ]
-            readonly property bool same: keys.every(k => Settings.v[k] === Settings.v[keys[0]])
+            visible: page.part === "style"
+            title: "Glass"
             actions: SetButton {
                 icon: "restart_alt"
                 text: "Reset"
-                enabled: !Settings.isDefault(motionSec.keys.concat(["animScale"]))
-                onClicked: Settings.reset(motionSec.keys.concat(["animScale"]))
-            }
-            SetRow {
-                label: "Everything"
-                description: motionSec.same ? "Popups, docks, panels, menus, notifications" : "Mixed · set each below"
-                SetChoice {
-                    options: Settings.anims
-                    current: motionSec.same ? Settings.v.popupAnim : ""
-                    onPicked: a => {
-                        for (const k of motionSec.keys)
-                            Settings.v[k] = a;
-                    }
-                }
-            }
-            Repeater {
-                model: motionSec.things
-                SetRow {
-                    id: mrow
-                    required property var modelData
-                    label: modelData.label
-                    description: modelData.desc
-                    SetChoice {
-                        options: Settings.anims
-                        current: Settings.v[mrow.modelData.key]
-                        onPicked: a => Settings.v[mrow.modelData.key] = a
-                    }
-                }
-            }
-            SetRow {
-                label: "Speed"
-                description: "Lower = quicker · everything"
-                SetSlider {
-                    from: 0.25
-                    to: 2
-                    stepSize: 0.05
-                    decimals: 2
-                    value: Settings.v.animScale
-                    suffix: "×"
-                    onMoved: v => Settings.v.animScale = v
-                }
-            }
-        }
-
-        // ── glass and scrolling ──
-        SetSection {
-            title: "Glass and scrolling"
-            actions: SetButton {
-                icon: "restart_alt"
-                text: "Reset"
-                enabled: !Settings.isDefault(["glassOpacity", "scrollSpeed"])
-                onClicked: Settings.reset(["glassOpacity", "scrollSpeed"])
+                enabled: !Settings.isDefault(["glassOpacity"])
+                onClicked: Settings.reset(["glassOpacity"])
             }
 
             SetRow {
@@ -8971,24 +9148,12 @@ in
                     onMoved: v => Settings.v.glassOpacity = v
                 }
             }
-            SetRow {
-                label: "Scroll speed"
-                description: "Mouse wheel, in lists and pages"
-                SetSlider {
-                    from: 0.5
-                    to: 4
-                    stepSize: 0.25
-                    decimals: 2
-                    value: Settings.v.scrollSpeed
-                    suffix: "×"
-                    onMoved: v => Settings.v.scrollSpeed = v
-                }
-            }
         }
 
         // ── surfaces: what the bar, docks, popups and cards are made of ──
         SetSection {
             id: surfSection
+            visible: page.part === "style"
             title: "Surfaces"
             caption: "Background, border, type · bar, docks, popups, cards"
             readonly property var keys: ["surfaceBase", "surfaceTint", "pillTint", "borderWidth", "borderColor", "borderOpacity", "borderPills", "uiFont", "iconFill"]
@@ -9102,151 +9267,6 @@ in
                 SetSwitch {
                     checked: Settings.v.iconFill
                     onToggled: on => Settings.v.iconFill = on
-                }
-            }
-        }
-
-        // ── Theme.qml, by hand: your own changes on top of it ──
-        SetSection {
-            id: themeCode
-            title: "Theme code"
-            caption: Theme.user ? "Your changes are on · " + Theme.userPath.replace(Quickshell.env("HOME"), "~") : "Uncomment a line, change it, Ctrl+S · " + Theme.userPath.replace(Quickshell.env("HOME"), "~")
-            readonly property string template: [
-                "import QtQuick",
-                "",
-                "// Changes to Theme.qml. Any property here replaces Theme's own of the same",
-                "// name, live. Theme.c has the theme's colors: bg, surface, bgDim, overlay,",
-                "// border, fg, dim, accent, red, green, blue, yellow, magenta, cyan, orange.",
-                "QtObject {",
-                "    // ── surfaces (bar, docks, popups, cards) ──",
-                "    // property color glass: Qt.rgba(Theme.c.surface.r, Theme.c.surface.g, Theme.c.surface.b, 0.85)",
-                "    // property real glassOpacity: 0.85",
-                "    // property int borderWidth: 1",
-                "    // property color border: Qt.rgba(1, 1, 1, 0.12)",
-                "    // property int radius: 12",
-                "",
-                "    // ── pills, buttons, hovered rows ──",
-                "    // property color pillSolid: Theme.c.overlay",
-                "    // property color pill: Qt.rgba(Theme.c.overlay.r, Theme.c.overlay.g, Theme.c.overlay.b, 0.6)",
-                "    // property color pillIcon: Theme.c.dim",
-                "",
-                "    // ── text and icons ──",
-                "    // property color text: Theme.c.fg",
-                "    // property color accent: Theme.c.accent",
-                "    // property string font: \"SFMono Nerd Font\"",
-                "    // property real textSize: 12.5",
-                "    // property real letterSpacing: -0.5",
-                "    // property int iconSize: 16",
-                "    // property var iconAxes: ({ FILL: 1, wght: 500, opsz: 20, GRAD: 0 })",
-                "}",
-                ""
-            ].join("\n")
-            actions: Row {
-                spacing: 6
-                SetButton {
-                    icon: "restart_alt"
-                    text: "Undo all"
-                    enabled: Theme.userText !== "" && Theme.userText !== themeCode.template
-                    onClicked: Theme.saveUser(themeCode.template)
-                }
-                SetButton {
-                    icon: "save"
-                    text: "Save"
-                    accent: themeEditor.dirty
-                    enabled: themeEditor.dirty
-                    onClicked: Theme.saveUser(themeEditor.current)
-                }
-            }
-            CodeEditor {
-                id: themeEditor
-                width: parent.width
-                height: 420
-                text: Theme.userText !== "" ? Theme.userText : themeCode.template
-                errorLines: Theme.userError.map(e => e.line).filter(l => l > 0)
-                onSaved: t => Theme.saveUser(t)
-            }
-            Repeater {
-                model: Theme.userError
-                Text {
-                    required property var modelData
-                    width: parent.width
-                    leftPadding: 12
-                    rightPadding: 12
-                    topPadding: 6
-                    bottomPadding: 6
-                    wrapMode: Text.Wrap
-                    text: (modelData.line > 0 ? "Line " + modelData.line + ": " : "") + modelData.message + " · not applied"
-                    color: Theme.red
-                    font.family: Theme.font
-                    font.pixelSize: 12
-                }
-            }
-        }
-
-        // ── how the wallpaper theme makes its colors ──
-        SetSection {
-            visible: page.wallTheme
-            title: "From wallpaper"
-            caption: Theme.busy ? "Making colors…" : "Material You palette from the wallpaper (matugen)"
-
-            SetRow {
-                label: "Built around"
-                description: Theme.matugenSources.length > 1 ? "Main colors, most first" : "Main color"
-                Row {
-                    spacing: 8
-                    Repeater {
-                        model: Theme.matugenSources
-                        Rectangle {
-                            id: swatch
-                            required property string modelData
-                            required property int index
-                            readonly property bool picked: Math.min(Theme.matugenIndex, Theme.matugenSources.length - 1) === index
-                            width: 30
-                            height: 30
-                            radius: 15
-                            color: modelData
-                            border.width: picked ? 3 : 1
-                            border.color: picked ? Theme.text : Theme.pill
-                            scale: swatchMouse.pressed ? 0.85 : swatchMouse.containsMouse ? 1.1 : 1
-                            Behavior on scale {
-                                NumberAnimation {
-                                    duration: 120
-                                }
-                            }
-                            MouseArea {
-                                id: swatchMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: if (!swatch.picked)
-                                    Theme.setMatugen("index", swatch.index)
-                            }
-                        }
-                    }
-                }
-            }
-            SetRow {
-                stacked: true
-                label: "Style"
-                description: page.schemeNotes[Theme.matugenScheme] || ""
-                SetChoice {
-                    width: parent.width
-                    options: page.schemes
-                    current: Theme.matugenScheme
-                    onPicked: s => Theme.setMatugen("scheme", s)
-                }
-            }
-            SetRow {
-                label: "Contrast"
-                description: "0 = Material default"
-                SetSlider {
-                    from: -1
-                    to: 1
-                    stepSize: 0.1
-                    decimals: 1
-                    live: false
-                    value: Theme.matugenContrast
-                    onMoved: v => Theme.setMatugen("contrast", v.toFixed(1))
                 }
             }
         }
@@ -9858,6 +9878,11 @@ in
                     onMoved: v => Settings.v.wsCorner = v
                 }
             }
+        }
+
+        SetSection {
+            title: "Timing"
+
             SetRow {
                 label: "Hides after"
                 SetSlider {
@@ -10993,6 +11018,14 @@ in
                     onToggled: on => Settings.v.clock24 = on
                 }
             }
+            SetRow {
+                label: "Date in the bar"
+                description: "The bar's clock reads " + Settings.clockTime(now.date)
+                SetSwitch {
+                    checked: Settings.v.clockDate
+                    onToggled: on => Settings.v.clockDate = on
+                }
+            }
         }
 
         SetSection {
@@ -11341,7 +11374,7 @@ in
     // The bar's, docks', pills' and panels' surface, neumorphic: the theme's glass
     // (blurred by Hyprland), rounded, lifted by two tight shadows that hug its edge: a
     // dark one away from the light and a light one toward it, so it looks raised out of
-    // what's behind it. Strongest right at the edge, no outline. Settings → Appearance →
+    // what's behind it. Strongest right at the edge, no outline. Settings → Style →
     // Shading has where the light comes from, the distance, blur and strength, and the
     // surface (flat, convex, concave); Flat shading for none (shadow: false for one that's
     // always flat).
@@ -11355,7 +11388,7 @@ in
         property bool shadow: Settings.v.shading === "neumorphic"
         property color color: Theme.glass
         property real neuScale: 1        // smaller for little things (the bar's pills)
-        property bool outlined: true     // the border (Settings → Appearance → Surfaces), if any
+        property bool outlined: true     // the border (Settings → Style → Surfaces), if any
 
         readonly property real strength: Settings.v.neuIntensity
         readonly property int sy: Settings.v.neuLight.startsWith("top") ? 1 : -1
@@ -11415,7 +11448,7 @@ in
     import QtQuick
 
     // A button: an icon (and label) that runs `command` when clicked.
-    //   PanelButton { icon: "apps"; command: "rofi -show drun" }
+    //   PanelButton { icon: "apps"; command: "quickshell ipc call overlay toggle launcher" }
     PanelItem {
         icon: "apps"
     }
@@ -11500,7 +11533,7 @@ in
     //
     //   PanelFrame {
     //       edge: "bottom"; size: 36; style: "pill"
-    //       start: [ PanelButton { icon: "apps"; command: "rofi -show drun" } ]
+    //       start: [ PanelButton { icon: "apps"; command: "quickshell ipc call overlay toggle launcher" } ]
     //       end: [ PanelClock {} ]
     //   }
     //
@@ -12386,6 +12419,25 @@ in
             drawerPanel = "";
             configTarget = null;
         }
+        // A click on the empty desktop while you edit (DesktopMenu.qml): whatever is open
+        // closes (a panel's widget drawer here; the bar's drawer, its options or a picked
+        // widget in BarEditor.qml, which listens for clickedOff and says so with
+        // clickOffTaken). With nothing open, it's the way out: back to the desktop.
+        signal clickedOff
+        property bool clickOffTaken: false
+        function clickOff() {
+            if (!editMode)
+                return;
+            clickOffTaken = false;
+            if (drawerPanel !== "" || configTarget) {
+                drawerPanel = "";
+                configTarget = null;
+                clickOffTaken = true;
+            }
+            clickedOff();
+            if (!clickOffTaken)
+                editMode = false;
+        }
         function configure(id, slot) {
             configTarget = { panelId: id, slot: slot };
             drawerPanel = "";
@@ -12459,7 +12511,7 @@ in
                     fields: [
                         { key: "icon", label: "Icon", def: "apps" },
                         { key: "text", label: "Label", def: "" },
-                        { key: "command", label: "Runs", def: "rofi -show drun", code: true }
+                        { key: "command", label: "Runs", def: "quickshell ipc call overlay toggle launcher", code: true }
                     ]
                 },
                 command: {
@@ -13525,9 +13577,13 @@ in
                 Panels.add();
                 Panels.editMode = true;
             } else if (act === "wallpaper")
-                Settings.show("appearance");
+                Settings.show("wallpaper");
             else if (act === "settings")
                 Settings.open = true;
+            else if (act === "apps")
+                Overlays.toggle("launcher");
+            else if (act === "capture" || act === "keys")
+                Overlays.toggle(act);
         }
         function show(x, y) {
             menu.x = Math.min(x, desk.width - menu.width - 8);
@@ -13574,8 +13630,10 @@ in
                 onClicked: m => {
                     if (m.button === Qt.RightButton)
                         root.show(m.x, m.y);
-                    else
+                    else if (root.open)
                         root.open = false;
+                    else
+                        Panels.clickOff();      // (editing without the zoom: see below)
                 }
             }
         }
@@ -13591,7 +13649,8 @@ in
             id: zoom
             screen: root.screen
             // 0 = as it is, 1 = zoomed out (the animation runs between)
-            property real amount: Panels.editMode ? 1 : 0
+            // (Settings → Animations → Edit desktop zooms out: off, you edit it as it is)
+            property real amount: Panels.editMode && Settings.v.editZoom ? 1 : 0
             Behavior on amount {
                 NumberAnimation {
                     duration: Settings.ms(380)
@@ -13705,17 +13764,24 @@ in
                     }
                 }
 
-                // a right-click anywhere: the desktop's menu (Done editing...); a click
-                // closes it
+                // A right-click anywhere: the desktop's menu (Done editing...). A click on
+                // the empty space, the desktop or the wallpaper round it: closes the menu
+                // if it's open, else whatever's open on the bar or a panel, else you're
+                // done editing and back on the desktop (Panels.clickOff). Not at the end
+                // of a drag that ran out here: only a press and release in one spot.
                 MouseArea {
                     anchors.fill: parent
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    property point downAt: Qt.point(0, 0)
+                    onPressed: m => downAt = Qt.point(m.x, m.y)
                     onClicked: m => {
                         parent.forceActiveFocus();
                         if (m.button === Qt.RightButton)
                             root.show(m.x, m.y);
-                        else
+                        else if (root.open)
                             root.open = false;
+                        else if (Math.abs(m.x - downAt.x) < 8 && Math.abs(m.y - downAt.y) < 8)
+                            Panels.clickOff();
                     }
                 }
             }
@@ -13759,6 +13825,10 @@ in
                     { act: "edit", icon: Panels.editMode ? "check" : "edit", label: Panels.editMode ? "Done editing" : "Edit desktop" },
                     { act: "panel", icon: "add_box", label: "Add Panel" },
                     { sep: true },
+                    { act: "apps", icon: "apps", label: "Apps" },
+                    { act: "capture", icon: "screenshot_region", label: "Screenshot" },
+                    { act: "keys", icon: "keyboard", label: "Keyboard shortcuts" },
+                    { sep: true },
                     { act: "wallpaper", icon: "wallpaper", label: "Wallpaper and theme" },
                     { act: "settings", icon: "settings", label: "Settings" }
                 ]
@@ -13783,7 +13853,7 @@ in
         property var model: []
         signal picked(string act)
 
-        // how it appears (Settings → Appearance → Motion: Menus): slide (drops a little),
+        // how it appears (Settings → Animations: Menus): slide (drops a little),
         // fade, pop (grows a little), none
         readonly property string anim: Settings.v.menuAnim
         property real shown: 1
@@ -15390,7 +15460,7 @@ in
     import QtQuick.Effects
 
     // Neumorphic shadows for something rounded (Glass.qml, Pill.qml): a dark one away from
-    // the light and a light one toward it, hugging the edge (Settings → Appearance →
+    // the light and a light one toward it, hugging the edge (Settings → Style →
     // Shading). Put it behind the thing: same size, z: -1 inside it, or before it.
     Item {
         id: n
@@ -15579,6 +15649,22 @@ in
             }
             dragId = "";
             dragNew = false;
+        }
+
+        // a click on the empty desktop (Panels.clickOff): like Esc, it closes what's open
+        // here first; if nothing was, Panels takes it as "done"
+        Connections {
+            target: Panels
+            function onClickedOff() {
+                if (!ed.active)
+                    return;
+                if (ed.selected !== "" || ed.drawerOpen || ed.barOpts) {
+                    ed.select("");
+                    ed.drawerOpen = false;
+                    ed.barOpts = false;
+                    Panels.clickOffTaken = true;
+                }
+            }
         }
 
         // ── the keyboard (the bar can take it while you edit: shell.qml) ──
@@ -16545,7 +16631,7 @@ in
                 onClicked: Settings.show("docks")
             }
         }
-        readonly property var dockKeys: ["dockStyle", "dockIconSize", "dockSlotPad", "dockPadding", "dockCurve", "dockCorner", "dockGap", "dockHideDelay", "dockStayUp", "dockFullscreen", "dockTray", "dockPreviewDelay"]
+        readonly property var dockKeys: ["dockStyle", "dockIconSize", "dockSlotPad", "dockPadding", "dockCurve", "dockCorner", "dockGap", "dockHideDelay", "dockStayUp", "dockFullscreen", "dockTray", "dockMagnify", "dockPreviewDelay"]
         readonly property var wsKeys: ["wsStyle", "wsCell", "wsIconSize", "wsMaxIcons", "wsPadding", "wsCurve", "wsCorner", "wsGap", "wsHideDelay", "wsFullscreen"]
 
         readonly property var styles: [
@@ -16600,6 +16686,12 @@ in
                     label: "Tray"
                     checked: Settings.v.dockTray
                     onToggled: v => Settings.v.dockTray = v
+                }
+                // the icons swell under the mouse (Dock.qml)
+                SwitchRow {
+                    label: "Magnify"
+                    checked: Settings.v.dockMagnify
+                    onToggled: v => Settings.v.dockMagnify = v
                 }
                 // over a fullscreen window: push the bottom edge to bring it out (off: not at all)
                 SwitchRow {
@@ -16679,7 +16771,7 @@ in
   xdg.configFile."quickshell/FastWheel.qml".text = ''
     import QtQuick
 
-    // The mouse wheel, faster (Settings → Appearance → Glass and scrolling: Scroll speed).
+    // The mouse wheel, faster (Settings → Animations → Scroll speed).
     // Put it straight inside a Flickable, ListView or GridView: `FastWheel {}`. A notch
     // moves `base` px (Qt's own is 72) times the speed, with a short glide; a touchpad's
     // pixels are sped up the same. Up / down scrolls sideways in something that only
@@ -16755,40 +16847,53 @@ in
     // don't edit it by hand.
     Singleton {
         readonly property var items: [
-            {"page": "appearance", "sub": "", "section": "Theme", "label": "Theme", "desc": "", "kind": "section", "keys": ""},
-            {"page": "appearance", "sub": "", "section": "Wallpaper", "label": "Wallpaper", "desc": "", "kind": "section", "keys": ""},
-            {"page": "appearance", "sub": "", "section": "Style", "label": "Style", "desc": "", "kind": "section", "keys": "smooth floating pill"},
-            {"page": "appearance", "sub": "", "section": "Style", "label": "Everything", "desc": "Bar, docks, popups · Mixed · set each below or on its page", "kind": "row", "keys": "smooth floating pill"},
-            {"page": "appearance", "sub": "", "section": "Style", "label": "Popups", "desc": "", "kind": "row", "keys": "smooth floating pill"},
-            {"page": "appearance", "sub": "", "section": "Style", "label": "Shading", "desc": "neumorphic · Raised · bar, docks, pills, panels · No shadows", "kind": "row", "keys": "smooth floating pill"},
-            {"page": "appearance", "sub": "", "section": "Shading", "label": "Shading", "desc": "", "kind": "section", "keys": "neumorphic shadow light"},
-            {"page": "appearance", "sub": "", "section": "Shading", "label": "Pills", "desc": "The bar's pills too (volume, clock…)", "kind": "row", "keys": "neumorphic shadow light"},
-            {"page": "appearance", "sub": "", "section": "Shading", "label": "Surface", "desc": "", "kind": "row", "keys": "neumorphic shadow light"},
-            {"page": "appearance", "sub": "", "section": "Shading", "label": "Intensity", "desc": "", "kind": "row", "keys": "neumorphic shadow light"},
-            {"page": "appearance", "sub": "", "section": "Shading", "label": "Auto depth", "desc": "From each thing's size", "kind": "row", "keys": "neumorphic shadow light"},
-            {"page": "appearance", "sub": "", "section": "Shading", "label": "Distance", "desc": "", "kind": "row", "keys": "neumorphic shadow light"},
-            {"page": "appearance", "sub": "", "section": "Shading", "label": "Softness", "desc": "Blur, as a share of the distance", "kind": "row", "keys": "neumorphic shadow light"},
-            {"page": "appearance", "sub": "", "section": "Motion", "label": "Motion", "desc": "", "kind": "section", "keys": "animation animations slide fade pop transition"},
-            {"page": "appearance", "sub": "", "section": "Motion", "label": "Everything", "desc": "Popups, docks, panels, menus, notifications · Mixed · set each below", "kind": "row", "keys": "animation animations slide fade pop transition"},
-            {"page": "appearance", "sub": "", "section": "Motion", "label": "Speed", "desc": "Lower = quicker · everything", "kind": "row", "keys": "animation animations slide fade pop transition"},
-            {"page": "appearance", "sub": "", "section": "Glass and scrolling", "label": "Glass and scrolling", "desc": "", "kind": "section", "keys": ""},
-            {"page": "appearance", "sub": "", "section": "Glass and scrolling", "label": "Opacity", "desc": "Bar, popups, docks", "kind": "row", "keys": ""},
-            {"page": "appearance", "sub": "", "section": "Glass and scrolling", "label": "Scroll speed", "desc": "Mouse wheel, in lists and pages", "kind": "row", "keys": ""},
-            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Surfaces", "desc": "", "kind": "section", "keys": "background border font tint"},
-            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Background", "desc": "The theme color under the glass", "kind": "row", "keys": "background border font tint"},
-            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Tint", "desc": "Accent mixed in", "kind": "row", "keys": "background border font tint"},
-            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Pill tint", "desc": "Pills, buttons, hovered rows", "kind": "row", "keys": "background border font tint"},
-            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Border", "desc": "None · Round the edges", "kind": "row", "keys": "background border font tint"},
-            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Border color", "desc": "", "kind": "row", "keys": "background border font tint"},
-            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Border strength", "desc": "", "kind": "row", "keys": "background border font tint"},
-            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Pills too", "desc": "The bar's pills (not in the Pill style)", "kind": "row", "keys": "background border font tint"},
-            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Font", "desc": "Its name, then Enter · empty = SFMono Nerd Font", "kind": "row", "keys": "background border font tint"},
-            {"page": "appearance", "sub": "", "section": "Surfaces", "label": "Filled icons", "desc": "", "kind": "row", "keys": "background border font tint"},
-            {"page": "appearance", "sub": "", "section": "Theme code", "label": "Theme code", "desc": "", "kind": "section", "keys": "theme.qml code override"},
-            {"page": "appearance", "sub": "", "section": "From wallpaper", "label": "From wallpaper", "desc": "", "kind": "section", "keys": ""},
-            {"page": "appearance", "sub": "", "section": "From wallpaper", "label": "Built around", "desc": "Main colors, most first · Main color", "kind": "row", "keys": ""},
-            {"page": "appearance", "sub": "", "section": "From wallpaper", "label": "Style", "desc": "", "kind": "row", "keys": ""},
-            {"page": "appearance", "sub": "", "section": "From wallpaper", "label": "Contrast", "desc": "0 = Material default", "kind": "row", "keys": ""},
+            {"page": "themes", "sub": "", "section": "Theme", "label": "Theme", "desc": "", "kind": "section", "keys": ""},
+            {"page": "wallpaper", "sub": "", "section": "Wallpaper", "label": "Wallpaper", "desc": "", "kind": "section", "keys": ""},
+            {"page": "style", "sub": "", "section": "Style", "label": "Style", "desc": "", "kind": "section", "keys": "smooth floating pill"},
+            {"page": "style", "sub": "", "section": "Style", "label": "Everything", "desc": "Bar, docks, popups · Mixed · set each below or on its page", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "style", "sub": "", "section": "Style", "label": "Popups", "desc": "", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "style", "sub": "", "section": "Style", "label": "Shading", "desc": "neumorphic · Raised · bar, docks, pills, panels · No shadows", "kind": "row", "keys": "smooth floating pill"},
+            {"page": "style", "sub": "", "section": "Shading", "label": "Shading", "desc": "", "kind": "section", "keys": "neumorphic shadow light"},
+            {"page": "style", "sub": "", "section": "Shading", "label": "Pills", "desc": "The bar's pills too (volume, clock…)", "kind": "row", "keys": "neumorphic shadow light"},
+            {"page": "style", "sub": "", "section": "Shading", "label": "Surface", "desc": "", "kind": "row", "keys": "neumorphic shadow light"},
+            {"page": "style", "sub": "", "section": "Shading", "label": "Intensity", "desc": "", "kind": "row", "keys": "neumorphic shadow light"},
+            {"page": "style", "sub": "", "section": "Shading", "label": "Auto depth", "desc": "From each thing's size", "kind": "row", "keys": "neumorphic shadow light"},
+            {"page": "style", "sub": "", "section": "Shading", "label": "Distance", "desc": "", "kind": "row", "keys": "neumorphic shadow light"},
+            {"page": "style", "sub": "", "section": "Shading", "label": "Softness", "desc": "Blur, as a share of the distance", "kind": "row", "keys": "neumorphic shadow light"},
+            {"page": "style", "sub": "", "section": "Glass", "label": "Glass", "desc": "", "kind": "section", "keys": ""},
+            {"page": "style", "sub": "", "section": "Glass", "label": "Opacity", "desc": "Bar, popups, docks", "kind": "row", "keys": ""},
+            {"page": "style", "sub": "", "section": "Surfaces", "label": "Surfaces", "desc": "", "kind": "section", "keys": "background border font tint"},
+            {"page": "style", "sub": "", "section": "Surfaces", "label": "Background", "desc": "The theme color under the glass", "kind": "row", "keys": "background border font tint"},
+            {"page": "style", "sub": "", "section": "Surfaces", "label": "Tint", "desc": "Accent mixed in", "kind": "row", "keys": "background border font tint"},
+            {"page": "style", "sub": "", "section": "Surfaces", "label": "Pill tint", "desc": "Pills, buttons, hovered rows", "kind": "row", "keys": "background border font tint"},
+            {"page": "style", "sub": "", "section": "Surfaces", "label": "Border", "desc": "None · Round the edges", "kind": "row", "keys": "background border font tint"},
+            {"page": "style", "sub": "", "section": "Surfaces", "label": "Border color", "desc": "", "kind": "row", "keys": "background border font tint"},
+            {"page": "style", "sub": "", "section": "Surfaces", "label": "Border strength", "desc": "", "kind": "row", "keys": "background border font tint"},
+            {"page": "style", "sub": "", "section": "Surfaces", "label": "Pills too", "desc": "The bar's pills (not in the Pill style)", "kind": "row", "keys": "background border font tint"},
+            {"page": "style", "sub": "", "section": "Surfaces", "label": "Font", "desc": "Its name, then Enter · empty = SFMono Nerd Font", "kind": "row", "keys": "background border font tint"},
+            {"page": "style", "sub": "", "section": "Surfaces", "label": "Filled icons", "desc": "", "kind": "row", "keys": "background border font tint"},
+            {"page": "themes", "sub": "", "section": "Theme code", "label": "Theme code", "desc": "", "kind": "section", "keys": "theme.qml code override"},
+            {"page": "themes", "sub": "", "section": "From wallpaper", "label": "From wallpaper", "desc": "", "kind": "section", "keys": ""},
+            {"page": "themes", "sub": "", "section": "From wallpaper", "label": "Built around", "desc": "Main colors, most first · Main color", "kind": "row", "keys": ""},
+            {"page": "themes", "sub": "", "section": "From wallpaper", "label": "Style", "desc": "", "kind": "row", "keys": ""},
+            {"page": "themes", "sub": "", "section": "From wallpaper", "label": "Contrast", "desc": "0 = Material default", "kind": "row", "keys": ""},
+            {"page": "animations", "sub": "", "section": "Everything", "label": "Everything", "desc": "One style and one speed for the whole shell", "kind": "section", "keys": "animation animations motion slide fade pop none speed"},
+            {"page": "animations", "sub": "", "section": "Everything", "label": "Style", "desc": "Popups, docks, panels, menus, notifications, overlays", "kind": "row", "keys": "animation animations motion slide fade pop none speed"},
+            {"page": "animations", "sub": "", "section": "Everything", "label": "Speed", "desc": "Quicker or slower than designed", "kind": "row", "keys": "animation animations motion slide fade pop none speed"},
+            {"page": "animations", "sub": "", "section": "Each one", "label": "Each one", "desc": "Slide · Fade · Pop · None", "kind": "section", "keys": "animation animations motion slide fade pop none speed"},
+            {"page": "animations", "sub": "", "section": "Each one", "label": "Popups", "desc": "The bar's widgets", "kind": "row", "keys": "animation animations motion slide fade pop none speed"},
+            {"page": "animations", "sub": "", "section": "Each one", "label": "Dock", "desc": "Out of the bottom edge", "kind": "row", "keys": "animation animations motion slide fade pop none speed"},
+            {"page": "animations", "sub": "", "section": "Each one", "label": "Workspaces dock", "desc": "Out of the left edge", "kind": "row", "keys": "animation animations motion slide fade pop none speed"},
+            {"page": "animations", "sub": "", "section": "Each one", "label": "Panels", "desc": "Auto-hide ones", "kind": "row", "keys": "animation animations motion slide fade pop none speed"},
+            {"page": "animations", "sub": "", "section": "Each one", "label": "Menus", "desc": "Right-click", "kind": "row", "keys": "animation animations motion slide fade pop none speed"},
+            {"page": "animations", "sub": "", "section": "Each one", "label": "Notifications", "desc": "Coming and going", "kind": "row", "keys": "animation animations motion slide fade pop none speed"},
+            {"page": "animations", "sub": "", "section": "Each one", "label": "Overlays", "desc": "Launcher, clipboard, overview", "kind": "row", "keys": "animation animations motion slide fade pop none speed"},
+            {"page": "animations", "sub": "", "section": "Effects", "label": "Effects", "desc": "", "kind": "section", "keys": "animation animations motion slide fade pop none speed zoom magnify scroll"},
+            {"page": "animations", "sub": "", "section": "Effects", "label": "Edit desktop zooms out", "desc": "The desktop shrinks onto the blurred wallpaper while you edit", "kind": "row", "keys": "animation animations motion slide fade pop none speed zoom magnify scroll"},
+            {"page": "animations", "sub": "", "section": "Effects", "label": "Dock magnify", "desc": "Icons swell under the mouse", "kind": "row", "keys": "animation animations motion slide fade pop none speed zoom magnify scroll"},
+            {"page": "animations", "sub": "", "section": "Effects", "label": "Scroll speed", "desc": "Mouse wheel, in lists and pages", "kind": "row", "keys": "animation animations motion slide fade pop none speed zoom magnify scroll"},
+            {"page": "animations", "sub": "", "section": "Windows and workspaces", "label": "Windows and workspaces", "desc": "Hyprland's own, not the shell's", "kind": "section", "keys": "animation animations motion slide fade pop none speed hyprmod hyprland"},
+            {"page": "animations", "sub": "", "section": "Windows and workspaces", "label": "Windows, workspaces, fades", "desc": "Set them in HyprMod", "kind": "row", "keys": "animation animations motion slide fade pop none speed hyprmod hyprland"},
             {"page": "bar", "sub": "", "section": "Widgets", "label": "Widgets", "desc": "", "kind": "section", "keys": ""},
             {"page": "bar", "sub": "", "section": "Style", "label": "Style", "desc": "", "kind": "section", "keys": "smooth floating pill"},
             {"page": "bar", "sub": "", "section": "Style", "label": "Look", "desc": "", "kind": "row", "keys": "smooth floating pill"},
@@ -16835,7 +16940,8 @@ in
             {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Padding", "desc": "", "kind": "row", "keys": ""},
             {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Curves", "desc": "Smooth style only", "kind": "row", "keys": ""},
             {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Corners", "desc": "", "kind": "row", "keys": ""},
-            {"page": "docks", "sub": "workspaces", "section": "Size and shape", "label": "Hides after", "desc": "", "kind": "row", "keys": ""},
+            {"page": "docks", "sub": "workspaces", "section": "Timing", "label": "Timing", "desc": "", "kind": "section", "keys": ""},
+            {"page": "docks", "sub": "workspaces", "section": "Timing", "label": "Hides after", "desc": "", "kind": "row", "keys": ""},
             {"page": "panels", "sub": "", "section": "Panels", "label": "Panels", "desc": "", "kind": "section", "keys": ""},
             {"page": "panels", "sub": "", "section": "Place", "label": "Place", "desc": "", "kind": "section", "keys": ""},
             {"page": "panels", "sub": "", "section": "Place", "label": "Name", "desc": "", "kind": "row", "keys": ""},
@@ -16892,6 +16998,7 @@ in
             {"page": "notifications", "sub": "", "section": "Sounds", "label": "Notification sounds", "desc": "", "kind": "row", "keys": ""},
             {"page": "general", "sub": "", "section": "Clock", "label": "Clock", "desc": "", "kind": "section", "keys": ""},
             {"page": "general", "sub": "", "section": "Clock", "label": "24-hour time", "desc": "Now ", "kind": "row", "keys": ""},
+            {"page": "general", "sub": "", "section": "Clock", "label": "Date in the bar", "desc": "The bar's clock reads the day too", "kind": "row", "keys": "day weekday"},
             {"page": "general", "sub": "", "section": "Weather", "label": "Weather", "desc": "", "kind": "section", "keys": ""},
             {"page": "general", "sub": "", "section": "Weather", "label": "Place", "desc": ",  · Not set", "kind": "row", "keys": ""},
             {"page": "general", "sub": "", "section": "Weather", "label": "Units", "desc": "°F · mph · in · °C · km/h · mm", "kind": "row", "keys": ""},
@@ -16911,12 +17018,6 @@ in
             {"page": "scheduler", "sub": "", "section": "Mode", "label": "Mode", "desc": " has no flags for this one: its own defaults", "kind": "row", "keys": "scx gaming power save low latency server"},
             {"page": "scheduler", "sub": "", "section": "Schedulers", "label": "Schedulers", "desc": "", "kind": "section", "keys": "scx sched_ext scx_loader cpu"},
             {"page": "scheduler", "sub": "", "section": "At boot", "label": "At boot", "desc": "", "kind": "section", "keys": "scx default_sched restore stop"},
-            {"page": "appearance", "sub": "", "section": "Motion", "label": "Popups", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
-            {"page": "appearance", "sub": "", "section": "Motion", "label": "Dock", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
-            {"page": "appearance", "sub": "", "section": "Motion", "label": "Workspaces dock", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
-            {"page": "appearance", "sub": "", "section": "Motion", "label": "Panels", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
-            {"page": "appearance", "sub": "", "section": "Motion", "label": "Menus", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
-            {"page": "appearance", "sub": "", "section": "Motion", "label": "Notifications", "desc": "Animation", "kind": "row", "keys": "animation animations slide fade pop transition"},
             {"page": "scheduler", "sub": "", "section": "Schedulers", "label": "bpfland", "desc": "CPU scheduler", "kind": "row", "keys": "scx sched_ext scx_loader cpu"},
             {"page": "scheduler", "sub": "", "section": "Schedulers", "label": "lavd", "desc": "CPU scheduler", "kind": "row", "keys": "scx sched_ext scx_loader cpu"},
             {"page": "scheduler", "sub": "", "section": "Schedulers", "label": "cake", "desc": "CPU scheduler", "kind": "row", "keys": "scx sched_ext scx_loader cpu"},
@@ -16924,6 +17025,18 @@ in
             {"page": "scheduler", "sub": "", "section": "Schedulers", "label": "cosmos", "desc": "CPU scheduler", "kind": "row", "keys": "scx sched_ext scx_loader cpu"},
             {"page": "scheduler", "sub": "", "section": "Schedulers", "label": "rusty", "desc": "CPU scheduler", "kind": "row", "keys": "scx sched_ext scx_loader cpu"},
             {"page": "scheduler", "sub": "", "section": "Schedulers", "label": "p2dq", "desc": "CPU scheduler", "kind": "row", "keys": "scx sched_ext scx_loader cpu"},
+            {"page": "overlays", "sub": "", "section": "Launcher", "label": "Launcher", "desc": "Super + Tab, or the bar's Apps button", "kind": "section", "keys": "launcher apps rofi clipboard cliphist osd volume brightness overview alt tab screenshot shortcuts keys"},
+            {"page": "overlays", "sub": "", "section": "Launcher", "label": "Most used first", "desc": "It learns as you open apps", "kind": "row", "keys": "launcher apps rofi clipboard cliphist osd volume brightness overview alt tab screenshot shortcuts keys"},
+            {"page": "overlays", "sub": "", "section": "Launcher", "label": "Open it", "desc": "Apps by name, a sum, or >command", "kind": "row", "keys": "launcher apps rofi clipboard cliphist osd volume brightness overview alt tab screenshot shortcuts keys"},
+            {"page": "overlays", "sub": "", "section": "On-screen display", "label": "On-screen display", "desc": "The pill the volume, microphone and brightness keys bring up", "kind": "section", "keys": "launcher apps rofi clipboard cliphist osd volume brightness overview alt tab screenshot shortcuts keys"},
+            {"page": "overlays", "sub": "", "section": "On-screen display", "label": "Show it", "desc": "Off: the keys still work, quietly", "kind": "row", "keys": "launcher apps rofi clipboard cliphist osd volume brightness overview alt tab screenshot shortcuts keys"},
+            {"page": "overlays", "sub": "", "section": "On-screen display", "label": "Volume tick", "desc": "The volume keys play a tick at the new volume", "kind": "row", "keys": "launcher apps rofi clipboard cliphist osd volume brightness overview alt tab screenshot shortcuts keys"},
+            {"page": "overlays", "sub": "", "section": "Clipboard history", "label": "Clipboard history", "desc": "Super + C", "kind": "section", "keys": "launcher apps rofi clipboard cliphist osd volume brightness overview alt tab screenshot shortcuts keys"},
+            {"page": "overlays", "sub": "", "section": "Clipboard history", "label": "What you've copied", "desc": "Text and pictures, kept by cliphist until you forget them", "kind": "row", "keys": "launcher apps rofi clipboard cliphist osd volume brightness overview alt tab screenshot shortcuts keys"},
+            {"page": "overlays", "sub": "", "section": "Windows and capture", "label": "Windows and capture", "desc": "", "kind": "section", "keys": "launcher apps rofi clipboard cliphist osd volume brightness overview alt tab screenshot shortcuts keys"},
+            {"page": "overlays", "sub": "", "section": "Windows and capture", "label": "Overview", "desc": "Super + `  ·  Alt + Tab", "kind": "row", "keys": "launcher apps rofi clipboard cliphist osd volume brightness overview alt tab screenshot shortcuts keys"},
+            {"page": "overlays", "sub": "", "section": "Windows and capture", "label": "Screenshots", "desc": "Print  ·  Shift + Print", "kind": "row", "keys": "launcher apps rofi clipboard cliphist osd volume brightness overview alt tab screenshot shortcuts keys"},
+            {"page": "overlays", "sub": "", "section": "Windows and capture", "label": "Keyboard shortcuts", "desc": "Super + /", "kind": "row", "keys": "launcher apps rofi clipboard cliphist osd volume brightness overview alt tab screenshot shortcuts keys"},
             {"page": "scheduler", "sub": "", "section": "Schedulers", "label": "beerland", "desc": "CPU scheduler", "kind": "row", "keys": "scx sched_ext scx_loader cpu"}
         ]
     }
@@ -17695,7 +17808,7 @@ in
             }
         }
 
-        // ── your own changes (Settings → Appearance → Theme code) ──
+        // ── your own changes (Settings → Themes → Theme code) ──
         // ~/.local/state/quickshell/theme.qml: a QtObject whose properties replace the ones
         // here with the same name (ov() below). It's loaded like a panel's file, so it can
         // use Theme.c (the theme's colors), Settings and the rest. A mistake in it: it's
@@ -17762,7 +17875,7 @@ in
 
         property color bg: ov("bg", c.bg)
         // pills, buttons, hovered rows: the theme's overlay color (with some accent, if
-        // you like: Settings → Appearance → Surfaces), as see-through as the glass under
+        // you like: Settings → Style → Surfaces), as see-through as the glass under
         // them (glassOpacity below), so everything has the same look
         property color pillSolid: ov("pillSolid", mix(c.overlay, c.accent, Settings.v.pillTint))
         readonly property color pill: ov("pill", Qt.rgba(pillSolid.r, pillSolid.g, pillSolid.b, glassOpacity))
@@ -17777,7 +17890,7 @@ in
         property color orange: ov("orange", c.orange)
         property color accent: ov("accent", c.accent)
         // what the glass is made of: one of the theme's background colors, maybe with
-        // some accent in it (Settings → Appearance → Surfaces)
+        // some accent in it (Settings → Style → Surfaces)
         property color surface: ov("surface", mix(c[Settings.v.surfaceBase] || c.bg, c.accent, Settings.v.surfaceTint))
         // the outline round the bar, docks, popups and cards (0 = none)
         readonly property int borderWidth: ov("borderWidth", Settings.v.borderWidth)
@@ -17820,7 +17933,7 @@ in
         readonly property bool barDetached: barStyle !== "smooth"
         readonly property int barMargin: barDetached ? Settings.v.barMargin : 0
         readonly property int barBottom: barMargin + barHeight   // where the bar ends
-        // the popups' own style (Settings → Appearance → Style): "auto" = like the bar
+        // the popups' own style (Settings → Style → Style): "auto" = like the bar
         // (smooth with a smooth bar, a rounder card with the pill one, a card otherwise)
         readonly property string popupStyle: Settings.v.popupStyle !== "auto" ? Settings.v.popupStyle : barStyle === "smooth" ? "smooth" : barStyle === "pill" ? "pill" : "floating"
         readonly property bool popupDetached: popupStyle !== "smooth"
@@ -17834,7 +17947,7 @@ in
         readonly property int spacing: Settings.v.spacing
         readonly property int radius: ov("radius", Settings.v.radius)
 
-        // (Settings → Appearance → Surfaces: Font; "" = this one)
+        // (Settings → Style → Surfaces: Font; "" = this one)
         property string font: ov("font", Settings.v.uiFont !== "" ? Settings.v.uiFont : "SFMono Nerd Font")
         readonly property real textSize: ov("textSize", Settings.v.textSize)
         property real letterSpacing: ov("letterSpacing", -0.5)
@@ -17917,7 +18030,7 @@ in
         readonly property real grow: anim === "slide" ? openness : 1
 
         // the curves into the bar: none when the popup floats (Theme.popupStyle: its own
-        // style, Settings → Appearance → Style)
+        // style, Settings → Style → Style)
         readonly property int flare: Theme.popupDetached ? 0 : curve
 
         // true while the popup is open (or opening)
@@ -18123,7 +18236,7 @@ in
 
                 ShapePath {
                     fillColor: Theme.glass         // the bar's color, in the same window: one piece
-                    // the border (Settings → Appearance → Surfaces); the path starts and
+                    // the border (Settings → Style → Surfaces); the path starts and
                     // ends on the bar's edge, so there's no line between it and the bar
                     strokeColor: Theme.borderWidth > 0 ? Theme.border : "transparent"
                     strokeWidth: Theme.borderWidth
@@ -20645,7 +20758,7 @@ in
     import Quickshell.Io
     import Quickshell.Widgets
 
-    // ── Wallpaper picker ── (Settings → Appearance, SetAppearance.qml)
+    // ── Wallpaper picker ── (Settings → Style, SetAppearance.qml)
     // Shows the pictures in ~/Pictures/Wallpapers/<theme>/ (the theme that's on). Click
     // one to make it the wallpaper. It's remembered for that theme: switch themes and
     // back and it's still the one. A theme you haven't picked one for uses the first
@@ -20657,7 +20770,7 @@ in
     Column {
         id: root
 
-        // which folder: the theme's own (Settings → Appearance lets the wallpaper theme
+        // which folder: the theme's own (Settings → Style lets the wallpaper theme
         // look in the others' too)
         property string folder: Theme.current
         readonly property string dir: Theme.wallpaperDir + "/" + folder
@@ -21262,6 +21375,43 @@ in
         readonly property int iconSize: Settings.v.dockIconSize
         readonly property int cell: iconSize + Settings.v.dockSlotPad   // an icon's slot
 
+        // ── Magnify (Edit desktop, the dock's card / Settings → Dock) ──
+        // The icons near the mouse swell, the nearest the most, pushing the others
+        // apart. It's one smooth lens over the row: an icon
+        // `d` px from the mouse is drawn magScale(d) times its size and moved magShift(d)
+        // sideways, where magShift is the sum of all the swelling between it and the
+        // mouse, so the icons never overlap and the one under the mouse stays under it.
+        // The row gets magPad wider on each side while it's on, which is how
+        // far the lens pushes the far icons, so they stay on the dock.
+        readonly property bool magnify: Settings.v.dockMagnify
+        readonly property real magMax: 1.4                      // the one under the mouse
+        readonly property real magReach: 2.2 * (cell + 2)       // how far from the mouse it swells
+        readonly property bool magOn: magnify && rowHover.hovered && dragFrom < 0 && extra === "" && panel.openness === 1
+        readonly property real magPad: magOn ? (magMax - 1) * magReach / 2 : 0
+        readonly property real magX: rowHover.point.position.x  // the mouse, along the row
+        property real magAmount: magOn ? 1 : 0                   // 0 = flat, 1 = swollen
+        Behavior on magAmount {
+            // in step with the dock getting wider (DockPanel.qml: the same time and curve)
+            NumberAnimation {
+                duration: 260
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: panel.openCurve.concat([1, 1])
+            }
+        }
+        function magScale(d) {
+            if (magAmount === 0 || Math.abs(d) >= magReach)
+                return 1;
+            const c = Math.cos(Math.PI * d / (2 * magReach));
+            return 1 + (magMax - 1) * magAmount * c * c;
+        }
+        function magShift(d) {
+            if (magAmount === 0)
+                return 0;
+            const r = magReach;
+            const t = Math.max(-r, Math.min(r, d));
+            return (magMax - 1) * magAmount * (t / 2 + r / (2 * Math.PI) * Math.sin(Math.PI * t / r));
+        }
+
         // ── showing and hiding ──
         property bool shown: false
         // Over a fullscreen window (a game, a video) it's never just up (not even Always
@@ -21422,6 +21572,7 @@ in
             cornerRadius: Settings.v.dockCorner
             anchorX: dock.width / 2
             baseY: dock.height
+            overflow: dock.magnify && dock.magAmount > 0 && panel.openness === 1
             HoverHandler {
                 id: panelHover
             }
@@ -21875,6 +22026,12 @@ in
                     id: row
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 2
+                    leftPadding: dock.magPad
+                    rightPadding: dock.magPad
+                    // where the mouse is along the row, for Magnify
+                    HoverHandler {
+                        id: rowHover
+                    }
 
                     // nothing pinned or open
                     Text {
@@ -21916,17 +22073,26 @@ in
                                     return dock.slotStep;
                                 return 0;
                             }
-                            z: dragged ? 10 : 0
-                            transform: Translate {
-                                x: app.dragged ? dock.dragDx : app.shift
-                                Behavior on x {
-                                    enabled: !app.dragged && dock.dragFrom >= 0
-                                    NumberAnimation {
-                                        duration: 150
-                                        easing.type: Easing.OutCubic
+                            // Magnify: how far its slot's middle is from the mouse, and so
+                            // how big it's drawn and how far it's pushed aside
+                            readonly property real magD: app.x + app.width - dock.cell / 2 - dock.magX
+                            readonly property real mag: dock.magScale(app.magD)
+                            z: dragged ? 10 : mag > 1 ? 1 : 0
+                            transform: [
+                                Translate {
+                                    x: app.dragged ? dock.dragDx : app.shift
+                                    Behavior on x {
+                                        enabled: !app.dragged && dock.dragFrom >= 0
+                                        NumberAnimation {
+                                            duration: 150
+                                            easing.type: Easing.OutCubic
+                                        }
                                     }
+                                },
+                                Translate {
+                                    x: dock.magShift(app.magD)
                                 }
-                            }
+                            ]
 
                             Rectangle {
                                 visible: app.firstUnpinned
@@ -21943,6 +22109,13 @@ in
                                 anchors.right: parent.right
                                 width: dock.cell
                                 height: dock.cell
+                                // Magnify: the whole slot swells up from its bottom edge, the
+                                // part that takes the mouse too
+                                transformOrigin: Item.Bottom
+                                scale: app.mag
+
+                                // its list or menu is open
+                                readonly property bool picked: (dock.extra === "list" && dock.listApp && dock.listApp.key === app.modelData.key) || (dock.extra === "menu" && dock.menuApp && dock.menuApp.key === app.modelData.key)
 
                                 // picked out while its list or menu is open
                                 Rectangle {
@@ -21950,32 +22123,38 @@ in
                                     anchors.margins: 2
                                     radius: Theme.radius
                                     color: Theme.pill
-                                    opacity: (dock.extra === "list" && dock.listApp && dock.listApp.key === app.modelData.key) || (dock.extra === "menu" && dock.menuApp && dock.menuApp.key === app.modelData.key) ? 1 : 0
+                                    opacity: slot.picked ? 1 : 0
                                     Behavior on opacity {
                                         NumberAnimation {
-                                            duration: 150
+                                            duration: 120
                                         }
                                     }
                                 }
-                                AppIcon {
-                                    anchors.centerIn: parent
-                                    anchors.verticalCenterOffset: -2
-                                    width: dock.iconSize
-                                    height: dock.iconSize
-                                    icon: DockData.iconFor(app.modelData.key)
-                                    name: DockData.nameFor(app.modelData.key)
-                                    // pinned but closed: a little faded
-                                    opacity: app.modelData.windows.length > 0 || appMouse.containsMouse ? 1 : 0.7
-                                    scale: appMouse.pressed ? 0.9 : appMouse.containsMouse ? 1.12 : 1
-                                    Behavior on scale {
-                                        NumberAnimation {
-                                            duration: 160
-                                            easing.type: Easing.OutCubic
+                                // the icon
+                                Item {
+                                    id: bubble
+                                    anchors.fill: parent
+
+                                    AppIcon {
+                                        anchors.centerIn: parent
+                                        anchors.verticalCenterOffset: -2
+                                        width: dock.iconSize
+                                        height: dock.iconSize
+                                        icon: DockData.iconFor(app.modelData.key)
+                                        name: DockData.nameFor(app.modelData.key)
+                                        // pinned but closed: a little faded
+                                        opacity: app.modelData.windows.length > 0 || appMouse.containsMouse ? 1 : 0.7
+                                        scale: appMouse.pressed ? 0.9 : appMouse.containsMouse && !dock.magnify ? 1.12 : 1
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 120
+                                                easing.type: Easing.OutCubic
+                                            }
                                         }
-                                    }
-                                    Behavior on opacity {
-                                        NumberAnimation {
-                                            duration: 150
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: 120
+                                            }
                                         }
                                     }
                                 }
@@ -21992,7 +22171,7 @@ in
                                     opacity: app.active ? 1 : 0.5
                                     Behavior on width {
                                         NumberAnimation {
-                                            duration: 150
+                                            duration: 120
                                             easing.type: Easing.OutCubic
                                         }
                                     }
@@ -22077,13 +22256,14 @@ in
                                 parent: dock.contentItem
                                 visible: appMouse.containsMouse && dock.extra === "" && dock.dragFrom < 0 && panel.openness === 1
                                 // worked out again whenever the dock moves or changes size
-                                readonly property real atX: (panel.width, appMouse.containsMouse, slot.mapToItem(dock.contentItem, slot.width / 2, 0).x)
+                                readonly property real atX: (panel.width, appMouse.containsMouse, app.mag, dock.magX, slot.mapToItem(dock.contentItem, slot.width / 2, 0).x)
                                 x: Math.max(4, Math.min(dock.width - width - 4, atX - width / 2))
-                                y: panel.y - height - 8
+                                // (Magnify: clear of the icon, which stands up out of the dock)
+                                y: panel.y - height - 8 - (dock.magnify ? Math.max(0, (app.mag - 1) * dock.cell - Settings.v.dockPadding) : 0)
                                 width: nameLabel.implicitWidth + 16
                                 height: 24
                                 radius: height / 2
-                                color: Theme.glass     // like the dock under it
+                                color: dock.magnify ? Theme.accent : Theme.glass     // (else like the dock under it)
                                 Text {
                                     id: nameLabel
                                     anchors.centerIn: parent
@@ -22101,7 +22281,7 @@ in
                                             t += "  ·  " + (ws.length === 1 ? "workspace " : "workspaces ") + ws.join(", ");
                                         return t;
                                     }
-                                    color: Theme.text
+                                    color: dock.magnify ? Theme.bg : Theme.text
                                     font.family: Theme.font
                                     font.pixelSize: Theme.textSize * 0.9
                                     font.weight: 600
@@ -22112,10 +22292,14 @@ in
 
                     // ── the tray ──
                     Item {
+                        id: traySep
                         visible: Settings.v.dockTray && SystemTray.items.values.length > 0
                         anchors.verticalCenter: parent.verticalCenter
                         width: 9
                         height: dock.cell - 16
+                        transform: Translate {
+                            x: dock.magShift(traySep.x + 4.5 - dock.magX)
+                        }
                         Rectangle {
                             anchors.centerIn: parent
                             width: 1
@@ -22135,7 +22319,12 @@ in
                             height: dock.cell - 14
                             radius: Theme.radius
                             color: menuOpen ? Theme.pill : trayMouse.containsMouse ? Qt.rgba(Theme.pill.r, Theme.pill.g, Theme.pill.b, 0.6) : "transparent"
-                            scale: trayMouse.pressed ? 0.85 : 1
+                            // Magnify: swells and steps aside with the app icons
+                            readonly property real magD: x + width / 2 - dock.magX
+                            transform: Translate {
+                                x: dock.magShift(trayBtn.magD)
+                            }
+                            scale: (trayMouse.pressed ? 0.85 : 1) * dock.magScale(trayBtn.magD)
                             Behavior on scale {
                                 NumberAnimation {
                                     duration: 120
@@ -22215,9 +22404,12 @@ in
         property var closeCurve: [0.45, 0, 0.55, 1]
 
         default property alias content: area.data
+        // the content may stand out past the shape (the dock's icons, swelling under the
+        // mouse: Dock.qml). Only once it's all the way up: sliding, it has to be cut off.
+        property bool overflow: false
 
 
-        // how it shows and hides (Settings → Docks / Edit desktop): "slide" grows out of
+        // how it shows and hides (Settings → Animations): "slide" grows out of
         // the edge, "fade" fades in where it is, "pop" fades in and grows a little, "none"
         property string anim: "slide"
         // how much of its size it's showing: slide follows the opening, the others are
@@ -22305,12 +22497,12 @@ in
             visible: !pop.detached
             anchors.fill: parent
             preferredRendererType: Shape.CurveRenderer
-            // neumorphic shading (Settings → Appearance): a tight dark shadow toward the
+            // neumorphic shading (Settings → Style): a tight dark shadow toward the
             // bottom right, like Glass.qml (one shadow: the shape has curves Glass can't do)
             layer.enabled: Settings.v.shading === "neumorphic" && height > 2
             layer.effect: MultiEffect {
                 shadowEnabled: true
-                // (Settings → Appearance → Shading: distance, blur, strength, light)
+                // (Settings → Style → Shading: distance, blur, strength, light)
                 shadowColor: Qt.rgba(0, 0, 0, Math.min(1, 1.5 * Settings.v.neuIntensity))
                 // tied to the distance, like NeuShadow.qml
                 shadowBlur: Math.min(1, (Settings.v.neuAuto ? 4 * 2.4 : Settings.v.neuDistance * Settings.v.neuSoft) / 32)
@@ -22328,7 +22520,7 @@ in
 
             ShapePath {
                 fillColor: Theme.glass      // see-through and blurred, like the bar
-                // the border (Settings → Appearance → Surfaces); the path's ends are on the
+                // the border (Settings → Style → Surfaces); the path's ends are on the
                 // screen's edge, so there's no line along it
                 strokeColor: Theme.borderWidth > 0 ? Theme.border : "transparent"
                 strokeWidth: Theme.borderWidth
@@ -22388,7 +22580,7 @@ in
             x: pop.flare
             width: pop.shownWidth
             height: parent.height
-            clip: true
+            clip: !pop.overflow
 
             Item {
                 id: area
@@ -22443,7 +22635,7 @@ in
         default property alias content: area.data
 
 
-        // how it shows and hides (Settings → Docks / Edit desktop): "slide" grows out of
+        // how it shows and hides (Settings → Animations): "slide" grows out of
         // the edge, "fade" fades in where it is, "pop" fades in and grows a little, "none"
         property string anim: "slide"
         // how much of its size it's showing: slide follows the opening, the others are
@@ -22532,12 +22724,12 @@ in
             visible: !pop.detached
             anchors.fill: parent
             preferredRendererType: Shape.CurveRenderer
-            // neumorphic shading (Settings → Appearance): a tight dark shadow toward the
+            // neumorphic shading (Settings → Style): a tight dark shadow toward the
             // bottom right, like Glass.qml (one shadow: the shape has curves Glass can't do)
             layer.enabled: Settings.v.shading === "neumorphic" && height > 2
             layer.effect: MultiEffect {
                 shadowEnabled: true
-                // (Settings → Appearance → Shading: distance, blur, strength, light)
+                // (Settings → Style → Shading: distance, blur, strength, light)
                 shadowColor: Qt.rgba(0, 0, 0, Math.min(1, 1.5 * Settings.v.neuIntensity))
                 // tied to the distance, like NeuShadow.qml
                 shadowBlur: Math.min(1, (Settings.v.neuAuto ? 4 * 2.4 : Settings.v.neuDistance * Settings.v.neuSoft) / 32)
@@ -22555,7 +22747,7 @@ in
 
             ShapePath {
                 fillColor: Theme.glass      // see-through and blurred, like the bar
-                // the border (Settings → Appearance → Surfaces); the path's ends are on the
+                // the border (Settings → Style → Surfaces); the path's ends are on the
                 // screen's edge, so there's no line along it
                 strokeColor: Theme.borderWidth > 0 ? Theme.border : "transparent"
                 strokeWidth: Theme.borderWidth
@@ -23273,6 +23465,8 @@ in
     //   battery-low / -caution  a battery down to 15% / 5% (BatteryWatch.qml)
     //   battery-full            the laptop's battery charged (BatteryWatch.qml)
     //   power-plug / -unplug    the laptop's charger in / out (BatteryWatch.qml)
+    //   audio-volume-change     the volume keys (Osd.qml)
+    //   screen-capture          a screenshot saved (Overlays.qml)
     // The lock screen plays its own lock sound (Ocean's service-logout; configuration.nix).
     Singleton {
         id: sounds
@@ -25090,7 +25284,7 @@ in
         // Which one the mouse is over: -1 = none.
         property int hoveredIndex: -1
         property real hoverShrink: 0.85
-        property int hoverTime: 150
+        property int hoverTime: 120      // (the shell's press / hover time)
 
         // ── a window dragged over it ──
         property bool dragging: false
@@ -25425,7 +25619,7 @@ in
         radius: Math.min(Theme.radius, height / 2)
         color: bare ? "transparent" : Theme.pill
 
-        // neumorphic, like the bar and docks (Settings → Appearance → Shading: Pills)
+        // neumorphic, like the bar and docks (Settings → Style → Shading: Pills)
         NeuShadow {
             z: -1
             visible: on && Settings.v.neuPills && !root.bare
@@ -25467,7 +25661,7 @@ in
                 font.letterSpacing: Theme.letterSpacing
             }
         }
-        // the border (Settings → Appearance → Surfaces: "Pills too")
+        // the border (Settings → Style → Surfaces: "Pills too")
         Rectangle {
             visible: Settings.v.borderPills && !root.bare && Theme.borderWidth > 0
             anchors.fill: parent
@@ -25670,7 +25864,7 @@ in
             font.variableAxes: Theme.iconAxes
             Behavior on scale {                           // ← new: animate it
                 NumberAnimation {
-                    duration: 150
+                    duration: 120
                     easing.type: Easing.OutCubic
                 }
             }
@@ -25911,7 +26105,16 @@ in
             command: ["sh", Quickshell.shellDir + "/sysmon.sh"]
             running: true
             stdout: SplitParser {
-                onRead: line => root.update(JSON.parse(line))
+                // (a line that isn't whole JSON, cut off as the script starts or stops, is skipped)
+                onRead: line => {
+                    let sample = null;
+                    try {
+                        sample = JSON.parse(line);
+                    } catch (e) {
+                        return;
+                    }
+                    root.update(sample);
+                }
             }
         }
 
@@ -26059,6 +26262,2157 @@ in
         sleep 1
     done
   '';
+
+  xdg.configFile."quickshell/Capture.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // ── Capture ── (Shift + Print; Overlays.qml)
+    // A screenshot of an area you drag, a window you click, or the screen you're on,
+    // now or after a few seconds (to open a menu first); and the colour picker. Print
+    // by itself goes straight to dragging an area. 1 – 4, or Left / Right and Enter,
+    // pick from the keyboard. (How they're taken: Overlays.qml.)
+    FocusScope {
+        id: root
+
+        readonly property bool bare: false
+        implicitWidth: row.implicitWidth
+        implicitHeight: col.implicitHeight
+
+        readonly property var modes: [
+            { id: "region", icon: "crop_free", label: "Area" },
+            { id: "window", icon: "select_window", label: "Window" },
+            { id: "screen", icon: "desktop_windows", label: "Screen" },
+            { id: "colour", icon: "colorize", label: "Colour" }
+        ]
+        readonly property var delays: [0, 3, 5, 10]
+        property int delay: 0
+        property int picked: 0
+
+        // The mouse picks one only when it really moves: a row or card sliding under a
+        // mouse that's at rest (the page opening, the list scrolling, a card growing)
+        // doesn't take the pick off the keyboard.
+        property point lastMouse: Qt.point(-1, -1)
+        function mouseMoved(item, mouse) {
+            const p = item.mapToItem(null, mouse.x, mouse.y);      // (where it is on the screen)
+            const moved = root.lastMouse.x >= 0 && (Math.abs(p.x - root.lastMouse.x) > 1 || Math.abs(p.y - root.lastMouse.y) > 1);
+            root.lastMouse = p;
+            return moved;
+        }
+        function run(m) {
+            if (m.id === "colour")
+                Overlays.pickColour();
+            else
+                Overlays.capture(m.id, root.delay);
+        }
+
+        focus: true
+        Keys.onPressed: event => {
+            event.accepted = true;
+            const k = event.key;
+            if (k === Qt.Key_Right || k === Qt.Key_Tab)
+                root.picked = (root.picked + 1) % root.modes.length;
+            else if (k === Qt.Key_Left || k === Qt.Key_Backtab)
+                root.picked = (root.picked + root.modes.length - 1) % root.modes.length;
+            else if (k === Qt.Key_Return || k === Qt.Key_Enter || k === Qt.Key_Space)
+                root.run(root.modes[root.picked]);
+            else if (k >= Qt.Key_1 && k < Qt.Key_1 + root.modes.length)
+                root.run(root.modes[k - Qt.Key_1]);
+            else if (k === Qt.Key_Down || k === Qt.Key_Up) {
+                const i = root.delays.indexOf(root.delay) + (k === Qt.Key_Down ? 1 : -1);
+                root.delay = root.delays[Math.max(0, Math.min(root.delays.length - 1, i))];
+            } else
+                event.accepted = false;
+        }
+
+        Column {
+            id: col
+            spacing: 14
+
+            Row {
+                id: row
+                spacing: 10
+
+                Repeater {
+                    model: root.modes
+
+                    Rectangle {
+                        id: tile
+                        required property var modelData
+                        required property int index
+                        readonly property bool isPicked: index === root.picked
+                        width: 118
+                        height: 104
+                        radius: Theme.radius + 4
+                        color: isPicked ? Theme.pillSolid : Theme.pill
+                        border.width: isPicked ? 2 : 0
+                        border.color: Theme.accent
+                        scale: tileMouse.pressed ? 0.95 : 1
+                        Behavior on scale {
+                            NumberAnimation {
+                                duration: Settings.ms(120)
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: Settings.ms(120)
+                            }
+                        }
+
+                        Column {
+                            anchors.centerIn: parent
+                            spacing: 8
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: tile.modelData.icon
+                                color: tile.isPicked ? Theme.accent : Theme.text
+                                font.family: Theme.iconFont
+                                font.pixelSize: 34
+                                font.variableAxes: Theme.iconAxes
+                            }
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: tile.modelData.label
+                                color: Theme.text
+                                font.family: Theme.font
+                                font.pixelSize: Theme.textSize
+                                font.weight: 600
+                            }
+                        }
+                        // its number key
+                        Text {
+                            x: 10
+                            y: 7
+                            text: tile.index + 1
+                            color: Theme.text
+                            opacity: 0.4
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.8
+                            font.weight: 700
+                        }
+                        MouseArea {
+                            id: tileMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onPositionChanged: mouse => {
+                            if (root.mouseMoved(this, mouse))
+                                root.picked = tile.index;
+                        }
+                            onClicked: root.run(tile.modelData)
+                        }
+                    }
+                }
+            }
+
+            // wait first
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 6
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    rightPadding: 6
+                    text: "Wait"
+                    color: Theme.text
+                    opacity: 0.6
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize * 0.9
+                }
+                Repeater {
+                    model: root.delays
+                    Rectangle {
+                        id: chip
+                        required property int modelData
+                        readonly property bool on: root.delay === modelData
+                        width: chipText.implicitWidth + 22
+                        height: 28
+                        radius: 14
+                        color: on ? Theme.accent : Theme.pill
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: Settings.ms(120)
+                            }
+                        }
+                        Text {
+                            id: chipText
+                            anchors.centerIn: parent
+                            text: chip.modelData === 0 ? "No" : chip.modelData + " s"
+                            color: chip.on ? Theme.bg : Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.9
+                            font.weight: 600
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.delay = chip.modelData
+                        }
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Clipboard.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+    import Quickshell
+    import Quickshell.Io
+
+    // ── Clipboard history ── (Super + C; Overlays.qml)
+    // What you've copied, newest first (cliphist keeps it: services.cliphist in
+    // home.nix). Type to search; Enter (or a click) copies one again, ready to paste;
+    // Delete forgets the one picked; the bin forgets everything. Pictures show as
+    // thumbnails.
+    FocusScope {
+        id: root
+
+        readonly property bool bare: false
+        implicitWidth: 640
+        implicitHeight: col.implicitHeight
+
+        readonly property string cliphist: "${pkgs.cliphist}/bin/cliphist"
+        readonly property string wlCopy: "${pkgs.wl-clipboard}/bin/wl-copy"
+
+        // [{ id, text, image, kind, size }]: cliphist list prints "<id>\t<what>" a line,
+        // a picture as "[[ binary data 12 KiB png 640x480 ]]"
+        property var entries: []
+        property bool loaded: false
+        function parse(text) {
+            const out = [];
+            for (const line of text.split("\n")) {
+                const tab = line.indexOf("\t");
+                if (tab < 0)
+                    continue;
+                const what = line.slice(tab + 1);
+                const m = what.match(/^\[\[ binary data (.+) (png|jpe?g|gif|bmp|webp|tiff) (\d+)x(\d+) \]\]$/);
+                out.push({
+                    "id": line.slice(0, tab),
+                    "text": m ? "Picture  ·  " + m[3] + " × " + m[4] + "  ·  " + m[1] : what,
+                    "image": !!m,
+                    "kind": m ? m[2] : ""
+                });
+            }
+            root.entries = out;
+            root.loaded = true;
+        }
+        Process {
+            id: lister
+            running: true
+            command: [root.cliphist, "list"]
+            stdout: StdioCollector {
+                onStreamFinished: root.parse(this.text)
+            }
+            // (cliphist missing or its store unreadable: an empty list, not "loading" for ever)
+            onExited: code => {
+                if (code !== 0)
+                    root.loaded = true;
+            }
+        }
+
+        readonly property string query: field.text.trim().toLowerCase()
+        readonly property var results: root.query === "" ? root.entries : root.entries.filter(e => e.text.toLowerCase().includes(root.query))
+        property int picked: 0
+        onResultsChanged: root.picked = Math.max(0, Math.min(root.picked, root.results.length - 1))
+        onQueryChanged: {
+            root.picked = 0;
+            list.positionViewAtBeginning();
+        }
+
+        // The mouse picks one only when it really moves: a row or card sliding under a
+        // mouse that's at rest (the page opening, the list scrolling, a card growing)
+        // doesn't take the pick off the keyboard.
+        property point lastMouse: Qt.point(-1, -1)
+        function mouseMoved(item, mouse) {
+            const p = item.mapToItem(null, mouse.x, mouse.y);      // (where it is on the screen)
+            const moved = root.lastMouse.x >= 0 && (Math.abs(p.x - root.lastMouse.x) > 1 || Math.abs(p.y - root.lastMouse.y) > 1);
+            root.lastMouse = p;
+            return moved;
+        }
+        function step(by) {
+            if (root.results.length === 0)
+                return;
+            root.picked = Math.max(0, Math.min(root.results.length - 1, root.picked + by));
+            list.positionViewAtIndex(root.picked, ListView.Contain);
+        }
+        // cliphist reads "<id>\t..." from stdin (the tab ends the id)
+        function copy(e) {
+            if (!e)
+                return;
+            Quickshell.execDetached(["sh", "-c", 'printf "%s\\t" "$1" | "$2" decode | "$3"', "sh", e.id, root.cliphist, root.wlCopy]);
+            Overlays.close();
+        }
+        function forget(e) {
+            if (!e)
+                return;
+            Quickshell.execDetached(["sh", "-c", 'printf "%s\\t" "$1" | "$2" delete', "sh", e.id, root.cliphist]);
+            root.entries = root.entries.filter(x => x.id !== e.id);
+        }
+        function forgetAll() {
+            Quickshell.execDetached([root.cliphist, "wipe"]);
+            root.entries = [];
+        }
+
+        Column {
+            id: col
+            width: parent.width
+            spacing: 10
+
+            Row {
+                width: parent.width
+                spacing: 8
+                OverlayField {
+                    id: field
+                    width: parent.width - wipe.width - parent.spacing
+                    focus: true
+                    icon: "content_paste"
+                    hint: "Search what you've copied"
+                    onKeys: event => {
+                        event.accepted = true;
+                        if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab)
+                            root.step(1);
+                        else if (event.key === Qt.Key_Up || event.key === Qt.Key_Backtab)
+                            root.step(-1);
+                        else if (event.key === Qt.Key_PageDown)
+                            root.step(list.rowsShown);
+                        else if (event.key === Qt.Key_PageUp)
+                            root.step(-list.rowsShown);
+                        else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                            root.copy(root.results[root.picked]);
+                        else if (event.key === Qt.Key_Delete)
+                            root.forget(root.results[root.picked]);
+                        else
+                            event.accepted = false;
+                    }
+                }
+                IconButton {
+                    id: wipe
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.entries.length > 0
+                    icon: "delete_sweep"
+                    iconColor: Theme.red
+                    tip: "Forget everything"
+                    tipBelow: true
+                    onClicked: root.forgetAll()
+                }
+            }
+
+            Text {
+                visible: root.results.length === 0
+                width: parent.width
+                height: 56
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                text: !root.loaded ? "" : root.entries.length === 0 ? "Nothing copied yet" : "Nothing like that"
+                color: Theme.text
+                opacity: 0.55
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize
+            }
+
+            ListView {
+                id: list
+                readonly property int rowHeight: 50
+                readonly property int rowsShown: 9
+                visible: root.results.length > 0
+                width: parent.width
+                height: Math.min(root.results.length, rowsShown) * rowHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                model: root.results
+                ScrollBar.vertical: ThinScrollBar {}
+                FastWheel {}
+
+                Rectangle {
+                    parent: list.contentItem
+                    z: -1
+                    y: root.picked * list.rowHeight + 2
+                    width: list.width
+                    height: list.rowHeight - 4
+                    radius: Theme.radius + 2
+                    color: Theme.pill
+                    Behavior on y {
+                        NumberAnimation {
+                            duration: Settings.ms(120)
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                }
+
+                delegate: Item {
+                    id: row
+                    required property var modelData
+                    required property int index
+                    width: list.width
+                    height: list.rowHeight
+
+                    // a picture: decoded once into the session's runtime folder, shown from there
+                    property string thumb: ""
+                    Process {
+                        running: row.modelData.image
+                        command: ["sh", "-c", 'd="$XDG_RUNTIME_DIR/quickshell-clip"; mkdir -p "$d"; f="$d/$1.$2"; [ -s "$f" ] || printf "%s\\t" "$1" | "$3" decode > "$f"; printf "%s" "$f"', "sh", row.modelData.id, row.modelData.kind, root.cliphist]
+                        stdout: StdioCollector {
+                            onStreamFinished: row.thumb = this.text
+                        }
+                    }
+                    Rectangle {
+                        id: tile
+                        x: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 54
+                        height: 38
+                        radius: 6
+                        color: Theme.pill
+                        clip: true
+                        Image {
+                            anchors.fill: parent
+                            visible: row.thumb !== ""
+                            source: row.thumb !== "" ? "file://" + row.thumb : ""
+                            sourceSize: Qt.size(108, 76)
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            visible: row.thumb === ""
+                            text: row.modelData.image ? "image" : "notes"
+                            color: Theme.accent
+                            opacity: 0.8
+                            font.family: Theme.iconFont
+                            font.pixelSize: Theme.iconSize
+                            font.variableAxes: Theme.iconAxes
+                        }
+                    }
+                    Text {
+                        anchors.left: tile.right
+                        anchors.leftMargin: 12
+                        anchors.right: parent.right
+                        anchors.rightMargin: 44
+                        anchors.verticalCenter: parent.verticalCenter
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
+                        textFormat: Text.PlainText
+                        text: row.modelData.text
+                        color: row.index === root.picked ? Theme.accent : Theme.text
+                        opacity: row.modelData.image ? 0.75 : 1
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize
+                    }
+                    MouseArea {
+                        id: rowMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onPositionChanged: mouse => {
+                            if (root.mouseMoved(this, mouse))
+                                root.picked = row.index;
+                        }
+                        onClicked: root.copy(row.modelData)
+                    }
+                    // forget this one (on the one picked)
+                    IconButton {
+                        visible: row.index === root.picked
+                        anchors.right: parent.right
+                        anchors.rightMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        icon: "close"
+                        iconSize: Math.round(Theme.iconSize * 0.9)
+                        onClicked: root.forget(row.modelData)
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Launcher.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+    import Quickshell
+
+    // ── The launcher ── (Super + Tab; Overlays.qml)
+    // Type a few letters of an app's name and press Enter. With nothing typed: the apps
+    // you open most, then the rest by name. Up / Down (or Tab) pick another; a click
+    // opens one too.
+    //   a sum ("12*7.5", "2^10")   Enter copies the answer
+    //   >command                   runs it (through sh)
+    // Apps open the way the dock opens them (uwsm app). How often you open each is
+    // kept (Settings.v.launchCounts), which is what puts your usual ones first.
+    FocusScope {
+        id: root
+
+        readonly property bool bare: false
+        implicitWidth: 640
+        implicitHeight: col.implicitHeight
+
+        readonly property string query: field.text.trim()
+        readonly property var apps: DesktopEntries.applications.values.filter(e => !e.noDisplay)
+
+        // how well an app matches what's typed: 0 = not at all
+        function score(e, q) {
+            const n = e.name.toLowerCase();
+            if (n === q)
+                return 100;
+            if (n.startsWith(q))
+                return 80;
+            const words = n.split(/[\s\-_.]+/);
+            for (let i = 0; i < words.length; i++)
+                if (words[i].startsWith(q))
+                    return 60;
+            // its initials: "vsc" for Visual Studio Code
+            if (q.length > 1 && words.map(w => w.charAt(0)).join("").startsWith(q))
+                return 55;
+            if (n.includes(q))
+                return 45;
+            if ((e.genericName || "").toLowerCase().includes(q))
+                return 30;
+            const k = e.keywords;
+            for (let i = 0; k && i < k.length; i++)
+                if (String(k[i]).toLowerCase().startsWith(q))
+                    return 25;
+            if (e.id.toLowerCase().includes(q))
+                return 15;
+            if ((e.comment || "").toLowerCase().includes(q))
+                return 10;
+            return 0;
+        }
+        // a sum? Only digits, brackets and + - * / % ^ get this far.
+        readonly property string answer: {
+            const q = root.query.replace(/,/g, ".");
+            if (!/^[\d\s+\-*\/().%^]+$/.test(q) || !/\d/.test(q) || !/[+\-*\/%^]/.test(q.replace(/^\s*-/, "")))
+                return "";
+            try {
+                const v = Function("return (" + q.replace(/\^/g, "**") + ")")();
+                if (typeof v !== "number" || !isFinite(v))
+                    return "";
+                return String(Math.round(v * 1e10) / 1e10);
+            } catch (e) {
+                return "";
+            }
+        }
+        readonly property var results: {
+            const q = root.query.toLowerCase();
+            const used = Settings.v.launchCounts || {};
+            const out = [];
+            if (q.startsWith(">")) {
+                const cmd = root.query.slice(1).trim();
+                return cmd === "" ? [] : [{
+                        "kind": "command",
+                        "title": cmd,
+                        "detail": "Run this command",
+                        "icon": "terminal"
+                    }];
+            }
+            if (root.answer !== "")
+                out.push({
+                    "kind": "sum",
+                    "title": root.answer,
+                    "detail": "Enter copies it",
+                    "icon": "calculate"
+                });
+            const hits = [];
+            for (const e of root.apps) {
+                const s = q === "" ? 1 : root.score(e, q);
+                if (s > 0)
+                    hits.push({
+                        "kind": "app",
+                        "entry": e,
+                        "title": e.name,
+                        "detail": e.genericName || e.comment || "",
+                        "rank": s,
+                        "used": used[e.id] || 0
+                    });
+            }
+            hits.sort((a, b) => b.rank - a.rank || b.used - a.used || a.title.localeCompare(b.title));
+            return out.concat(hits);
+        }
+        property int picked: 0
+        onResultsChanged: {
+            root.picked = 0;
+            list.positionViewAtBeginning();
+        }
+
+        function run(r) {
+            if (!r)
+                return;
+            if (r.kind === "app") {
+                const c = Object.assign({}, Settings.v.launchCounts || {});
+                c[r.entry.id] = (c[r.entry.id] || 0) + 1;
+                Settings.v.launchCounts = c;
+                Quickshell.execDetached(["uwsm", "app", "--", r.entry.id + ".desktop"]);
+            } else if (r.kind === "sum") {
+                Quickshell.clipboardText = r.title;
+            } else if (r.kind === "command") {
+                Quickshell.execDetached(["uwsm", "app", "--", "sh", "-c", r.title]);
+            }
+            Overlays.close();
+        }
+        // The mouse picks one only when it really moves: a row or card sliding under a
+        // mouse that's at rest (the page opening, the list scrolling, a card growing)
+        // doesn't take the pick off the keyboard.
+        property point lastMouse: Qt.point(-1, -1)
+        function mouseMoved(item, mouse) {
+            const p = item.mapToItem(null, mouse.x, mouse.y);      // (where it is on the screen)
+            const moved = root.lastMouse.x >= 0 && (Math.abs(p.x - root.lastMouse.x) > 1 || Math.abs(p.y - root.lastMouse.y) > 1);
+            root.lastMouse = p;
+            return moved;
+        }
+        function step(by) {
+            if (root.results.length === 0)
+                return;
+            root.picked = Math.max(0, Math.min(root.results.length - 1, root.picked + by));
+            list.positionViewAtIndex(root.picked, ListView.Contain);
+        }
+
+        Column {
+            id: col
+            width: parent.width
+            spacing: 10
+
+            OverlayField {
+                id: field
+                width: parent.width
+                focus: true
+                hint: "Apps, a sum, or >command"
+                onKeys: event => {
+                    event.accepted = true;
+                    if (event.key === Qt.Key_Down || (event.key === Qt.Key_Tab))
+                        root.step(1);
+                    else if (event.key === Qt.Key_Up || event.key === Qt.Key_Backtab)
+                        root.step(-1);
+                    else if (event.key === Qt.Key_PageDown)
+                        root.step(list.rowsShown);
+                    else if (event.key === Qt.Key_PageUp)
+                        root.step(-list.rowsShown);
+                    else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                        root.run(root.results[root.picked]);
+                    else
+                        event.accepted = false;
+                }
+            }
+
+            Text {
+                visible: root.results.length === 0
+                width: parent.width
+                height: 56
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                text: root.query.startsWith(">") ? "Type a command to run" : "Nothing called that"
+                color: Theme.text
+                opacity: 0.55
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize
+            }
+
+            ListView {
+                id: list
+                readonly property int rowHeight: 54
+                readonly property int rowsShown: 8
+                visible: root.results.length > 0
+                width: parent.width
+                height: Math.min(root.results.length, rowsShown) * rowHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                model: root.results
+                ScrollBar.vertical: ThinScrollBar {}
+                FastWheel {}
+
+                // the highlight slides to the one picked
+                highlightFollowsCurrentItem: false
+                Rectangle {
+                    parent: list.contentItem
+                    z: -1
+                    y: root.picked * list.rowHeight + 2
+                    width: list.width
+                    height: list.rowHeight - 4
+                    radius: Theme.radius + 2
+                    color: Theme.pill
+                    Behavior on y {
+                        NumberAnimation {
+                            duration: Settings.ms(120)
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                }
+
+                delegate: Item {
+                    id: row
+                    required property var modelData
+                    required property int index
+                    width: list.width
+                    height: list.rowHeight
+
+                    AppIcon {
+                        visible: row.modelData.kind === "app"
+                        x: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 34
+                        height: 34
+                        icon: row.modelData.kind === "app" ? row.modelData.entry.icon : ""
+                        name: row.modelData.title
+                    }
+                    Text {
+                        visible: row.modelData.kind !== "app"
+                        x: 12
+                        width: 34
+                        anchors.verticalCenter: parent.verticalCenter
+                        horizontalAlignment: Text.AlignHCenter
+                        text: row.modelData.icon || ""
+                        color: Theme.accent
+                        font.family: Theme.iconFont
+                        font.pixelSize: 26
+                        font.variableAxes: Theme.iconAxes
+                    }
+                    Column {
+                        x: 58
+                        width: parent.width - x - 70
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 1
+                        Text {
+                            width: parent.width
+                            elide: Text.ElideRight
+                            text: row.modelData.title
+                            color: row.index === root.picked ? Theme.accent : Theme.text
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 1.05
+                            font.weight: 600
+                        }
+                        Text {
+                            visible: text !== ""
+                            width: parent.width
+                            elide: Text.ElideRight
+                            text: row.modelData.detail
+                            color: Theme.text
+                            opacity: 0.55
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.85
+                        }
+                    }
+                    // what Enter does, on the one picked
+                    Text {
+                        visible: row.index === root.picked
+                        anchors.right: parent.right
+                        anchors.rightMargin: 16
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "keyboard_return"
+                        color: Theme.text
+                        opacity: 0.45
+                        font.family: Theme.iconFont
+                        font.pixelSize: Theme.iconSize
+                        font.variableAxes: Theme.iconAxes
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onPositionChanged: mouse => {
+                            if (root.mouseMoved(this, mouse))
+                                root.picked = row.index;
+                        }
+                        onClicked: root.run(row.modelData)
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Osd.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Io
+    import Quickshell.Wayland
+    import Quickshell.Hyprland
+    import Quickshell.Services.Pipewire
+
+    // ── The on-screen display ──
+    // A pill near the bottom of the screen you're on, for a moment, when a key changes
+    // the volume, the microphone or the screen's brightness: its icon, a bar, the
+    // number. The keys are in the Hyprland config (home.nix), which calls
+    //   quickshell ipc call osd volume 5 | volume -5 | mute | mic | brightness 5 | brightness -5
+    // and this does the change itself, so what it shows is what happened. (The bar's
+    // own sliders don't bring it up: you're already looking at the number.)
+    // The volume keys tick (Ocean's audio-volume-change) at the new volume, so you
+    // hear how loud it now is. (Settings → General → On-screen display.)
+    Scope {
+        id: root
+
+        readonly property var sink: Pipewire.defaultAudioSink
+        readonly property var source: Pipewire.defaultAudioSource
+        PwObjectTracker {
+            objects: [root.sink, root.source]
+        }
+
+        // what it's showing
+        property string kind: "volume"       // "volume", "mic", "brightness"
+        property real value: 0               // 0 – 1
+        property bool off: false             // muted
+        property bool up: false
+        property var screen: null
+
+        function flash(kind, value, off) {
+            if (!Settings.v.osd)
+                return;
+            root.kind = kind;
+            root.value = Math.max(0, Math.min(1, value));
+            root.off = off;
+            if (!root.up) {
+                const m = Hyprland.focusedMonitor;
+                let s = Quickshell.screens.length > 0 ? Quickshell.screens[0] : null;
+                for (const x of Quickshell.screens)
+                    if (m && x.name === m.name)
+                        s = x;
+                root.screen = s;
+            }
+            root.up = true;
+            hide.restart();
+        }
+        Timer {
+            id: hide
+            interval: 1400
+            onTriggered: root.up = false
+        }
+
+        function volume(by) {
+            const a = root.sink ? root.sink.audio : null;
+            if (!a)
+                return;
+            a.muted = false;
+            a.volume = Math.max(0, Math.min(1, Math.round(a.volume * 100 + by) / 100));
+            flash("volume", a.volume, false);
+            if (Settings.v.osdSound)
+                Sounds.play("audio-volume-change");
+        }
+        function mute() {
+            const a = root.sink ? root.sink.audio : null;
+            if (!a)
+                return;
+            a.muted = !a.muted;
+            flash("volume", a.volume, a.muted);
+            if (Settings.v.osdSound && !a.muted)
+                Sounds.play("audio-volume-change");
+        }
+        function mic() {
+            const a = root.source ? root.source.audio : null;
+            if (!a)
+                return;
+            a.muted = !a.muted;
+            flash("mic", a.volume, a.muted);
+        }
+        // brightnessctl -m prints "device,class,now,43%,max": show what it ended up at.
+        // Never below 1%, so the keys can't turn the screen fully black.
+        function brightness(by) {
+            if (setter.running)
+                return;
+            setter.command = ["brightnessctl", "-m", "-c", "backlight", "--min-value=1", "set", Math.abs(by) + "%" + (by < 0 ? "-" : "+")];
+            setter.running = true;
+        }
+        Process {
+            id: setter
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const f = this.text.trim().split(",");
+                    if (f.length > 3)
+                        root.flash("brightness", parseInt(f[3]) / 100, false);
+                }
+            }
+        }
+
+        IpcHandler {
+            target: "osd"
+            function volume(by: int): void {
+                root.volume(by);
+            }
+            function mute(): void {
+                root.mute();
+            }
+            function mic(): void {
+                root.mic();
+            }
+            function brightness(by: int): void {
+                root.brightness(by);
+            }
+        }
+
+        PanelWindow {
+            id: win
+            screen: root.screen
+            anchors.bottom: true
+            margins.bottom: 110
+            exclusionMode: ExclusionMode.Ignore
+            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.namespace: "osd"
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+            color: "transparent"
+            implicitWidth: 300
+            implicitHeight: 64
+            // (it never takes the mouse)
+            mask: Region {}
+
+            property real amount: root.up ? 1 : 0
+            Behavior on amount {
+                NumberAnimation {
+                    duration: Settings.ms(180)
+                    easing.type: Easing.OutCubic
+                }
+            }
+            visible: amount > 0
+
+            Rectangle {
+                id: pill
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: 6 + 10 * (1 - win.amount)       // rises a little as it comes in
+                width: parent.width - 12
+                height: 46
+                radius: height / 2
+                opacity: win.amount
+                color: Theme.glass
+                border.width: 1
+                border.color: Theme.border
+
+                Text {
+                    id: glyph
+                    x: 16
+                    width: 24
+                    anchors.verticalCenter: parent.verticalCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    text: root.kind === "brightness" ? (root.value > 0.5 ? "brightness_high" : "brightness_medium") : root.kind === "mic" ? (root.off ? "mic_off" : "mic") : root.off || root.value === 0 ? "volume_off" : root.value > 0.6 ? "volume_up" : "volume_down"
+                    color: root.off ? Theme.red : Theme.accent
+                    font.family: Theme.iconFont
+                    font.pixelSize: Theme.iconSize * 1.2
+                    font.variableAxes: Theme.iconAxes
+                }
+                // the bar
+                Rectangle {
+                    id: track
+                    anchors.left: glyph.right
+                    anchors.leftMargin: 12
+                    anchors.right: number.left
+                    anchors.rightMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: 6
+                    radius: 3
+                    color: Theme.pill
+                    Rectangle {
+                        width: Math.max(height, parent.width * root.value)
+                        height: parent.height
+                        radius: 3
+                        visible: root.value > 0
+                        color: root.off ? Theme.pillIcon : Theme.accent
+                        Behavior on width {
+                            NumberAnimation {
+                                duration: Settings.ms(120)
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+                    }
+                }
+                Text {
+                    id: number
+                    anchors.right: parent.right
+                    anchors.rightMargin: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 40
+                    horizontalAlignment: Text.AlignRight
+                    text: root.off ? "Off" : Math.round(root.value * 100) + "%"
+                    color: Theme.text
+                    font.family: Theme.font
+                    font.pixelSize: Theme.textSize
+                    font.weight: 700
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/OverlayField.qml".text = ''
+    import QtQuick
+
+    // The search box at the top of an overlay page (Launcher.qml, Clipboard.qml): an
+    // icon, what you type, a hint while it's empty. It has the keyboard; the page reads
+    // `text`, and gets the keys it doesn't use itself (arrows, Enter) through `keys`.
+    Rectangle {
+        id: field
+
+        property string icon: "search"
+        property string hint: ""
+        property alias text: input.text
+        signal keys(var event)
+
+        implicitHeight: 46
+        radius: height / 2
+        color: Theme.pill
+
+        function clear() {
+            input.text = "";
+        }
+        onActiveFocusChanged: if (activeFocus)
+            input.forceActiveFocus()
+
+        Text {
+            id: glyph
+            x: 16
+            anchors.verticalCenter: parent.verticalCenter
+            text: field.icon
+            color: Theme.accent
+            font.family: Theme.iconFont
+            font.pixelSize: Theme.iconSize * 1.15
+            font.variableAxes: Theme.iconAxes
+        }
+        Text {
+            anchors.left: input.left
+            anchors.verticalCenter: parent.verticalCenter
+            visible: input.text === ""
+            text: field.hint
+            color: Theme.text
+            opacity: 0.45
+            font: input.font
+        }
+        TextInput {
+            id: input
+            anchors.left: glyph.right
+            anchors.leftMargin: 12
+            anchors.right: parent.right
+            anchors.rightMargin: 18
+            anchors.verticalCenter: parent.verticalCenter
+            focus: true
+            clip: true
+            color: Theme.text
+            selectionColor: Theme.accent
+            selectedTextColor: Theme.bg
+            font.family: Theme.font
+            font.pixelSize: Theme.textSize * 1.15
+            Keys.onPressed: event => field.keys(event)
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/OverlayWindow.qml".text = ''
+    import QtQuick
+    import QtQuick.Effects
+    import Quickshell
+    import Quickshell.Wayland
+
+    // The overlays' window (Overlays.qml): the whole screen, over everything. The
+    // desktop behind is dimmed, and blurred by Hyprland (the "overlay" layer rule in the
+    // Hyprland config); the page fades in growing a little, like the popups. It takes the
+    // keyboard while it's up. Esc, or a click beside the page, closes it.
+    PanelWindow {
+        id: win
+
+        screen: Overlays.screen
+        anchors {
+            top: true
+            bottom: true
+            left: true
+            right: true
+        }
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.namespace: "overlay"
+        WlrLayershell.keyboardFocus: win.up ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+        color: "transparent"
+
+        readonly property bool up: Overlays.open !== ""
+        // the page showing: kept while it fades out
+        property string page: ""
+        Connections {
+            target: Overlays
+            function onOpenChanged() {
+                if (Overlays.open !== "")
+                    win.page = Overlays.open;
+            }
+        }
+        // Going to a window (Overlays.leaveTo): no fade of its own, the window is gone at
+        // once, because Hyprland won't focus a window until it is. A moment later (the
+        // window's gone by then) the window is asked for.
+        property bool gone: false
+        Connections {
+            target: Overlays
+            function onPendingChanged() {
+                if (Overlays.pending) {
+                    win.gone = true;
+                    land.restart();
+                }
+            }
+        }
+        Timer {
+            id: land
+            interval: 40
+            onTriggered: {
+                Overlays.land();
+                win.gone = false;
+            }
+        }
+        // 0 = gone, 1 = up
+        property real amount: win.up ? 1 : 0
+        Behavior on amount {
+            enabled: !win.gone
+            NumberAnimation {
+                duration: Settings.v.overlayAnim === "none" ? 0 : Settings.ms(220)
+                easing.type: Easing.OutCubic
+            }
+        }
+        visible: win.amount > 0 && !win.gone
+
+        // the dim (Hyprland blurs what's behind it)
+        Rectangle {
+            anchors.fill: parent
+            color: "#000000"
+            opacity: 0.42 * win.amount
+        }
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+            onClicked: Overlays.close()
+            onWheel: wheel => wheel.accepted = true
+        }
+
+        Item {
+            id: stage
+            anchors.fill: parent
+            opacity: win.amount
+            // the overview comes in from bigger (zooming out to all the windows), the
+            // cards from smaller
+            // (Settings → Animations → Overlays: Fade and None don't grow)
+            scale: Settings.v.overlayAnim === "fade" || Settings.v.overlayAnim === "none" ? 1 : host.item && host.item.bare ? 1.06 - 0.06 * win.amount : 0.95 + 0.05 * win.amount
+            Keys.onEscapePressed: Overlays.close()
+
+            // the card behind a page (not the overview: its windows stand by themselves)
+            RectangularShadow {
+                visible: card.visible
+                anchors.fill: card
+                radius: card.radius
+                blur: 40
+                spread: 2
+                offset.y: 12
+                color: Qt.rgba(0, 0, 0, 0.45)
+            }
+            Rectangle {
+                id: card
+                visible: !!host.item && !host.item.bare
+                anchors.fill: host
+                anchors.margins: -14
+                radius: Theme.radius + 10
+                color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, Math.max(Theme.glassOpacity, 0.86))
+                border.width: 1
+                border.color: Theme.border
+                // (clicks on the card don't close it)
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.AllButtons
+                }
+            }
+            Loader {
+                id: host
+                // a little above the middle, where the eye rests; the overview fills the screen
+                x: Math.round((stage.width - width) / 2)
+                y: item && item.bare ? 0 : Math.max(Theme.barBottom + 30, Math.round(stage.height * 0.2))
+                active: win.visible
+                focus: true
+                sourceComponent: win.page === "launcher" ? launcher : win.page === "clipboard" ? clipboard : win.page === "overview" ? overview : win.page === "capture" ? capture : win.page === "keys" ? keys : null
+                onLoaded: item.forceActiveFocus()
+            }
+            Component {
+                id: launcher
+                Launcher {}
+            }
+            Component {
+                id: clipboard
+                Clipboard {}
+            }
+            Component {
+                id: overview
+                Overview {
+                    width: stage.width
+                    height: stage.height
+                }
+            }
+            Component {
+                id: capture
+                Capture {}
+            }
+            Component {
+                id: keys
+                Shortcuts {
+                    maxHeight: stage.height - y - 60
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Overlays.qml".text = ''
+    pragma Singleton
+
+    import QtQuick
+    import Quickshell
+    import Quickshell.Hyprland
+
+    // ── The overlays ──
+    // The things that come up over everything, in the middle of the screen you're on,
+    // with the desktop dimmed and blurred behind them (OverlayWindow.qml is the window, each
+    // of these a page in it):
+    //   launcher   Super + Tab          apps, by name; also sums and ">" commands
+    //   clipboard  Super + C            what you've copied (cliphist)
+    //   overview   Super + grave        every window; Alt + Tab steps through them
+    //   capture    Shift + Print        screenshots, and the colour picker
+    //   keys       Super + slash        the keyboard shortcuts
+    // The keys are in the Hyprland config (home.nix), which calls
+    // `quickshell ipc call overlay toggle <page>` (shell.qml). One at a time: opening
+    // one closes the other. Esc, or a click beside it, closes it.
+    Singleton {
+        id: root
+
+        property string open: ""        // the page showing, "" = none
+        property var screen: null       // the screen it's on (the one you were on when it opened)
+
+        // ── Alt + Tab ──
+        // A quick tap goes straight to the window you used before this one, with nothing
+        // drawn. Hold Alt a moment longer and the overview comes up, in the order you
+        // last used the windows: each Tab steps on (Shift: back), and letting go of Alt
+        // goes to the one picked. Letting go is Hyprland's to notice (a release bind on
+        // Alt in the Hyprland config calls commit()); the overview, once it has the
+        // keyboard, notices it too.
+        property bool switching: false      // the overview is up for Alt + Tab
+        property int firstStep: 1           // how many Tabs before it came up (Shift: back)
+        signal stepped(int by)
+        signal committed
+
+        // The order you last used the windows in, newest first: kept here, as focus
+        // moves, so it's right the moment Alt + Tab asks. (Hyprland's own focusHistoryID
+        // is only as fresh as the last time its window list was read.)
+        property var mru: []
+        Connections {
+            target: Hyprland
+            function onActiveToplevelChanged() {
+                const t = Hyprland.activeToplevel;
+                if (t)
+                    root.mru = [t].concat(root.mru.filter(x => x !== t && !!x && !!x.wayland)).slice(0, 64);
+            }
+        }
+        // a window's place in that order (ones not focused since the shell started: after)
+        function rank(h) {
+            const i = root.mru.indexOf(h);
+            if (i >= 0)
+                return i;
+            const o = h.lastIpcObject || {};
+            return 1000 + (o.focusHistoryID === undefined ? 999 : o.focusHistoryID);
+        }
+        function switchList() {
+            return Hyprland.toplevels.values.filter(h => !!h.wayland && !!h.workspace).sort((a, b) => rank(a) - rank(b));
+        }
+        // where `steps` Tabs from the window you're on lands in a list of n (the window
+        // you're on is its first, unless nothing's focused)
+        function switchIndex(list, steps) {
+            const n = list.length;
+            if (n === 0)
+                return -1;
+            const from = Hyprland.activeToplevel && list[0] === Hyprland.activeToplevel ? 0 : -1;
+            return (((from + steps) % n) + n) % n;
+        }
+        function activate(top) {
+            if (!top || !top.wayland)
+                return;
+            if (DockData.isMinimized(top.wayland))
+                DockData.restore(top.wayland);
+            else
+                top.wayland.activate();
+        }
+        // Alt + Tab (by = 1) / Alt + Shift + Tab (by = -1)
+        property int steps: 0
+        function switchWindows(by) {
+            if (root.open === "overview") {
+                root.stepped(by);
+                return;
+            }
+            if (reveal.running) {
+                root.steps += by;
+                return;
+            }
+            root.steps = by;
+            reveal.restart();
+        }
+        // still holding Alt: the overview
+        Timer {
+            id: reveal
+            interval: 140
+            onTriggered: {
+                Panels.editMode = false;
+                root.screen = root.focusedScreen();
+                root.switching = true;
+                root.firstStep = root.steps;    // (the overview isn't there yet to be told: it reads this)
+                root.open = "overview";
+            }
+        }
+        // Alt let go
+        function commit() {
+            if (reveal.running) {
+                // a quick tap: straight there (nothing of ours is up, so Hyprland lets it)
+                reveal.stop();
+                const list = switchList();
+                const i = switchIndex(list, root.steps);
+                if (i >= 0 && list[i] !== Hyprland.activeToplevel)
+                    activate(list[i]);
+            } else if (root.open === "overview" && root.switching) {
+                root.committed();
+            }
+        }
+
+        function focusedScreen() {
+            const m = Hyprland.focusedMonitor;
+            for (const s of Quickshell.screens)
+                if (m && s.name === m.name)
+                    return s;
+            return Quickshell.screens.length > 0 ? Quickshell.screens[0] : null;
+        }
+        function show(page) {
+            if (page === "") {
+                close();
+                return;
+            }
+            Panels.editMode = false;
+            reveal.stop();
+            if (root.open === "")
+                root.screen = focusedScreen();
+            root.switching = false;
+            root.open = page;
+        }
+        function toggle(page) {
+            if (root.open === page)
+                close();
+            else
+                show(page);
+        }
+        function close() {
+            reveal.stop();
+            root.open = "";
+            root.switching = false;
+        }
+        // ── going to a window from an overlay ── (Overview.qml)
+        // Hyprland won't focus a window while a layer holds the keyboard exclusively, as
+        // the overlay does (its FocusState.cpp: "Refusing a keyboard focus to a window
+        // because of an exclusive ls"), and it only hears that the overlay has let go
+        // with its next frame. So asking for the window in the same breath as closing
+        // did nothing. Instead: the overlay's window goes at once (OverlayWindow.qml;
+        // Hyprland fades what's left of it), and only then is the window asked for
+        // (`go`). `there` says whether it worked; if not (the overlay wasn't gone yet
+        // after all) it's asked again, a few times.
+        property var pending: null      // { go, there }, until the overlay's window is gone
+        property var landing: null
+        property int tries: 0
+        function leaveTo(go, there) {
+            root.pending = {
+                "go": go,
+                "there": there
+            };
+            close();
+        }
+        // (OverlayWindow.qml calls this once its window has gone)
+        function land() {
+            root.landing = root.pending;
+            root.pending = null;
+            root.tries = 0;
+            if (root.landing) {
+                root.landing.go();
+                recheck.restart();
+            }
+        }
+        Timer {
+            id: recheck
+            interval: 90
+            onTriggered: {
+                const l = root.landing;
+                if (!l || root.open !== "" || l.there() || ++root.tries > 6) {
+                    root.landing = null;
+                    return;
+                }
+                l.go();
+                recheck.restart();
+            }
+        }
+
+        // ── screenshots ── (hyprshot: region = drag a box, window = click one, screen =
+        // the screen you're on). Saved in ~/Pictures/Screenshots and copied; hyprshot
+        // shows the notification. Taken once the overlay has gone (and after `delay`
+        // seconds, to set something up first); the sound plays if a file was saved, so
+        // not when you press Esc instead of picking.
+        function capture(mode, delay) {
+            close();
+            shotTimer.mode = mode;
+            // (not before the overlay has finished fading, however slow you've set that:
+            // it would be in the picture)
+            shotTimer.interval = Math.max(Settings.ms(220) + 180, (delay || 0) * 1000);
+            shotTimer.restart();
+        }
+        Timer {
+            id: shotTimer
+            property string mode: "region"
+            onTriggered: {
+                const m = mode === "screen" ? "-m output -m active" : mode === "window" ? "-m window" : "-m region";
+                Quickshell.execDetached(["sh", "-c", 'd="$HOME/Pictures/Screenshots"; mkdir -p "$d"; n=$(ls -1 "$d" | wc -l); ${pkgs.hyprshot}/bin/hyprshot ' + m + ' -o "$d"; [ -n "$1" ] && [ "$(ls -1 "$d" | wc -l)" -gt "$n" ] && exec ${pkgs.pipewire}/bin/pw-play "$1"', "sh", Sounds.enabled ? Sounds.path("screen-capture") : ""]);
+            }
+        }
+        // the colour under the mouse, copied as #rrggbb (hyprpicker)
+        function pickColour() {
+            close();
+            Quickshell.execDetached(["sh", "-c", "sleep " + ((Settings.ms(220) + 180) / 1000) + "; exec ${pkgs.hyprpicker}/bin/hyprpicker -a -n"]);
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Overview.qml".text = ''
+    import QtQuick
+    import Quickshell
+    import Quickshell.Wayland
+    import Quickshell.Hyprland
+
+    // ── The overview ── (Super + grave; Alt + Tab; Overlays.qml)
+    // Every window, as a picture of it (the one picked plays live), with its app, title
+    // and workspace. Arrows or Tab pick one; Enter or a click goes to it; a middle click
+    // (or Delete) closes it; type to narrow them down by app or title.
+    //
+    // Alt + Tab, held: the same, in the order you last used them, starting on the one
+    // before this. Each Tab steps on (Shift: back), and letting go of Alt goes there.
+    // (A quick Alt + Tab never gets here: Overlays.qml goes straight to the window.)
+    FocusScope {
+        id: root
+
+        readonly property bool bare: true      // no card behind it (OverlayWindow.qml)
+
+        property string query: ""
+        // Hyprland's windows, with the dock's idea of which app each is (DockData.qml)
+        // and how lately each was used (Overlays.rank).
+        readonly property var windows: {
+            const q = root.query.toLowerCase();
+            const out = [];
+            for (const h of Hyprland.toplevels.values) {
+                if (!h.wayland || !h.workspace)
+                    continue;
+                const key = DockData.keyFor({
+                    "appId": h.wayland.appId,
+                    "title": h.title
+                });
+                const name = DockData.nameFor(key);
+                if (q !== "" && !name.toLowerCase().includes(q) && !h.title.toLowerCase().includes(q))
+                    continue;
+                out.push({
+                    "top": h,
+                    "key": key,
+                    "name": name,
+                    "ws": h.workspace.id,
+                    "wsName": h.workspace.name,
+                    "used": Overlays.rank(h)       // 0 = the one you're on, 1 = the one before...
+                });
+            }
+            // Alt + Tab: last used first. Otherwise by workspace (hidden ones last).
+            if (Overlays.switching)
+                out.sort((a, b) => a.used - b.used);
+            else
+                out.sort((a, b) => (a.ws > 0 ? a.ws : 1e6 - a.ws) - (b.ws > 0 ? b.ws : 1e6 - b.ws) || a.used - b.used);
+            return out;
+        }
+        property int picked: 0
+        onWindowsChanged: root.picked = Math.max(0, Math.min(root.picked, root.windows.length - 1))
+
+        // ── the grid: as many across as keeps the cards a sensible shape and size ──
+        readonly property int count: root.windows.length
+        readonly property real gap: 22
+        readonly property real roomW: root.width * 0.86
+        readonly property real roomH: root.height - Theme.barBottom - 150
+        readonly property int columns: {
+            // the fewest columns whose rows still fit the height
+            for (let c = 1; c <= Math.max(1, root.count); c++) {
+                const w = Math.min(420, (root.roomW - (c - 1) * root.gap) / c);
+                const rows = Math.ceil(root.count / c);
+                if (rows * (w * 0.6 + 40) + (rows - 1) * root.gap <= root.roomH)
+                    return c;
+            }
+            return Math.max(1, root.count);
+        }
+        readonly property real cardW: Math.floor(Math.min(420, (root.roomW - (root.columns - 1) * root.gap) / root.columns))
+        readonly property real cardH: Math.floor(root.cardW * 0.6) + 40
+
+        function go(w) {
+            if (!w)
+                return;
+            // (not straight away: Hyprland refuses while the overlay has the keyboard.
+            // Overlays.leaveTo closes it first, then does this.)
+            const top = w.top;
+            Overlays.leaveTo(() => Overlays.activate(top), () => Hyprland.activeToplevel === top);
+        }
+        // The mouse picks one only when it really moves: a row or card sliding under a
+        // mouse that's at rest (the page opening, the list scrolling, a card growing)
+        // doesn't take the pick off the keyboard.
+        property point lastMouse: Qt.point(-1, -1)
+        function mouseMoved(item, mouse) {
+            const p = item.mapToItem(null, mouse.x, mouse.y);      // (where it is on the screen)
+            const moved = root.lastMouse.x >= 0 && (Math.abs(p.x - root.lastMouse.x) > 1 || Math.abs(p.y - root.lastMouse.y) > 1);
+            root.lastMouse = p;
+            return moved;
+        }
+        function step(by) {
+            if (root.count === 0)
+                return;
+            root.picked = (root.picked + by + root.count) % root.count;
+        }
+        Connections {
+            target: Overlays
+            function onStepped(by) {
+                root.step(by);
+            }
+            // Alt let go (Hyprland's release bind)
+            function onCommitted() {
+                root.go(root.windows[root.picked]);
+            }
+        }
+        Component.onCompleted: {
+            Hyprland.refreshToplevels();    // (for the order they were last used in)
+            // Alt + Tab starts as many Tabs on from the window you're on as you pressed
+            // before it came up: one = the window before this
+            root.picked = Overlays.switching && root.count > 0 ? Overlays.switchIndex(root.windows.map(w => w.top), Overlays.firstStep) : 0;
+        }
+
+        focus: true
+        Keys.onPressed: event => {
+            event.accepted = true;
+            const k = event.key;
+            if (k === Qt.Key_Right || k === Qt.Key_Tab)
+                root.step(1);
+            else if (k === Qt.Key_Left || k === Qt.Key_Backtab)
+                root.step(-1);
+            else if (k === Qt.Key_Down)
+                root.picked = Math.min(root.count - 1, root.picked + root.columns);
+            else if (k === Qt.Key_Up)
+                root.picked = Math.max(0, root.picked - root.columns);
+            else if (k === Qt.Key_Return || k === Qt.Key_Enter || k === Qt.Key_Space && root.query === "")
+                root.go(root.windows[root.picked]);
+            else if (k === Qt.Key_Delete) {
+                if (root.windows[root.picked])
+                    root.windows[root.picked].top.wayland.close();
+            } else if (k === Qt.Key_Backspace)
+                root.query = root.query.slice(0, -1);
+            else if (event.text.length === 1 && event.text >= " " && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
+                root.query += event.text;
+                root.picked = 0;
+            } else
+                event.accepted = false;
+        }
+        // Alt + Tab: let go of Alt and you're there
+        Keys.onReleased: event => {
+            if (Overlays.switching && event.key === Qt.Key_Alt)
+                root.go(root.windows[root.picked]);
+        }
+
+        // what you've typed (or how to)
+        Rectangle {
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: Theme.barBottom + 34
+            width: hint.implicitWidth + 36
+            height: 38
+            radius: height / 2
+            color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.8)
+            border.width: 1
+            border.color: Theme.border
+            Text {
+                id: hint
+                anchors.centerIn: parent
+                text: root.query !== "" ? root.query : root.count === 0 ? "No windows open" : Overlays.switching ? "Tab for the next  ·  let go of Alt to go there" : "Type to find a window"
+                color: root.query !== "" ? Theme.accent : Theme.text
+                opacity: root.query !== "" ? 1 : 0.7
+                font.family: Theme.font
+                font.pixelSize: Theme.textSize
+                font.weight: 600
+            }
+        }
+
+        Grid {
+            id: grid
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: Theme.barBottom + 96 + Math.max(0, (root.roomH - height) / 2)
+            columns: root.columns
+            spacing: root.gap
+
+            Repeater {
+                model: root.windows
+
+                Item {
+                    id: card
+                    required property var modelData
+                    required property int index
+                    readonly property bool isPicked: index === root.picked
+                    width: root.cardW
+                    height: root.cardH
+                    scale: cardMouse.pressed ? 0.97 : isPicked ? 1.04 : 1
+                    z: isPicked ? 1 : 0
+                    Behavior on scale {
+                        NumberAnimation {
+                            duration: Settings.ms(120)
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Theme.radius + 6
+                        color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.88)
+                        border.width: card.isPicked ? 2 : 1
+                        border.color: card.isPicked ? Theme.accent : Theme.border
+                        Behavior on border.color {
+                            ColorAnimation {
+                                duration: Settings.ms(120)
+                            }
+                        }
+                    }
+                    // the window
+                    Item {
+                        id: shotBox
+                        x: 8
+                        y: 8
+                        width: parent.width - 16
+                        height: parent.height - 48
+                        clip: true
+                        ScreencopyView {
+                            id: shot
+                            anchors.centerIn: parent
+                            captureSource: card.modelData.top.wayland
+                            live: card.isPicked
+                            constraintSize: Qt.size(shotBox.width, shotBox.height)
+                            visible: hasContent
+                        }
+                        AppIcon {
+                            anchors.centerIn: parent
+                            visible: !shot.hasContent
+                            width: 48
+                            height: 48
+                            icon: DockData.iconFor(card.modelData.key)
+                            name: card.modelData.name
+                        }
+                    }
+                    // its app, title and workspace
+                    AppIcon {
+                        id: icon
+                        x: 10
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 8
+                        width: 24
+                        height: 24
+                        icon: DockData.iconFor(card.modelData.key)
+                        name: card.modelData.name
+                    }
+                    Text {
+                        anchors.left: icon.right
+                        anchors.leftMargin: 8
+                        anchors.right: wsTag.left
+                        anchors.rightMargin: 8
+                        anchors.verticalCenter: icon.verticalCenter
+                        elide: Text.ElideRight
+                        textFormat: Text.PlainText
+                        text: card.modelData.top.title || card.modelData.name
+                        color: card.isPicked ? Theme.accent : Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: Theme.textSize * 0.92
+                        font.weight: 600
+                    }
+                    Rectangle {
+                        id: wsTag
+                        anchors.right: parent.right
+                        anchors.rightMargin: 10
+                        anchors.verticalCenter: icon.verticalCenter
+                        width: Math.max(22, wsText.implicitWidth + 12)
+                        height: 22
+                        radius: 11
+                        color: Theme.pill
+                        Text {
+                            id: wsText
+                            anchors.centerIn: parent
+                            text: card.modelData.ws > 0 ? card.modelData.wsName : "hidden"
+                            color: Theme.text
+                            opacity: 0.8
+                            font.family: Theme.font
+                            font.pixelSize: Theme.textSize * 0.8
+                            font.weight: 700
+                        }
+                    }
+                    MouseArea {
+                        id: cardMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                        onPositionChanged: mouse => {
+                            if (root.mouseMoved(this, mouse))
+                                root.picked = card.index;
+                        }
+                        onClicked: mouse => {
+                            if (mouse.button === Qt.MiddleButton)
+                                card.modelData.top.wayland.close();
+                            else
+                                root.go(card.modelData);
+                        }
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetOverlays.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // Settings → Launcher & keys: the overlays (Overlays.qml) and the on-screen display
+    // (Osd.qml). The keys themselves are in the Hyprland config (home.nix).
+    Column {
+        id: page
+        spacing: 26
+
+        readonly property int counted: Object.keys(Settings.v.launchCounts || {}).length
+
+        SetSection {
+            title: "Launcher"
+            caption: "Super + Tab, or the bar's Apps button"
+
+            SetRow {
+                label: "Most used first"
+                description: page.counted === 0 ? "Nothing counted yet: it learns as you open apps" : "Counting " + page.counted + (page.counted === 1 ? " app" : " apps") + " you've opened"
+                SetButton {
+                    enabled: page.counted > 0
+                    opacity: enabled ? 1 : 0.5
+                    icon: "restart_alt"
+                    text: "Forget"
+                    onClicked: Settings.v.launchCounts = ({})
+                }
+            }
+            SetRow {
+                label: "Open it"
+                description: "Apps by name, a sum, or >command"
+                SetButton {
+                    icon: "apps"
+                    text: "Launcher"
+                    onClicked: Overlays.show("launcher")
+                }
+            }
+        }
+
+        SetSection {
+            title: "On-screen display"
+            caption: "The pill the volume, microphone and brightness keys bring up"
+
+            SetRow {
+                label: "Show it"
+                description: "Off: the keys still work, quietly"
+                SetSwitch {
+                    checked: Settings.v.osd
+                    onToggled: on => Settings.v.osd = on
+                }
+            }
+            SetRow {
+                enabled: Settings.v.uiSounds
+                label: "Volume tick"
+                description: Settings.v.uiSounds ? "The volume keys play a tick at the new volume" : "Sound effects are off (Notifications)"
+                SetSwitch {
+                    checked: Settings.v.osdSound
+                    onToggled: on => Settings.v.osdSound = on
+                }
+            }
+        }
+
+        SetSection {
+            title: "Clipboard history"
+            caption: "Super + C"
+
+            SetRow {
+                label: "What you've copied"
+                description: "Text and pictures, kept by cliphist until you forget them"
+                Row {
+                    spacing: 10
+                    SetButton {
+                        anchors.verticalCenter: parent.verticalCenter
+                        icon: "content_paste"
+                        text: "Open"
+                        onClicked: Overlays.show("clipboard")
+                    }
+                    SetButton {
+                        anchors.verticalCenter: parent.verticalCenter
+                        icon: "delete_sweep"
+                        text: "Forget all"
+                        tint: Theme.red
+                        onClicked: Quickshell.execDetached(["${pkgs.cliphist}/bin/cliphist", "wipe"])
+                    }
+                }
+            }
+        }
+
+        SetSection {
+            title: "Windows and capture"
+
+            SetRow {
+                label: "Overview"
+                description: "Super + `  ·  Alt + Tab: the window before; held, all of them"
+                SetButton {
+                    icon: "view_cozy"
+                    text: "Show"
+                    onClicked: Overlays.show("overview")
+                }
+            }
+            SetRow {
+                label: "Screenshots"
+                description: "Print: an area  ·  Shift + Print: window, screen, a delay, the colour picker"
+                SetButton {
+                    icon: "screenshot_region"
+                    text: "Capture"
+                    onClicked: Overlays.show("capture")
+                }
+            }
+            SetRow {
+                label: "Keyboard shortcuts"
+                description: "Super + /"
+                SetButton {
+                    icon: "keyboard"
+                    text: "Show the list"
+                    onClicked: Overlays.show("keys")
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/Shortcuts.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+    import Quickshell
+
+    // ── Keyboard shortcuts ── (Super + slash; Overlays.qml)
+    // The keys the Hyprland config in home.nix binds, to look up. (It's a list kept by
+    // hand: change a key there and change it here. Keys you add in HyprMod aren't in it.)
+    FocusScope {
+        id: root
+
+        readonly property bool bare: false
+        property real maxHeight: 700
+        implicitWidth: 860
+        implicitHeight: Math.min(flick.contentHeight, root.maxHeight)
+
+        readonly property var sections: [
+            {
+                title: "Open",
+                col: 0,
+                keys: [
+                    ["Super  Tab", "Apps (the launcher)"],
+                    ["Super  Return", "A terminal"],
+                    ["Super  C", "Clipboard history"],
+                    ["Super  `", "Every window (the overview)"],
+                    ["Alt  Tab", "The window before · held: every window, Tab for the next"],
+                    ["Super  I", "Settings"],
+                    ["Super  /", "This list"]
+                ]
+            },
+            {
+                title: "Windows",
+                col: 1,
+                keys: [
+                    ["Super  Q", "Close"],
+                    ["Super  F", "Maximize"],
+                    ["Super  Shift  F", "Fullscreen"],
+                    ["Super  V", "Float / tile"],
+                    ["Super  Shift  V", "Float / tile all on this workspace"],
+                    ["Super  ←  →  ↑  ↓", "Focus the window that way"],
+                    ["Super  drag", "Move (onto the left edge: to a workspace)"],
+                    ["Super  right-drag", "Resize"]
+                ]
+            },
+            {
+                title: "Workspaces",
+                col: 0,
+                keys: [
+                    ["Super  Shift  ↑  ↓", "The one above / below"],
+                    ["Super  J  K", "The one before / after"],
+                    ["Super  Ctrl  ↑  ↓", "Send the window up / down one"],
+                    ["Super  Ctrl  ←  →", "Send the window back / on one"]
+                ]
+            },
+            {
+                title: "Capture",
+                col: 0,
+                keys: [
+                    ["Print", "Screenshot: drag an area"],
+                    ["Shift  Print", "Area, window, screen, colour picker"]
+                ]
+            },
+            {
+                title: "Sound and screen",
+                col: 1,
+                keys: [
+                    ["Volume keys", "Louder, quieter, mute"],
+                    ["Mic mute key", "Microphone on / off"],
+                    ["Brightness keys", "The laptop's screen"],
+                    ["Play, next, previous", "The player you used last"]
+                ]
+            },
+            {
+                title: "Session",
+                col: 1,
+                keys: [
+                    ["Super  Shift  E", "Log out"]
+                ]
+            }
+        ]
+
+        focus: true
+        Keys.onPressed: event => {
+            const by = event.key === Qt.Key_Down ? 60 : event.key === Qt.Key_Up ? -60 : event.key === Qt.Key_PageDown ? flick.height : event.key === Qt.Key_PageUp ? -flick.height : 0;
+            if (by !== 0) {
+                flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height, flick.contentY + by));
+                event.accepted = true;
+            }
+        }
+
+        Flickable {
+            id: flick
+            anchors.fill: parent
+            contentHeight: flow.height
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ThinScrollBar {}
+            FastWheel {}
+
+            // two columns of sections: `col` says which
+            Row {
+                id: flow
+                width: flick.width
+                spacing: 26
+
+                Repeater {
+                    model: 2
+
+                    Column {
+                        id: half
+                        required property int index
+                        width: (flow.width - flow.spacing) / 2
+                        spacing: 18
+
+                        Repeater {
+                            model: root.sections.filter(s => s.col === half.index)
+
+                            Column {
+                                id: section
+                                required property var modelData
+                                width: half.width
+                                spacing: 0
+
+                                Text {
+                                    height: 34
+                                    text: section.modelData.title
+                                    color: Theme.accent
+                                    font.family: Theme.font
+                                    font.pixelSize: Theme.textSize * 1.05
+                                    font.weight: 700
+                                }
+                                Repeater {
+                                    model: section.modelData.keys
+
+                                    Item {
+                                        id: line
+                                        required property var modelData
+                                        width: section.width
+                                        height: 30
+
+                                        // each key on its own cap
+                                        Row {
+                                            id: caps
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 4
+                                            Repeater {
+                                                model: line.modelData[0].split("  ")
+                                                Rectangle {
+                                                    required property string modelData
+                                                    width: Math.max(24, capText.implicitWidth + 14)
+                                                    height: 22
+                                                    radius: 6
+                                                    color: Theme.pill
+                                                    border.width: 1
+                                                    border.color: Theme.border
+                                                    Text {
+                                                        id: capText
+                                                        anchors.centerIn: parent
+                                                        text: parent.modelData
+                                                        color: Theme.text
+                                                        font.family: Theme.font
+                                                        font.pixelSize: Theme.textSize * 0.82
+                                                        font.weight: 600
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Text {
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: 176
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            elide: Text.ElideRight
+                                            text: line.modelData[1]
+                                            color: Theme.text
+                                            opacity: 0.85
+                                            font.family: Theme.font
+                                            font.pixelSize: Theme.textSize * 0.92
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetAnimations.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // Settings → Animations: how everything the shell draws moves. One style and one
+    // speed for all of it, or each thing its own. (They used to be spread over
+    // Appearance and the docks' pages.) What Hyprland animates itself, windows opening
+    // and closing, workspaces sliding, isn't the shell's: that's set in HyprMod, which
+    // the last section opens.
+    Column {
+        id: page
+        spacing: 26
+
+        readonly property var keys: ["popupAnim", "dockAnim", "wsAnim", "panelAnim", "menuAnim", "toastAnim", "overlayAnim"]
+        readonly property var things: [
+            { key: "popupAnim", label: "Popups", desc: "The bar's widgets" },
+            { key: "dockAnim", label: "Dock", desc: "Out of the bottom edge" },
+            { key: "wsAnim", label: "Workspaces dock", desc: "Out of the left edge" },
+            { key: "panelAnim", label: "Panels", desc: "Auto-hide ones" },
+            { key: "menuAnim", label: "Menus", desc: "Right-click" },
+            { key: "toastAnim", label: "Notifications", desc: "Coming and going" },
+            { key: "overlayAnim", label: "Overlays", desc: "Launcher, clipboard, overview · Slide and Pop: grows in" }
+        ]
+        readonly property bool same: keys.every(k => Settings.v[k] === Settings.v[keys[0]])
+        readonly property bool allOff: keys.every(k => Settings.v[k] === "none")
+
+        SetSection {
+            title: "Everything"
+            caption: "One style and one speed for the whole shell"
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(page.keys.concat(["animScale"]))
+                onClicked: Settings.reset(page.keys.concat(["animScale"]))
+            }
+
+            SetRow {
+                label: "Style"
+                description: page.same ? "Popups, docks, panels, menus, notifications, overlays" : "Mixed · set each below"
+                SetChoice {
+                    options: Settings.anims
+                    current: page.same ? Settings.v.popupAnim : ""
+                    onPicked: a => {
+                        for (const k of page.keys)
+                            Settings.v[k] = a;
+                    }
+                }
+            }
+            SetRow {
+                label: "Speed"
+                description: Settings.v.animScale === 1 ? "As designed" : Settings.v.animScale < 1 ? "Quicker than designed" : "Slower than designed"
+                SetSlider {
+                    from: 0.25
+                    to: 2
+                    stepSize: 0.05
+                    decimals: 2
+                    value: Settings.v.animScale
+                    suffix: "×"
+                    onMoved: v => Settings.v.animScale = v
+                }
+            }
+        }
+
+        SetSection {
+            title: "Each one"
+            caption: "Slide: out of its edge · Fade: in place · Pop: fades in, growing · None: just there"
+
+            Repeater {
+                model: page.things
+                SetRow {
+                    id: mrow
+                    required property var modelData
+                    label: modelData.label
+                    description: modelData.desc
+                    SetChoice {
+                        options: Settings.anims
+                        current: Settings.v[mrow.modelData.key]
+                        onPicked: a => Settings.v[mrow.modelData.key] = a
+                    }
+                }
+            }
+        }
+
+        SetSection {
+            title: "Effects"
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(["editZoom", "dockMagnify", "scrollSpeed"])
+                onClicked: Settings.reset(["editZoom", "dockMagnify", "scrollSpeed"])
+            }
+
+            SetRow {
+                label: "Edit desktop zooms out"
+                description: "The desktop shrinks onto the blurred wallpaper while you edit"
+                SetSwitch {
+                    checked: Settings.v.editZoom
+                    onToggled: on => Settings.v.editZoom = on
+                }
+            }
+            SetRow {
+                enabled: Settings.v.dock
+                label: "Dock magnify"
+                description: "Icons swell under the mouse"
+                SetSwitch {
+                    checked: Settings.v.dockMagnify
+                    onToggled: on => Settings.v.dockMagnify = on
+                }
+            }
+            SetRow {
+                label: "Scroll speed"
+                description: "Mouse wheel, in lists and pages"
+                SetSlider {
+                    from: 0.5
+                    to: 4
+                    stepSize: 0.25
+                    decimals: 2
+                    value: Settings.v.scrollSpeed
+                    suffix: "×"
+                    onMoved: v => Settings.v.scrollSpeed = v
+                }
+            }
+        }
+
+        SetSection {
+            title: "Windows and workspaces"
+            caption: "Hyprland's own, not the shell's"
+
+            SetRow {
+                label: "Windows, workspaces, fades"
+                description: "Opening and closing, moving, workspace slides, the blur fading in: set them in HyprMod"
+                SetButton {
+                    icon: "open_in_new"
+                    text: "Open HyprMod"
+                    onClicked: {
+                        Quickshell.execDetached(["hyprmod"]);
+                        Settings.open = false;
+                    }
+                }
+            }
+        }
+    }
+  '';
   services.hyprpolkitagent.enable = true;
 
   # ── UWSM session environment ──
@@ -26181,6 +28535,11 @@ in
 
   # Keeps track of the most recently active media player for playerctl.
   services.playerctld.enable = true;
+
+  # Clipboard history: cliphist remembers what you copy (text and pictures), for the
+  # shell's clipboard overlay (Super + C; Quickshell's Clipboard.qml). It runs as
+  # user services that watch the clipboard (wl-paste --watch).
+  services.cliphist.enable = true;
 
   # ── Wallpapers for the login screen ──
   # The login screen can't read your home folder, so this copies the pictures in
@@ -26308,11 +28667,22 @@ in
       hl.bind("SUPER + SHIFT + Up", hl.dsp.focus({ workspace = -1 }))
       hl.unbind("SUPER + SHIFT + Down")
       hl.bind("SUPER + SHIFT + Down", hl.dsp.focus({ workspace = "+1" }))
-      hl.bind("Print", hl.dsp.exec_cmd("uwsm app -- hyprshot -m region --output-folder ~/Pictures/Screenshots"))
-      -- Laptop brightness keys: hold to keep going, and they work on the lock screen too.
-      -- --min-value=1 stops it at 1 instead of going fully black.
-      hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd("brightnessctl -q -c backlight set 5%+"), { repeating = true, locked = true })
-      hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("brightnessctl -q -c backlight --min-value=1 set 5%-"), { repeating = true, locked = true })
+      -- Print: a screenshot of an area you drag (saved in ~/Pictures/Screenshots and
+      -- copied). Through the shell, which plays the sound once it's saved
+      -- (Quickshell's Overlays.qml); by itself if the shell isn't running.
+      -- Shift + Print: the capture card: area, window, screen, a delay, the colour picker.
+      hl.bind("Print", hl.dsp.exec_cmd("quickshell ipc call overlay shot region || uwsm app -- hyprshot -m region --output-folder ~/Pictures/Screenshots"))
+      hl.bind("SHIFT + Print", hl.dsp.exec_cmd("quickshell ipc call overlay toggle capture"))
+      -- Volume, microphone and brightness keys: the shell makes the change and shows it
+      -- (Quickshell's Osd.qml: the pill near the bottom of the screen). Hold to keep
+      -- going; they work on the lock screen too. If the shell isn't running they still
+      -- work, without the pill. Brightness stops at 1% instead of going fully black.
+      hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd("quickshell ipc call osd volume 5 || wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+"), { repeating = true, locked = true })
+      hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd("quickshell ipc call osd volume -5 || wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"), { repeating = true, locked = true })
+      hl.bind("XF86AudioMute", hl.dsp.exec_cmd("quickshell ipc call osd mute || wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"), { locked = true })
+      hl.bind("XF86AudioMicMute", hl.dsp.exec_cmd("quickshell ipc call osd mic || wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"), { locked = true })
+      hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd("quickshell ipc call osd brightness 5 || brightnessctl -q -c backlight set 5%+"), { repeating = true, locked = true })
+      hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("quickshell ipc call osd brightness -5 || brightnessctl -q -c backlight --min-value=1 set 5%-"), { repeating = true, locked = true })
       -- Media keys: keyboard media keys, and headphone buttons / AirPods taps (BlueZ turns
       -- those into the same keys). playerctl sends them to the player you used last
       -- (playerctld). Pause is its own key so a "pause" tap never starts playback.
@@ -26354,6 +28724,13 @@ in
       -- Edit desktop's cards beside the docks, and the desktop's right-click menu
       hl.layer_rule({ name = "dock-editor-blur", match = { namespace = "dock-editor" }, blur = true, ignore_alpha = 0.35, xray = false })
       hl.layer_rule({ name = "desktop-menu-blur", match = { namespace = "desktop-menu" }, blur = true, ignore_alpha = 0.35, xray = false })
+      -- The overlays (Quickshell's OverlayWindow.qml: the launcher, clipboard history, the
+      -- window overview...): the whole desktop behind them blurred, through their dim
+      -- (ignore_alpha is low so the dim counts). Hyprland's own fade for layers
+      -- (the "layers" animation below) brings the blur in and out with them.
+      hl.layer_rule({ name = "overlay-blur", match = { namespace = "overlay" }, blur = true, ignore_alpha = 0.05, xray = false })
+      -- The volume / brightness pill (Osd.qml)
+      hl.layer_rule({ name = "osd-blur", match = { namespace = "osd" }, blur = true, ignore_alpha = 0.35, xray = false })
       -- The shell's Settings window (SettingsWindow.qml): a normal app window, but floating,
       -- centered, at its size. Quickshell's windows are all "org.quickshell"; this one is
       -- the one called "Settings".
@@ -26532,9 +28909,27 @@ in
           end
       end)
 
-      -- Toggle Rofi App Launcher using Super and Tab
-
-      hl.bind("SUPER + TAB", hl.dsp.exec_cmd("pkill rofi || rofi -show drun -run-command 'uwsm app -- {cmd}' -theme-str 'window { close-on-click:true; } '"))
+      -- The shell's overlays (Quickshell's Overlays.qml), each open / closed:
+      --   Super + Tab     the launcher (apps by name; it replaced rofi here)
+      --   Super + C       clipboard history (cliphist, below)
+      --   Super + grave   the overview: every window
+      --   Super + slash   the keyboard shortcuts
+      --   Alt + Tab       a quick tap: the window you used before this one. Held: the
+      --                   overview in the order you last used the windows; Tab again
+      --                   steps on (Shift: back), letting go of Alt goes there
+      hl.bind("SUPER + TAB", hl.dsp.exec_cmd("quickshell ipc call overlay toggle launcher"))
+      hl.bind("SUPER + C", hl.dsp.exec_cmd("quickshell ipc call overlay toggle clipboard"))
+      hl.bind("SUPER + grave", hl.dsp.exec_cmd("quickshell ipc call overlay toggle overview"))
+      hl.bind("SUPER + slash", hl.dsp.exec_cmd("quickshell ipc call overlay toggle keys"))
+      hl.bind("ALT + TAB", hl.dsp.exec_cmd("quickshell ipc call overlay step 1"))
+      hl.bind("ALT + SHIFT + TAB", hl.dsp.exec_cmd("quickshell ipc call overlay step -1"))
+      -- Letting go of Alt goes to the window picked. Hyprland has to be the one to
+      -- notice: after a quick Alt + Tab the shell has drawn nothing yet that could
+      -- (a "release" bind on a modifier names the modifier as its own key, like
+      -- Hyprland's "bindr = SUPER, SUPER_L" example; non_consuming: Alt still reaches
+      -- your apps). The second is for when Shift is still down.
+      hl.bind("ALT + Alt_L", hl.dsp.exec_cmd("quickshell ipc call overlay commit"), { release = true, non_consuming = true })
+      hl.bind("ALT + SHIFT + Alt_L", hl.dsp.exec_cmd("quickshell ipc call overlay commit"), { release = true, non_consuming = true })
 
       -- Delete or replace the bottom section with ONLY this line:
 
