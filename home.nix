@@ -644,6 +644,133 @@ let
   themeState = "${config.home.homeDirectory}/.local/state/theme";
   themeCmd = "${themeSwitch}/bin/theme";
 
+  # ── Fonts ── (the shell's Settings → Fonts)
+  # What everything's set in until you pick something else there. GTK, Qt and kitty
+  # below are declared with these; the shell's own default is in its Theme.qml.
+  fontDefaults = {
+    ui = "SFProText Nerd Font"; # GTK and Qt apps
+    mono = "SFMono Nerd Font"; # their monospace, and the terminal
+    size = 11;
+  };
+  # `shell-fonts`: puts a font you picked in Settings → Fonts where the shell can't
+  # reach by itself. An empty name means "the default above".
+  #   shell-fonts apps "<font>" <size> "<monospace>"   GTK apps (dconf: they follow at
+  #                                                    once) and Qt apps (the Fonts
+  #                                                    lines of qt5ct.conf / qt6ct.conf)
+  #   shell-fonts terminal "<font>" <size>             kitty: writes the kitty.conf it
+  #                                                    includes, and has it reread it
+  #   shell-fonts shell "<font>"                       the lock and login screens
+  #                                                    (/var/lib/greeter-theme/fonts.json)
+  #   shell-fonts reapply                              all you've picked, again
+  # A rebuild puts GTK's and Qt's fonts back to the defaults (home-manager writes
+  # dconf and the qt*ct files), so what you picked is kept in
+  # ~/.local/state/theme/fonts and put back after each rebuild and at each login
+  # (home.activation.shellFonts and theme-session, below).
+  fontSwitch = pkgs.writeShellScriptBin "shell-fonts" ''
+    set -u
+    export PATH=${
+      lib.makeBinPath (
+        with pkgs;
+        [
+          coreutils
+          gnused
+          dconf
+          procps
+        ]
+      )
+    }:$PATH
+    # (home-manager's activation may run without the session's bus in its environment)
+    : "''${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+    export XDG_RUNTIME_DIR
+    if [ -z "''${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+      export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+    fi
+    state="${themeState}/fonts"
+    mkdir -p "$state"
+
+    # a font's name with nothing in it that would break out of the files it goes into
+    clean() { printf '%s' "$1" | tr -d "'\"\\\\|&\n"; }
+    # a size: digits (and a point), or else the default given
+    size_or() {
+      case "$1" in
+        "" | *[!0-9.]*) printf '%s' "$2" ;;
+        *) printf '%s' "$1" ;;
+      esac
+    }
+
+    apps() {
+      ui=$(clean "''${1:-}")
+      size=$(size_or "''${2:-}" ${toString fontDefaults.size})
+      mono=$(clean "''${3:-}")
+      [ -n "$ui" ] || ui="${fontDefaults.ui}"
+      [ -n "$mono" ] || mono="${fontDefaults.mono}"
+      # GTK 3 and 4 apps read these and change at once
+      dconf write /org/gnome/desktop/interface/font-name "'$ui $size'" || true
+      dconf write /org/gnome/desktop/interface/document-font-name "'$ui $size'" || true
+      dconf write /org/gnome/desktop/interface/monospace-font-name "'$mono $size'" || true
+      # Qt apps: qt5ct / qt6ct's Fonts lines. The files are home-manager's links into
+      # the store, so each is swapped for an edited copy (its `force` lets a rebuild
+      # put the link back; `reapply` then edits it again).
+      for q in qt5ct qt6ct; do
+        f="''${XDG_CONFIG_HOME:-$HOME/.config}/$q/$q.conf"
+        [ -e "$f" ] || continue
+        t=$(mktemp "$state/.$q.XXXXXX") || continue
+        if sed -e "s|^general=.*|general=\"$ui,$size\"|" -e "s|^fixed=.*|fixed=\"$mono,$size\"|" "$f" > "$t"; then
+          chmod 644 "$t"
+          mv -f "$t" "$f"
+        else
+          rm -f "$t"
+        fi
+      done
+    }
+
+    terminal() {
+      fam=$(clean "''${1:-}")
+      size=$(size_or "''${2:-}" "")
+      {
+        echo "# written by shell-fonts (the shell's Settings → Fonts → Terminal)"
+        [ -z "$fam" ] || printf 'font_family %s\n' "$fam"
+        [ -z "$size" ] || printf 'font_size %s\n' "$size"
+      } > "$state/kitty.conf"
+      # kitty rereads its config, fonts too, on SIGUSR1 (on NixOS it's .kitty-wrapped)
+      pkill -USR1 -x kitty || true
+      pkill -USR1 -x .kitty-wrapped || true
+    }
+
+    # the lock screen and the login screen (configuration.nix: their Theme.qml reads this)
+    shell() {
+      fam=$(clean "''${1:-}")
+      g=/var/lib/greeter-theme
+      if [ -d "$g" ] && [ -w "$g" ]; then
+        printf '{"font": "%s"}\n' "$fam" > "$g/fonts.json" || true
+      fi
+    }
+
+    case "''${1:-}" in
+      apps | terminal | shell)
+        kind=$1
+        shift
+        printf '%s\n' "$@" > "$state/$kind.args"
+        "$kind" "$@"
+        ;;
+      reapply)
+        for kind in apps terminal shell; do
+          if [ -f "$state/$kind.args" ]; then
+            mapfile -t args < "$state/$kind.args"
+            "$kind" "''${args[@]}"
+          fi
+        done
+        # (kitty includes this: it should exist even with nothing picked)
+        [ -e "$state/kitty.conf" ] || : > "$state/kitty.conf"
+        ;;
+      *)
+        echo "usage: shell-fonts apps <font> <size> <monospace> | terminal <font> <size> | shell <font> | reapply" >&2
+        exit 2
+        ;;
+    esac
+  '';
+  fontCmd = "${fontSwitch}/bin/shell-fonts";
+
   # what Settings → About shows: key=value lines about this computer
   aboutScript = pkgs.writeShellScript "shell-about" ''
     export PATH=${lib.makeBinPath (with pkgs; [ coreutils gnugrep gnused gawk pciutils ])}:$PATH
@@ -786,7 +913,7 @@ let
         gtk-application-prefer-dark-theme=true
         gtk-cursor-theme-name=${t.cursor.name}
         gtk-cursor-theme-size=24
-        gtk-font-name=SFProText Nerd Font 11
+        gtk-font-name=${fontDefaults.ui} ${toString fontDefaults.size}
         gtk-icon-theme-name=${t.icons.name}
         gtk-theme-name=${t.gtk.name}
       '';
@@ -7107,7 +7234,15 @@ in
                 borderColor: "subtle",   // subtle (the text color, faint), theme (its border color), accent
                 borderOpacity: 0.35,
                 borderPills: false,      // the pills on the bar get it too
-                uiFont: "",              // "" = SFMono Nerd Font
+                uiFont: "",              // the shell's text: "" = SFMono Nerd Font (Settings → Fonts)
+                monoFont: "",            // its code boxes: "" = SFMono Nerd Font
+                // fonts outside the shell, put in place by home.nix's `shell-fonts`
+                // ("" = what home.nix declares: fontDefaults)
+                appFont: "",             // GTK and Qt apps
+                appMonoFont: "",         // their monospace
+                appFontSize: 11,
+                termFont: "",            // kitty
+                termFontSize: 11,
                 iconFill: false,         // filled icons
                 // the bar's popups: "auto" (like the bar), smooth (melt into it), floating
                 // (a card under it), pill (a rounder card) (Settings → Style → Style)
@@ -7394,6 +7529,12 @@ in
                 property real borderOpacity: root.defaults.borderOpacity
                 property bool borderPills: root.defaults.borderPills
                 property string uiFont: root.defaults.uiFont
+                property string monoFont: root.defaults.monoFont
+                property string appFont: root.defaults.appFont
+                property string appMonoFont: root.defaults.appMonoFont
+                property real appFontSize: root.defaults.appFontSize
+                property string termFont: root.defaults.termFont
+                property real termFontSize: root.defaults.termFontSize
                 property bool iconFill: root.defaults.iconFill
                 property real scrollSpeed: root.defaults.scrollSpeed
                 property string popupStyle: root.defaults.popupStyle
@@ -7479,6 +7620,7 @@ in
             { id: "themes", group: "visual", label: "Themes", icon: "palette", caption: "The colors of everything · From wallpaper makes its own" },
             { id: "wallpaper", group: "visual", label: "Wallpaper", icon: "wallpaper", caption: "The picture behind everything" },
             { id: "style", group: "visual", label: "Style", icon: "format_paint", caption: "Look, shading, glass, surfaces" },
+            { id: "fonts", group: "visual", label: "Fonts", icon: "text_fields", caption: "The shell, apps, the terminal" },
             { id: "animations", group: "visual", label: "Animations", icon: "animation", caption: "How everything moves · Hyprland's own are in HyprMod" },
             { id: "bar", group: "visual", label: "Bar", icon: "toolbar", caption: "Style, size, shape, widgets" },
             { id: "docks", group: "visual", label: "Docks", icon: "dock_to_bottom", caption: "Bottom and left · the one you're on stays out" },
@@ -7892,6 +8034,7 @@ in
                                 themes: themesPage,
                                 wallpaper: wallpaperPage,
                                 style: stylePage,
+                                fonts: fontsPage,
                                 animations: animationsPage,
                                 bar: barPage,
                                 docks: docksPage,
@@ -7994,6 +8137,10 @@ in
             SetAppearance {
                 part: "style"
             }
+        }
+        Component {
+            id: fontsPage
+            SetFonts {}
         }
         Component {
             id: animationsPage
@@ -9156,7 +9303,7 @@ in
             visible: page.part === "style"
             title: "Surfaces"
             caption: "Background, border, type · bar, docks, popups, cards"
-            readonly property var keys: ["surfaceBase", "surfaceTint", "pillTint", "borderWidth", "borderColor", "borderOpacity", "borderPills", "uiFont", "iconFill"]
+            readonly property var keys: ["surfaceBase", "surfaceTint", "pillTint", "borderWidth", "borderColor", "borderOpacity", "borderPills", "iconFill"]
             actions: SetButton {
                 icon: "restart_alt"
                 text: "Reset"
@@ -9251,18 +9398,6 @@ in
                 }
             }
             SetRow {
-                label: "Font"
-                description: "Its name, then Enter · empty = SFMono Nerd Font"
-                SetField {
-                    width: 220
-                    placeholder: "SFMono Nerd Font"
-                    text: Settings.v.uiFont
-                    property string draft: Settings.v.uiFont
-                    onEdited: t => draft = t
-                    onAccepted: Settings.v.uiFont = draft.trim()     // (Enter)
-                }
-            }
-            SetRow {
                 label: "Filled icons"
                 SetSwitch {
                     checked: Settings.v.iconFill
@@ -9281,7 +9416,7 @@ in
         id: page
         spacing: 26
 
-        readonly property var sizeKeys: ["barHeight", "moduleHeight", "textSize", "iconSize", "spacing"]
+        readonly property var sizeKeys: ["barHeight", "moduleHeight", "spacing"]     // (text and icon sizes: Settings → Fonts)
         readonly property var shapeKeys: ["radius", "barCurve", "popupCurve", "popupCorner"]
 
         readonly property var styleKeys: ["barStyle", "barMargin", "floatRadius", "shading"]
@@ -9647,28 +9782,6 @@ in
                     value: Settings.v.moduleHeight
                     suffix: " px"
                     onMoved: v => Settings.v.moduleHeight = v
-                }
-            }
-            SetRow {
-                label: "Text"
-                SetSlider {
-                    from: 9
-                    to: 18
-                    stepSize: 0.5
-                    decimals: 1
-                    value: Settings.v.textSize
-                    suffix: " px"
-                    onMoved: v => Settings.v.textSize = v
-                }
-            }
-            SetRow {
-                label: "Icons"
-                SetSlider {
-                    from: 10
-                    to: 28
-                    value: Settings.v.iconSize
-                    suffix: " px"
-                    onMoved: v => Settings.v.iconSize = v
                 }
             }
             SetRow {
@@ -11214,7 +11327,7 @@ in
         readonly property bool dirty: input.text !== text
         signal saved(string text)
 
-        readonly property string mono: "SFMono Nerd Font"
+        readonly property string mono: Theme.mono
         readonly property int fontSize: 12
 
         radius: 10
@@ -12965,7 +13078,7 @@ in
             selectionColor: Theme.accent
             selectedTextColor: Theme.bg
             selectByMouse: true
-            font.family: field.mono ? "SFMono Nerd Font" : Theme.font
+            font.family: field.mono ? Theme.mono : Theme.font
             font.pixelSize: 12
             onTextEdited: field.edited(text)
             onAccepted: field.accepted()
@@ -13496,7 +13609,7 @@ in
                     text: "~/.config/quickshell/panels/" + page.sel + ".qml" + (editor.dirty ? "  ·  unsaved" : "")
                     color: Theme.text
                     opacity: 0.6
-                    font.family: "SFMono Nerd Font"
+                    font.family: Theme.mono
                     font.pixelSize: 12
                 }
                 Row {
@@ -13534,7 +13647,7 @@ in
                     wrapMode: Text.Wrap
                     text: (modelData.line > 0 ? "Line " + modelData.line + ": " : "") + modelData.message
                     color: Theme.red
-                    font.family: "SFMono Nerd Font"
+                    font.family: Theme.mono
                     font.pixelSize: 12
                 }
             }
@@ -16870,13 +16983,24 @@ in
             {"page": "style", "sub": "", "section": "Surfaces", "label": "Border color", "desc": "", "kind": "row", "keys": "background border font tint"},
             {"page": "style", "sub": "", "section": "Surfaces", "label": "Border strength", "desc": "", "kind": "row", "keys": "background border font tint"},
             {"page": "style", "sub": "", "section": "Surfaces", "label": "Pills too", "desc": "The bar's pills (not in the Pill style)", "kind": "row", "keys": "background border font tint"},
-            {"page": "style", "sub": "", "section": "Surfaces", "label": "Font", "desc": "Its name, then Enter · empty = SFMono Nerd Font", "kind": "row", "keys": "background border font tint"},
             {"page": "style", "sub": "", "section": "Surfaces", "label": "Filled icons", "desc": "", "kind": "row", "keys": "background border font tint"},
             {"page": "themes", "sub": "", "section": "Theme code", "label": "Theme code", "desc": "", "kind": "section", "keys": "theme.qml code override"},
             {"page": "themes", "sub": "", "section": "From wallpaper", "label": "From wallpaper", "desc": "", "kind": "section", "keys": ""},
             {"page": "themes", "sub": "", "section": "From wallpaper", "label": "Built around", "desc": "Main colors, most first · Main color", "kind": "row", "keys": ""},
             {"page": "themes", "sub": "", "section": "From wallpaper", "label": "Style", "desc": "", "kind": "row", "keys": ""},
             {"page": "themes", "sub": "", "section": "From wallpaper", "label": "Contrast", "desc": "0 = Material default", "kind": "row", "keys": ""},
+            {"page": "fonts", "sub": "", "section": "Shell", "label": "Shell", "desc": "The bar, docks, popups, Settings · the lock and login screens follow Text", "kind": "section", "keys": "font fonts typeface family text size"},
+            {"page": "fonts", "sub": "", "section": "Shell", "label": "Text", "desc": "Everything the shell writes", "kind": "row", "keys": "font fonts typeface family text size interface ui"},
+            {"page": "fonts", "sub": "", "section": "Shell", "label": "Code", "desc": "The code boxes: Theme code, panels, custom widgets", "kind": "row", "keys": "font fonts typeface family text size monospace mono"},
+            {"page": "fonts", "sub": "", "section": "Shell", "label": "Text size", "desc": "", "kind": "row", "keys": "font fonts typeface family text size"},
+            {"page": "fonts", "sub": "", "section": "Shell", "label": "Icon size", "desc": "", "kind": "row", "keys": "font fonts typeface family text size icons"},
+            {"page": "fonts", "sub": "", "section": "Apps", "label": "Apps", "desc": "GTK and Qt apps", "kind": "section", "keys": "font fonts typeface family text size gtk qt"},
+            {"page": "fonts", "sub": "", "section": "Apps", "label": "Text", "desc": "Menus, buttons, documents", "kind": "row", "keys": "font fonts typeface family text size gtk qt apps"},
+            {"page": "fonts", "sub": "", "section": "Apps", "label": "Monospace", "desc": "Code and fixed-width text in apps", "kind": "row", "keys": "font fonts typeface family text size gtk qt apps mono"},
+            {"page": "fonts", "sub": "", "section": "Apps", "label": "Size", "desc": "", "kind": "row", "keys": "font fonts typeface family text size gtk qt apps"},
+            {"page": "fonts", "sub": "", "section": "Terminal", "label": "Terminal", "desc": "kitty", "kind": "section", "keys": "font fonts typeface family text size kitty"},
+            {"page": "fonts", "sub": "", "section": "Terminal", "label": "Font", "desc": "A monospace one", "kind": "row", "keys": "font fonts typeface family text size kitty terminal"},
+            {"page": "fonts", "sub": "", "section": "Terminal", "label": "Size", "desc": "", "kind": "row", "keys": "font fonts typeface family text size kitty terminal"},
             {"page": "animations", "sub": "", "section": "Everything", "label": "Everything", "desc": "One style and one speed for the whole shell", "kind": "section", "keys": "animation animations motion slide fade pop none speed"},
             {"page": "animations", "sub": "", "section": "Everything", "label": "Style", "desc": "Popups, docks, panels, menus, notifications, overlays", "kind": "row", "keys": "animation animations motion slide fade pop none speed"},
             {"page": "animations", "sub": "", "section": "Everything", "label": "Speed", "desc": "Quicker or slower than designed", "kind": "row", "keys": "animation animations motion slide fade pop none speed"},
@@ -16903,8 +17027,6 @@ in
             {"page": "bar", "sub": "", "section": "Size", "label": "Size", "desc": "", "kind": "section", "keys": ""},
             {"page": "bar", "sub": "", "section": "Size", "label": "Height", "desc": "", "kind": "row", "keys": ""},
             {"page": "bar", "sub": "", "section": "Size", "label": "Buttons", "desc": "", "kind": "row", "keys": ""},
-            {"page": "bar", "sub": "", "section": "Size", "label": "Text", "desc": "", "kind": "row", "keys": ""},
-            {"page": "bar", "sub": "", "section": "Size", "label": "Icons", "desc": "", "kind": "row", "keys": ""},
             {"page": "bar", "sub": "", "section": "Size", "label": "Spacing", "desc": "", "kind": "row", "keys": ""},
             {"page": "bar", "sub": "", "section": "Shape", "label": "Shape", "desc": "", "kind": "section", "keys": ""},
             {"page": "bar", "sub": "", "section": "Shape", "label": "Roundness", "desc": "Pills, buttons, rows", "kind": "row", "keys": ""},
@@ -17947,8 +18069,10 @@ in
         readonly property int spacing: Settings.v.spacing
         readonly property int radius: ov("radius", Settings.v.radius)
 
-        // (Settings → Style → Surfaces: Font; "" = this one)
+        // (Settings → Fonts → Shell: Text; "" = this one)
         property string font: ov("font", Settings.v.uiFont !== "" ? Settings.v.uiFont : "SFMono Nerd Font")
+        // the code boxes (CodeEditor.qml, SetField.qml): Settings → Fonts → Shell: Code
+        property string mono: ov("mono", Settings.v.monoFont !== "" ? Settings.v.monoFont : "SFMono Nerd Font")
         readonly property real textSize: ov("textSize", Settings.v.textSize)
         property real letterSpacing: ov("letterSpacing", -0.5)
 
@@ -28413,6 +28537,451 @@ in
         }
     }
   '';
+
+  xdg.configFile."quickshell/SetFont.qml".text = ''
+    import QtQuick
+    import QtQuick.Controls.Basic
+
+    // Pick a font from the ones installed (Settings → Fonts): a button showing the
+    // font, in that font; click it for the list, each name in its own font, with a
+    // box to type part of a name in. The first entry is "Default" (`fallback`: what
+    // that is). Up / Down and Enter work in the list; Esc closes it.
+    Item {
+        id: fp
+
+        property string current: ""          // "" = the default
+        property string fallback: ""         // the default's name
+        signal picked(string family)
+
+        readonly property var families: Qt.fontFamilies()
+        property string filter: ""
+        // [{ family, label }]: Default first, then the ones that match what's typed
+        readonly property var shown: {
+            const q = fp.filter.trim().toLowerCase();
+            const out = [];
+            if (q === "" || "default".includes(q))
+                out.push({
+                    "family": "",
+                    "label": "Default"
+                });
+            for (const f of fp.families)
+                if (q === "" || f.toLowerCase().includes(q))
+                    out.push({
+                        "family": f,
+                        "label": f
+                    });
+            return out;
+        }
+        property int at: 0
+        onShownChanged: fp.at = 0
+
+        implicitWidth: 250
+        implicitHeight: 30
+
+        function pick(o) {
+            if (!o)
+                return;
+            menu.close();
+            fp.picked(o.family);
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: 8
+            color: fpMouse.containsMouse || menu.visible ? Theme.pillSolid : Theme.pill
+            Text {
+                x: 10
+                width: parent.width - 34 - (tag.visible ? tag.width + 8 : 0)
+                anchors.verticalCenter: parent.verticalCenter
+                elide: Text.ElideRight
+                text: fp.current !== "" ? fp.current : fp.fallback
+                color: Theme.text
+                font.family: fp.current !== "" ? fp.current : fp.fallback
+                font.pixelSize: 13
+            }
+            // not picked: it's the default
+            Text {
+                id: tag
+                visible: fp.current === ""
+                anchors.right: arrow.left
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Default"
+                color: Theme.text
+                opacity: 0.5
+                font.family: Theme.font
+                font.pixelSize: 11
+            }
+            Text {
+                id: arrow
+                anchors.right: parent.right
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                text: "expand_more"
+                rotation: menu.visible ? 180 : 0
+                color: Theme.text
+                font.family: Theme.iconFont
+                font.pixelSize: 16
+                font.variableAxes: Theme.iconAxes
+                Behavior on rotation {
+                    NumberAnimation {
+                        duration: 120
+                    }
+                }
+            }
+        }
+        MouseArea {
+            id: fpMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: menu.visible ? menu.close() : menu.open()
+        }
+
+        Popup {
+            id: menu
+            width: Math.max(fp.width, 300)
+            padding: 6
+            margins: 8          // (kept inside the window)
+            focus: true
+            // below the button, or above it when there's no room left in the window below
+            onAboutToShow: {
+                const below = fp.Window.height - fp.mapToItem(null, 0, fp.height).y;
+                menu.y = below < 400 ? -menu.implicitHeight - 4 : fp.height + 4;
+                fp.filter = "";
+                input.text = "";
+                // start on the one that's picked
+                const i = fp.shown.findIndex(o => o.family === fp.current);
+                fp.at = Math.max(0, i);
+                list.positionViewAtIndex(fp.at, ListView.Center);
+            }
+            onOpened: input.forceActiveFocus()
+            background: Rectangle {
+                radius: 10
+                color: Theme.c.overlay
+                border.width: 1
+                border.color: Theme.pillSolid
+            }
+            contentItem: Column {
+                spacing: 6
+
+                Rectangle {
+                    width: parent.width
+                    height: 30
+                    radius: 8
+                    color: Theme.pill
+                    Text {
+                        id: glass
+                        x: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "search"
+                        color: Theme.accent
+                        font.family: Theme.iconFont
+                        font.pixelSize: 16
+                        font.variableAxes: Theme.iconAxes
+                    }
+                    Text {
+                        anchors.left: input.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: input.text === ""
+                        text: fp.families.length + " fonts · type a name"
+                        color: Theme.text
+                        opacity: 0.45
+                        font: input.font
+                    }
+                    TextInput {
+                        id: input
+                        anchors.left: glass.right
+                        anchors.leftMargin: 8
+                        anchors.right: parent.right
+                        anchors.rightMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        clip: true
+                        color: Theme.text
+                        selectionColor: Theme.accent
+                        selectedTextColor: Theme.bg
+                        font.family: Theme.font
+                        font.pixelSize: 12
+                        onTextChanged: fp.filter = text
+                        Keys.onPressed: e => {
+                            e.accepted = true;
+                            if (e.key === Qt.Key_Down)
+                                fp.at = Math.min(fp.shown.length - 1, fp.at + 1);
+                            else if (e.key === Qt.Key_Up)
+                                fp.at = Math.max(0, fp.at - 1);
+                            else if (e.key === Qt.Key_PageDown)
+                                fp.at = Math.min(fp.shown.length - 1, fp.at + 9);
+                            else if (e.key === Qt.Key_PageUp)
+                                fp.at = Math.max(0, fp.at - 9);
+                            else if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
+                                fp.pick(fp.shown[fp.at]);
+                            else
+                                e.accepted = false;
+                            if (e.accepted)
+                                list.positionViewAtIndex(fp.at, ListView.Contain);
+                        }
+                    }
+                }
+                Text {
+                    visible: fp.shown.length === 0
+                    width: parent.width
+                    height: 40
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    text: "No font called that"
+                    color: Theme.text
+                    opacity: 0.55
+                    font.family: Theme.font
+                    font.pixelSize: 12
+                }
+                ListView {
+                    id: list
+                    FastWheel {}
+                    visible: fp.shown.length > 0
+                    width: parent.width
+                    height: Math.min(contentHeight, 320)
+                    clip: true
+                    model: fp.shown
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ThinScrollBar {}
+                    delegate: Rectangle {
+                        id: opt
+                        required property var modelData
+                        required property int index
+                        readonly property bool isCurrent: modelData.family === fp.current
+                        width: ListView.view.width
+                        height: 32
+                        radius: 7
+                        color: index === fp.at || optMouse.containsMouse ? Theme.pill : "transparent"
+                        Text {
+                            x: 10
+                            width: parent.width - 40
+                            anchors.verticalCenter: parent.verticalCenter
+                            elide: Text.ElideRight
+                            text: opt.modelData.family === "" ? "Default  ·  " + fp.fallback : opt.modelData.label
+                            color: opt.isCurrent ? Theme.accent : Theme.text
+                            // each in its own font (Default: in the default's)
+                            font.family: opt.modelData.family !== "" ? opt.modelData.family : fp.fallback
+                            font.pixelSize: 13
+                        }
+                        Text {
+                            visible: opt.isCurrent
+                            anchors.right: parent.right
+                            anchors.rightMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "check"
+                            color: Theme.accent
+                            font.family: Theme.iconFont
+                            font.pixelSize: 16
+                            font.variableAxes: Theme.iconAxes
+                        }
+                        MouseArea {
+                            id: optMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: fp.pick(opt.modelData)
+                        }
+                    }
+                }
+            }
+        }
+    }
+  '';
+
+  xdg.configFile."quickshell/SetFonts.qml".text = ''
+    import QtQuick
+    import Quickshell
+
+    // Settings → Fonts: every font you'd want to pick, in one place.
+    //   Shell     this shell: its text, the code boxes, the sizes. The lock and login
+    //             screens follow its text font.
+    //   Apps      GTK and Qt apps: their text and their monospace
+    //   Terminal  kitty
+    // The shell's own are in its settings; the rest are put where those programs read
+    // them by home.nix's `shell-fonts` (dconf for GTK, qt5ct / qt6ct's files for Qt,
+    // a kitty.conf that kitty includes), which also puts them back after a rebuild.
+    // The defaults are the ones home.nix declares (fontDefaults).
+    Column {
+        id: page
+        spacing: 26
+
+        readonly property string fonts: "${fontCmd}"
+
+        // (not on every step of a slider: once it's been still a moment)
+        function apps() {
+            appsLater.restart();
+        }
+        function terminal() {
+            termLater.restart();
+        }
+        Timer {
+            id: appsLater
+            interval: 350
+            onTriggered: Quickshell.execDetached([page.fonts, "apps", Settings.v.appFont, String(Settings.v.appFontSize), Settings.v.appMonoFont])
+        }
+        Timer {
+            id: termLater
+            interval: 350
+            onTriggered: Quickshell.execDetached([page.fonts, "terminal", Settings.v.termFont, String(Settings.v.termFontSize)])
+        }
+        function shell() {
+            Quickshell.execDetached([page.fonts, "shell", Settings.v.uiFont]);
+        }
+
+        SetSection {
+            title: "Shell"
+            caption: "The bar, docks, popups, Settings · the lock and login screens follow Text"
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(["uiFont", "monoFont", "textSize", "iconSize"])
+                onClicked: {
+                    Settings.reset(["uiFont", "monoFont", "textSize", "iconSize"]);
+                    page.shell();
+                }
+            }
+
+            SetRow {
+                label: "Text"
+                description: "Everything the shell writes"
+                SetFont {
+                    current: Settings.v.uiFont
+                    fallback: "SFMono Nerd Font"
+                    onPicked: f => {
+                        Settings.v.uiFont = f;
+                        page.shell();
+                    }
+                }
+            }
+            SetRow {
+                label: "Code"
+                description: "The code boxes: Theme code, panels, custom widgets"
+                SetFont {
+                    current: Settings.v.monoFont
+                    fallback: "SFMono Nerd Font"
+                    onPicked: f => Settings.v.monoFont = f
+                }
+            }
+            SetRow {
+                label: "Text size"
+                SetSlider {
+                    from: 9
+                    to: 18
+                    stepSize: 0.5
+                    decimals: 1
+                    value: Settings.v.textSize
+                    suffix: " px"
+                    onMoved: v => Settings.v.textSize = v
+                }
+            }
+            SetRow {
+                label: "Icon size"
+                SetSlider {
+                    from: 10
+                    to: 28
+                    value: Settings.v.iconSize
+                    suffix: " px"
+                    onMoved: v => Settings.v.iconSize = v
+                }
+            }
+        }
+
+        SetSection {
+            title: "Apps"
+            caption: "GTK apps change at once · Qt apps when they're next opened"
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(["appFont", "appFontSize", "appMonoFont"])
+                onClicked: {
+                    Settings.reset(["appFont", "appFontSize", "appMonoFont"]);
+                    page.apps();
+                }
+            }
+
+            SetRow {
+                label: "Text"
+                description: "Menus, buttons, documents"
+                SetFont {
+                    current: Settings.v.appFont
+                    fallback: "${fontDefaults.ui}"
+                    onPicked: f => {
+                        Settings.v.appFont = f;
+                        page.apps();
+                    }
+                }
+            }
+            SetRow {
+                label: "Monospace"
+                description: "Code and fixed-width text in apps"
+                SetFont {
+                    current: Settings.v.appMonoFont
+                    fallback: "${fontDefaults.mono}"
+                    onPicked: f => {
+                        Settings.v.appMonoFont = f;
+                        page.apps();
+                    }
+                }
+            }
+            SetRow {
+                label: "Size"
+                SetSlider {
+                    from: 8
+                    to: 18
+                    value: Settings.v.appFontSize
+                    suffix: " pt"
+                    onMoved: v => {
+                        Settings.v.appFontSize = v;
+                        page.apps();
+                    }
+                }
+            }
+        }
+
+        SetSection {
+            title: "Terminal"
+            caption: "kitty · open windows change at once"
+            actions: SetButton {
+                icon: "restart_alt"
+                text: "Reset"
+                enabled: !Settings.isDefault(["termFont", "termFontSize"])
+                onClicked: {
+                    Settings.reset(["termFont", "termFontSize"]);
+                    page.terminal();
+                }
+            }
+
+            SetRow {
+                label: "Font"
+                description: "A monospace one, or its columns won't line up"
+                SetFont {
+                    current: Settings.v.termFont
+                    fallback: "${fontDefaults.mono}"
+                    onPicked: f => {
+                        Settings.v.termFont = f;
+                        page.terminal();
+                    }
+                }
+            }
+            SetRow {
+                label: "Size"
+                SetSlider {
+                    from: 6
+                    to: 24
+                    stepSize: 0.5
+                    decimals: 1
+                    value: Settings.v.termFontSize
+                    suffix: " pt"
+                    onMoved: v => {
+                        Settings.v.termFontSize = v;
+                        page.terminal();
+                    }
+                }
+            }
+        }
+    }
+  '';
   services.hyprpolkitagent.enable = true;
 
   # ── UWSM session environment ──
@@ -28596,9 +29165,10 @@ in
         custom_palette = true;
         color_scheme_path = "${themeState}/current/qt6ct.conf"; # the theme's colors
       };
+      # (the defaults: Settings → Fonts → Apps rewrites these two lines, `shell-fonts`)
       Fonts = {
-        general = ''"SFProText Nerd Font,11"'';
-        fixed = ''"SFMono Nerd Font,11"'';
+        general = ''"${fontDefaults.ui},${toString fontDefaults.size}"'';
+        fixed = ''"${fontDefaults.mono},${toString fontDefaults.size}"'';
       };
     };
     qt6ctSettings = {
@@ -28607,9 +29177,10 @@ in
         custom_palette = true;
         color_scheme_path = "${themeState}/current/qt6ct.conf"; # the theme's colors
       };
+      # (the defaults: Settings → Fonts → Apps rewrites these two lines, `shell-fonts`)
       Fonts = {
-        general = ''"SFProText Nerd Font,11"'';
-        fixed = ''"SFMono Nerd Font,11"'';
+        general = ''"${fontDefaults.ui},${toString fontDefaults.size}"'';
+        fixed = ''"${fontDefaults.mono},${toString fontDefaults.size}"'';
       };
     };
   };
@@ -29414,7 +29985,7 @@ in
   programs.kitty = {
     enable = true;
     themeFile = lib.mkForce null;
-    font.name = "SFMono Nerd Font";
+    font.name = fontDefaults.mono; # (Settings → Fonts → Terminal picks another: below)
     shellIntegration = {
       mode = null; # set via settings below, so HM does not force "no-rc"
       enableBashIntegration = false;
@@ -29437,8 +30008,11 @@ in
     };
     # The colors come from the theme ("kitty.conf" in mkThemeDir). `theme` sends kitty
     # SIGUSR1 after switching, which makes open windows reread this and recolor.
+    # The font you picked in the shell's Settings → Fonts, if any (`shell-fonts`
+    # writes it; it comes last, so it wins over font.name above).
     extraConfig = ''
       include ${themeState}/current/kitty.conf
+      include ${themeState}/fonts/kitty.conf
     '';
   };
   # kitty rewrites kitty.conf itself (e.g. the font/theme kittens), turning HM's
@@ -29514,6 +30088,11 @@ in
   home.activation.theme = lib.hm.dag.entryBetween [ "onFilesChange" ] [ "linkGeneration" ] ''
     run ${themeCmd} --refresh
   '';
+  # The fonts picked in the shell's Settings → Fonts: put back after this rebuild has
+  # written GTK's (dconf) and Qt's (qt*ct.conf) defaults again.
+  home.activation.shellFonts = lib.hm.dag.entryAfter [ "linkGeneration" "dconfSettings" ] ''
+    run ${fontCmd} reapply || true
+  '';
   # At login: tell GTK (dconf) and the login screen which theme is on, and pick up
   # pictures you've added to the theme's wallpaper folder.
   systemd.user.services.theme-session = {
@@ -29526,18 +30105,20 @@ in
     Service = {
       Type = "oneshot";
       ExecStart = "${themeCmd} --login";
+      ExecStartPost = "${fontCmd} reapply"; # and the fonts picked in Settings → Fonts
     };
     Install.WantedBy = [ "graphical-session.target" ];
   };
 
-  # GTK: home-manager still does the fonts. The theme, icons and cursor come from
+  # GTK: home-manager does the default font (fontDefaults). The theme, icons and cursor come from
   # the theme you picked: settings.ini (GTK 3 and 4) and GTK 4's gtk.css are links to
   # that theme's files, and `theme` also sets them in dconf so open GTK 3 apps switch.
   gtk = {
     enable = true;
+    # (the default: Settings → Fonts → Apps sets another in dconf, `shell-fonts`)
     font = {
-      name = "SFProText Nerd Font";
-      size = 11;
+      name = fontDefaults.ui;
+      size = fontDefaults.size;
     };
   };
   xdg.configFile."gtk-3.0/settings.ini" = {

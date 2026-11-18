@@ -382,7 +382,22 @@ in
           readonly property color accent: c.accent
           readonly property color yellow: c.yellow
           readonly property color red: c.red
-          readonly property string font: "SFMono Nerd Font"
+          // The shell's font (its Settings → Fonts → Interface), if you picked one:
+          // home.nix's `shell-fonts` writes ${greeterThemeDir}/fonts.json.
+          property var fonts: ({})
+          FileView {
+              path: "${greeterThemeDir}/fonts.json"
+              blockLoading: true
+              printErrors: false
+              onLoaded: {
+                  try {
+                      theme.fonts = JSON.parse(text());
+                  } catch (e) {
+                      theme.fonts = {};
+                  }
+              }
+          }
+          readonly property string font: fonts.font || "SFMono Nerd Font"
           readonly property string iconFont: "Material Symbols Rounded"
       }
   '';
